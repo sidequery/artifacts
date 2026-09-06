@@ -1,0 +1,21 @@
+node_modules/
+.herdr-canvas/
+*.log
+.DS_Store
+.agents/worklog.md
+
+# Local artifacts and state; keep reusable samples in examples/.
+/canvases/
+*.canvas.data.json
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+.env
+.env.*
+!.env.example
+
+# Generated test output and packages.
+/e2e/*.png
+/coverage/
+/dist/
+*.tgz

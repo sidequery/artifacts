@@ -1,0 +1,31 @@
+{
+  "name": "canvas",
+  "description": "Local React artifacts with a web gallery, version history, CLI, MCP, and Herdr integration.",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "bun": ">=1.4.0"
+  },
+  "bin": {
+    "canvas": "src/cli.ts"
+  },
+  "scripts": {
+    "canvas": "bun run src/cli.ts",
+    "mcp": "bun run src/cli.ts mcp",
+    "test": "bun test src",
+    "test:e2e": "bun test e2e/herdr.e2e.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "typescript": "5.9.3"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.14"
+  }
+}

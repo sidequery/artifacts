@@ -1,0 +1,14 @@
+node_modules
+.git
+.herdr-canvas
+*.log
+.DS_Store
+.agents
+.env
+.env.*
+canvases
+e2e/*.png
+*.sqlite*
+coverage
+dist
+*.tgz

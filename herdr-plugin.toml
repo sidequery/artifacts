@@ -1,0 +1,24 @@
+id = "herdr.canvas"
+name = "Canvas"
+version = "0.1.0"
+min_herdr_version = "0.8.2"
+description = "Create and manage live React canvas panes powered by Terminal Browser."
+platforms = ["linux", "macos"]
+
+[[panes]]
+id = "canvas"
+title = "Canvas"
+placement = "split"
+command = ["bun", "run", "src/viewer.ts"]
+
+[[actions]]
+id = "list"
+title = "List canvases"
+contexts = ["workspace"]
+command = ["bun", "run", "src/cli.ts", "list"]
+
+[[actions]]
+id = "open"
+title = "Open canvas"
+contexts = ["workspace"]
+command = ["bun", "run", "src/actions/open.ts"]
