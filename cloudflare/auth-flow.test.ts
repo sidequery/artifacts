@@ -173,6 +173,22 @@ test("real OIDC and MCP OAuth share per-user gallery, source and database bounda
   try {
     const aliceProvider = await authorize(aliceContext, "Alice");
     const bobPage = await bobContext.newPage();
+    const previewRequests: string[] = [];
+    bobPage.on("request", request => {
+      if (["/gallery/preview", "/api/canvas/request"].includes(new URL(request.url()).pathname)) {
+        previewRequests.push(`Started ${request.url()}`);
+      }
+    });
+    bobPage.on("requestfailed", request => {
+      if (["/gallery/preview", "/api/canvas/request"].includes(new URL(request.url()).pathname)) {
+        previewRequests.push(`${request.url()}: ${request.failure()?.errorText}`);
+      }
+    });
+    bobPage.on("response", response => {
+      if (["/gallery/preview", "/api/canvas/request"].includes(new URL(response.url()).pathname)) {
+        previewRequests.push(`${response.url()}: ${response.status()}`);
+      }
+    });
     await bobPage.goto(`${origin}/?workspace=test`);
     await login(bobPage, "Bob");
     await bobPage.waitForURL(`${origin}/?workspace=test`);
@@ -231,7 +247,13 @@ test("real OIDC and MCP OAuth share per-user gallery, source and database bounda
     // counter button, so wait for the team document before interacting with it.
     await bobPage.waitForURL(url => url.searchParams.get("library") === "team");
     await bobPage.getByRole("button", { name: "counter", exact: true }).click();
-    await bobPage.frameLocator("iframe").getByText("Count: 2", { exact: true }).waitFor();
+    try {
+      await bobPage.frameLocator("iframe").getByText("Count: 2", { exact: true }).waitFor();
+    } catch (error) {
+      const frame = bobPage.frameLocator("iframe");
+      const body = await frame.locator("body").innerText({ timeout: 500 }).catch(() => "Preview body unavailable");
+      throw new Error(`${String(error)}\nGallery: ${bobPage.url()}\nPreview: ${await bobPage.locator("iframe").getAttribute("src")}\n${body}\n${previewRequests.join("\n")}\n${celldRuntime?.logs().split("\n").filter(line => /ERROR|WARN| at |    at /.test(line)).join("\n") ?? ""}`);
+    }
     expect((await aliceContext.request.post(`${origin}/api/canvas/request`, { headers: { Origin: "https://evil.example" }, data: {} })).status()).toBe(403);
     const token = aliceProvider.savedTokens!.access_token;
     expect((await fetch(`${origin}/mcp`, { headers: { Authorization: `Bearer ${token.slice(0, -10)}tampered00` } })).status).toBe(401);

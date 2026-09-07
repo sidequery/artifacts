@@ -69,7 +69,11 @@ app.use("*", async (c, next) => {
     : JSON.stringify(["private", c.env.ACCESS_TEAM_DOMAIN ?? "local", identity.subject]);
   c.set("libraryScope", libraryScope);
   c.set("service", new CloudCanvasService(c.env.LIBRARIES.getByName(libraryKey), workspace, c.env.BACKENDS, libraryKey));
-  await next();
+  // Compilation uses shared isolate resources. Let an admitted operation finish
+  // after a client disconnects rather than abandoning its native compiler I/O.
+  const operation = next();
+  c.executionCtx.waitUntil(operation);
+  await operation;
 });
 app.get("/api/session", c => {
   const user = c.get("user");
