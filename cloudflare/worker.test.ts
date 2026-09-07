@@ -118,9 +118,20 @@ test("plugin HTTP and MCP routes expose catalog hints and validate requests", as
     expect(response.status).toBe(404);
     expect(await response.json()).toEqual({ error: "Plugin operation not found" });
   }
-  expect((await fetch(`${origin}/api/plugins/call`, { method: "POST", body: "{}" })).status).toBe(400);
-  expect((await fetch(`${origin}/api/plugins/call`, { method: "POST", body: " ".repeat(256 * 1024 + 1) })).status).toBe(413);
-  expect((await fetch(`${origin}/api/plugins/call`, { method: "POST", headers: { Origin: "https://evil.example" }, body: JSON.stringify(call) })).status).toBe(403);
+  // Rejection probes can leave the request unread or cancel its stream. Keep
+  // their closing sockets out of the pool used by the shared MCP client.
+  for (const [status, body, requestOrigin] of [
+    [400, "{}", undefined],
+    [413, " ".repeat(256 * 1024 + 1), undefined],
+    [403, JSON.stringify(call), "https://evil.example"],
+  ] as const) {
+    const response = await fetch(`${origin}/api/plugins/call`, {
+      method: "POST", body, headers: { Connection: "close", ...(requestOrigin ? { Origin: requestOrigin } : {}) },
+    });
+    expect(response.status).toBe(status);
+    expect(await response.text()).not.toBe("");
+  }
+  expect((await client.callTool({ name: "plugin_guide", arguments: {} })).isError).not.toBe(true);
 });
 
 test("invalid drafts remain readable with diagnostics and no preview", async () => {
