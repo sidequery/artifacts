@@ -4,8 +4,8 @@ export const CANVAS_GUIDE_EXPORTS = [
   "BarChart", "Button", "Callout", "Card", "CardBody", "CardHeader", "Checkbox",
   "Code", "Divider", "Grid", "H1", "H2", "H3", "LineChart", "Link", "PieChart",
   "Pill", "Row", "Select", "Spacer", "Stack", "Stat", "Table", "Text", "TextArea",
-  "TextInput", "Toggle", "canvasPaletteDark", "canvasPaletteLight", "canvasTypography",
-  "mergeStyle", "themeFromKind", "tokensFromPalette", "useCanvasAction", "useCanvasState", "useHostTheme",
+  "TextInput", "Toggle", "canvasFetch", "canvasPaletteDark", "canvasPaletteLight", "canvasTypography",
+  "mergeStyle", "themeFromKind", "tokensFromPalette", "useCanvasAction", "useCanvasState", "useEffect", "useHostTheme",
 ];
 
 export const CANVAS_GUIDE_EXAMPLE = `import { Button, H1, Stack, useCanvasState } from "herdr/canvas";
@@ -39,8 +39,15 @@ ${CANVAS_GUIDE_EXPORTS.join(", ")}
 - useCanvasState<T>(key: string, defaultValue: T): [T, setter]. Use a stable, distinct key for each state value. The setter accepts a value or a function of the previous value. State persistence depends on the host/view mode.
 - useHostTheme(): returns the host theme with color and typography tokens.
 - useCanvasAction(): returns a dispatcher accepting {type: "openFile", path, selection?}, {type: "promptAgent", prompt}, or {type: "openUrl", url}. Action support depends on the host.
+- useEffect(setup, dependencies?): React's effect hook, re-exported by herdr/canvas. The setup may return a cleanup function. Start async work inside the setup rather than making the setup itself async.
 
-useState, useEffect, and useMemo are not SDK exports. For interactive state, use useCanvasState("count", 0), not useState(0).
+useState and useMemo are not SDK exports. For interactive state, use useCanvasState("count", 0), not useState(0).
+
+## Hosted server requests
+
+canvasFetch(path: string, init?: RequestInit): Promise<Response> sends a request to the canvas's native server through the host bridge. Use relative paths and standard methods, headers, and bodies; check response.ok before reading response.json() or response.text(). Cross-origin and protocol-relative URLs are rejected. Request and response bodies are limited to 256 KiB.
+
+Server requests require a hosted runtime with a native canvas server. Local Bun CLI, stdio MCP and gallery views do not execute servers and report requests as unavailable. Hosted canvas_write accepts server TypeScript exporting class CanvasServer extends DurableObject from "cloudflare:workers", alongside browser contents. The server uses this.ctx.storage.sql/kv. Omitting server preserves existing code; null removes code without deleting the database. Hosted canvas_read/canvas_edit accept part: "server". Browser and server source are versioned together; the database remains live across source edits and restores.
 
 ## Common components and props
 
@@ -52,7 +59,7 @@ useState, useEffect, and useMemo are not SDK exports. For interactive state, use
 
 ## Restrictions and validation
 
-Embed data in the source. Network calls (fetch, XMLHttpRequest, WebSocket), eval, new Function, process/Bun APIs, localStorage and sessionStorage are disallowed. Use useCanvasState for state.
+For browser TSX, embed data in the source or use canvasFetch when a hosted native server is available. Direct network calls (fetch, XMLHttpRequest, WebSocket), eval, new Function, process/Bun APIs, localStorage and sessionStorage are disallowed. Use useCanvasState for state. The browser import restrictions above do not apply to native server source, which imports DurableObject from "cloudflare:workers".
 
 canvas_write creates or replaces the full source and then validates it. canvas_edit applies exact replacements and then validates; use canvas_read's source_hash as expected_hash to guard edits. A failed typecheck can leave source applied: inspect applied/ok and diagnostics, fix the source, and validate again. Do not treat an error as a rollback. Successful writes/edits show an inline preview in MCP Apps hosts. canvas_typecheck and canvas_compile check existing canvases; canvas_open shows one.
 
