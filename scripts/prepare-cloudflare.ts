@@ -20,10 +20,12 @@ async function collect(directory: string, accept: (path: string) => boolean) {
   }
 }
 await collect("src/sdk", path => /\.(ts|tsx)$/.test(path) && !path.endsWith(".test.ts"));
+files["src/httpTypes.ts"] = await readFile(join(root, "src/httpTypes.ts"), "utf8");
 for (const name of ["react", "react-dom", "scheduler", "@types/react", "@types/react-dom", "csstype"]) {
   await collect(`node_modules/${name}`, path => path.endsWith(".d.ts") || path.endsWith("/package.json"));
 }
 await collect("node_modules/typescript/lib", path => /\/lib\.[^/]+\.d\.ts$/.test(path));
+files["node_modules/@cloudflare/workers-types/index.d.ts"] = await readFile(join(root, "node_modules/@cloudflare/workers-types/index.d.ts"), "utf8");
 const output = join(root, "dist/cloudflare/compiler-files.json");
 await mkdir(dirname(output), { recursive: true });
 await writeFile(output, JSON.stringify(files));
@@ -59,7 +61,10 @@ const assets = join(root, "dist/cloudflare/assets");
 await mkdir(assets, { recursive: true });
 await writeFile(join(assets, "index.html"), galleryHtml());
 await writeFile(join(assets, "gallery.js"), await galleryBundle());
-await writeFile(join(dirname(output), "mcp-app.html"), await canvasAppHtml());
+await writeFile(join(dirname(output), "mcp-app.json"), JSON.stringify(await canvasAppHtml()));
+const galleryBridge = await Bun.build({ entrypoints: [join(root, "src/runtime/gallery-request.ts")], target: "browser", format: "iife", minify: true });
+if (!galleryBridge.success) throw new Error(galleryBridge.logs.join("\n"));
+await writeFile(join(dirname(output), "gallery-request.json"), JSON.stringify(await galleryBridge.outputs[0]!.text()));
 // Compile trusted schemas at build time: Workers must not need eval() to
 // validate arguments, and the listed schema stays the validation source.
 const ajv = new Ajv({ allErrors: true, strict: false, code: { source: true, esm: true } });

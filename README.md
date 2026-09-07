@@ -129,6 +129,68 @@ use `canvas_open({name: "overview", target: "herdr"})`. Similarly,
 write `open` flag is accepted, but inline display is automatic regardless of it.
 CLI `open` continues to open a Herdr pane.
 
+## Native canvas servers
+
+Hosted Cloudflare canvases can pair the browser `.canvas.tsx` with a native
+`CanvasServer`. The server is a generated Durable Object class and uses its own
+`ctx.storage.sql` and `ctx.storage.kv` directly. The browser calls it with
+`canvasFetch`, which accepts a path and standard `RequestInit` and returns a
+standard `Response`:
+
+```tsx
+import { Button, Text, canvasFetch, useCanvasState, useEffect } from "herdr/canvas";
+
+export default function Counter() {
+  const [value, setValue] = useCanvasState<number | null>("value", null);
+  async function load(method = "GET") {
+    const response = await canvasFetch("/counter", { method });
+    if (!response.ok) throw new Error(`Counter failed (${response.status})`);
+    setValue((await response.json() as { value: number }).value);
+  }
+  useEffect(() => { void load(); }, []);
+  return <><Text>Count: {value ?? "loading"}</Text><Button onClick={() => { void load("POST"); }}>Increment</Button></>;
+}
+```
+
+```ts
+import { DurableObject } from "cloudflare:workers";
+
+export class CanvasServer extends DurableObject {
+  fetch(request: Request): Response {
+    this.ctx.storage.sql.exec("create table if not exists counter (id integer primary key, value integer not null)");
+    this.ctx.storage.sql.exec("insert or ignore into counter values (1, 0)");
+    if (request.method === "POST") this.ctx.storage.sql.exec("update counter set value = value + 1 where id = 1");
+    const row = this.ctx.storage.sql.exec<{ value: number }>("select value from counter where id = 1").one();
+    return Response.json(row);
+  }
+}
+```
+
+The complete checked-in pair is
+[`examples/counter.canvas.tsx`](examples/counter.canvas.tsx) and
+[`examples/counter.canvas.server.ts`](examples/counter.canvas.server.ts).
+Seed it into the hosted runtime with `bun run seed:cloudflare default counter`.
+`canvasFetch` carries ordinary HTTP method, headers and body through the Canvas
+host; it does not expose an internal endpoint or bearer credential to canvas
+code. Use relative paths. Cross-origin and protocol-relative URLs are rejected,
+and request and response bodies are limited to 256 KiB.
+
+Hosted `canvas_write` accepts `server` source alongside `contents`. Omitting
+`server` preserves the existing server; passing `null` removes it without
+deleting its database. Use `canvas_read` or `canvas_edit` with `part: "server"`
+for targeted server changes. Client and server source are versioned and restored
+together. The database is live state keyed by library, workspace and canvas name:
+editing or restoring source reloads the code while preserving that state, and
+opening an archived version does not restore an old database snapshot.
+
+Private canvases receive databases isolated to the verified Access user. A team
+canvas shares one database with members authorized for that deployment's team
+library. Private and team canvases with the same workspace and name remain
+separate. Generated servers receive Durable Object storage; ordinary D1, R2 and
+custom Worker bindings are not provided. The local Bun CLI, stdio MCP server and
+gallery do not execute canvas servers, so `canvasFetch` reports that server
+requests are unavailable there. See [Cloudflare setup](docs/cloudflare.md).
+
 ## Targeted reads and edits
 
 Use `read` / `canvas_read` to retrieve only the needed working-source lines, and

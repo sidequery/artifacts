@@ -117,3 +117,56 @@ test("bounds source input", async () => {
   const response = await runtime.dispatchFetch("http://localhost/compile", { method: "POST", body: " ".repeat(256 * 1024 + 1) });
   expect(response.status).toBe(413);
 });
+
+test("compiles native Durable Object server APIs with semantic diagnostics and keeps client imports isolated", async () => {
+  const source = `import { DurableObject } from "cloudflare:workers";
+export class CanvasServer extends DurableObject {
+  fetch(request: Request) {
+    this.ctx.storage.sql.exec("create table if not exists counter (n integer)");
+    return Response.json(this.ctx.storage.sql.exec("select count(*) as n from counter").toArray());
+  }
+}`;
+  const server = await call(source, "compile-server");
+  expect(server.diagnostics).toEqual([]);
+  expect(server.ok).toBe(true);
+  expect(server.js).toContain("cloudflare:workers");
+  for (const valid of [
+    source.replace('import { DurableObject }', 'import { DurableObject as NativeDO }').replace('extends DurableObject', 'extends NativeDO'),
+    source.replace('import { DurableObject } from "cloudflare:workers";', 'import * as workers from "cloudflare:workers";').replace('extends DurableObject', 'extends workers.DurableObject'),
+    source.replace('export class CanvasServer extends DurableObject', 'class LocalBase extends DurableObject {}\nexport class CanvasServer extends LocalBase'),
+  ]) {
+    expect((await call(valid, "typecheck-server")).diagnostics).toEqual([]);
+    expect((await call(valid, "compile-server")).ok).toBe(true);
+  }
+  for (const invalidClass of [
+    'export class CanvasServer { fetch() { return new Response("ok"); } }',
+    'import { DurableObject } from "cloudflare:workers"; export default class CanvasServer extends DurableObject {}',
+    'import { DurableObject } from "cloudflare:workers"; class CanvasServer extends DurableObject {}',
+  ]) {
+    const checked = await call(invalidClass, "typecheck-server");
+    expect(checked.diagnostics.some(diagnostic => diagnostic.message.includes("extending DurableObject"))).toBe(true);
+    const compiled = await call(invalidClass, "compile-server");
+    expect(compiled.ok).toBe(false);
+    expect(compiled.diagnostics.some(diagnostic => diagnostic.message.includes("extending DurableObject"))).toBe(true);
+  }
+  const invalid = await call(source.replace("sql.exec", "sql.missingMethod"), "compile-server");
+  expect(invalid.ok).toBe(false);
+  expect(invalid.diagnostics[0]?.message).toContain("missingMethod");
+  const client = await call('import { DurableObject } from "cloudflare:workers"; export default function Canvas() { return <div />; }');
+  expect(client.ok).toBe(false);
+  const next = await call('import { H1 } from "herdr/canvas"; export default function Canvas() { return <H1>Still works</H1>; }');
+  expect(next.ok).toBe(true);
+  expect(outbound).toEqual([]);
+}, 60000);
+
+test("a transient server compiler queue overload can be retried", async () => {
+  const sources = Array.from({ length: 12 }, (_, index) => `import { DurableObject } from "cloudflare:workers";
+export class CanvasServer extends DurableObject { fetch() { return new Response("${index}"); } }`);
+  const overloaded = await Promise.all(sources.map(item => call(item, "compile-server")));
+  const last = overloaded.at(-1)!;
+  expect(last.ok).toBe(false);
+  expect(last.diagnostics.some(diagnostic => diagnostic.message.includes("Compiler is busy; retry shortly"))).toBe(true);
+  const retried = await call(sources.at(-1)!, "compile-server");
+  expect(retried.ok).toBe(true);
+  expect(retried.diagnostics).toEqual([]);
+}, 60000);

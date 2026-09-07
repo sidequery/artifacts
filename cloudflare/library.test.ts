@@ -7,10 +7,10 @@ let runtime: Miniflare;
 type CallResult<T> = { result?: T; error?: string };
 type DraftResult = {
   ok: boolean; workspace: string; name: string; source: string; source_hash: string;
-  state: Record<string, unknown>; path: string;
+  server_source: string | null; state: Record<string, unknown>; path: string;
 };
 type VersionResult = {
-  version: { id: string; revision: number; source: string; workspace: string; name: string };
+  version: { id: string; revision: number; source: string; server_source: string | null; workspace: string; name: string };
   event: { id: string; version_id: string; mode: string; initial_state: string };
 };
 
@@ -22,7 +22,7 @@ beforeAll(async () => {
   if (!build.success) throw new Error(build.logs.join("\n"));
   const worker = await build.outputs[0]!.text();
   runtime = new Miniflare({
-    cf: false, port: 0,
+    cf: false, port: 0, unsafeInspectDurableObjects: true,
     workers: [{
       config: {
         name: "canvas-library-test", type: "worker", compatibilityDate: "2026-09-06", compatibilityFlags: ["nodejs_compat"],
@@ -109,6 +109,57 @@ test("edits are sequential, guarded, exact, and atomic on every failure", async 
   });
 });
 
+test("paired server drafts preserve omission, support explicit removal, and keep client state", async () => {
+  const client = "export default function Canvas() { return null; }\n";
+  const server = "first server line\nsecond server line\nthird server line";
+  const paired = await call<DraftResult>("writeDraft", { workspace: "paired", name: "overview", source: client, server_source: server });
+  expect(paired).toMatchObject({ source: client, server_source: server });
+  const serverRead = await call<{ source: string; source_hash: string; path: string; part: string }>("readRange", {
+    workspace: "paired", name: "overview", part: "server", start_line: 2, end_line: 2,
+  });
+  expect(serverRead).toMatchObject({ source: "second server line\n", part: "server", path: "paired/overview.canvas.server.ts" });
+  expect(serverRead.source_hash).toBe(createHash("sha256").update(server).digest("hex"));
+  expect("server_source" in serverRead).toBe(false);
+  await fails("writeDraft", { workspace: "paired", name: "overview", source: "replacement", server_source: "x".repeat(256 * 1024 + 1) }, "256 KiB");
+  const clientRead = await call<{ source: string }>("readRange", { workspace: "paired", name: "overview" });
+  expect(clientRead.source).toBe(client);
+  expect("server_source" in clientRead).toBe(false);
+  expect((await call<{ source: string }>("readRange", { workspace: "paired", name: "overview", part: "server" })).source).toBe(server);
+
+  await call("setState", { workspace: "paired", name: "overview", key: "count", value: 7 });
+  const omitted = await call<DraftResult>("writeDraft", { workspace: "paired", name: "overview", source: client.replace("null", "<p />") });
+  expect(omitted.server_source).toBe(server);
+  expect(omitted.state).toEqual({ count: 7 });
+  const removed = await call<DraftResult>("writeDraft", { workspace: "paired", name: "overview", source: client, server_source: null });
+  expect(removed.server_source).toBeNull();
+  expect(removed.state).toEqual({ count: 7 });
+  await fails("readRange", { workspace: "paired", name: "overview", part: "server" }, "no server source");
+
+  const clientOnly = await call<DraftResult>("writeDraft", { workspace: "paired", name: "client-only", source: client });
+  expect(clientOnly.server_source).toBeNull();
+  expect("server_source" in await call<Record<string, unknown>>("readRange", { workspace: "paired", name: "client-only" })).toBe(false);
+  expect((await call<{ server_source: string | null }>("preview", { workspace: "paired", name: "client-only" })).server_source).toBeNull();
+});
+
+test("server edits guard and mutate only the selected source atomically", async () => {
+  const client = "client source\n";
+  const server = "alpha beta beta\ngamma\n";
+  await call("writeDraft", { workspace: "server-edits", name: "overview", source: client, server_source: server });
+  const read = await call<{ source_hash: string }>("readRange", { workspace: "server-edits", name: "overview", part: "server" });
+  const edited = await call<DraftResult & { source_part: string; changed: boolean }>("editDraft", {
+    workspace: "server-edits", name: "overview", part: "server", expected_hash: read.source_hash,
+    edits: [{ old_text: "alpha", new_text: "first" }, { old_text: "beta beta", new_text: "second" }],
+  });
+  expect(edited).toMatchObject({ source: client, server_source: "first second\ngamma\n", source_part: "server", changed: true });
+  expect(edited.source_hash).toBe(createHash("sha256").update(edited.server_source!).digest("hex"));
+  const stableServer = edited.server_source;
+  await fails("editDraft", { workspace: "server-edits", name: "overview", part: "server", expected_hash: read.source_hash, edits: [{ old_text: "first", new_text: "stale" }] }, "changed since read");
+  await fails("editDraft", { workspace: "server-edits", name: "overview", part: "server", edits: [{ old_text: "first", new_text: "changed" }, { old_text: "missing", new_text: "x" }] }, "no changes written");
+  const after = await call<{ source: string }>("readRange", { workspace: "server-edits", name: "overview", part: "server" });
+  expect(after.source).toBe(stableServer);
+  expect((await call<{ source: string }>("readRange", { workspace: "server-edits", name: "overview" })).source).toBe(client);
+});
+
 test("successful serve snapshots deduplicate versions while retaining UUID events and archived selection", async () => {
   const source = "export default function Canvas() { return null; }\n";
   await call("writeDraft", { workspace: "history", name: "overview", source });
@@ -136,6 +187,21 @@ test("successful serve snapshots deduplicate versions while retaining UUID event
   await fails("events", { workspace: "elsewhere", version_id: first.version.id }, "not found in this workspace");
 });
 
+test("version identity includes server source and client-only history stays compatible", async () => {
+  const client = "same client\n";
+  const first = await call<VersionResult>("recordServe", { workspace: "server-history", name: "overview", source: client, server_source: "server one\n", runtime: "sdk", initial_state: {}, mode: "live" });
+  const duplicate = await call<VersionResult>("recordServe", { workspace: "server-history", name: "overview", source: client, server_source: "server one\n", runtime: "sdk", initial_state: {}, mode: "live" });
+  expect(duplicate.version.id).toBe(first.version.id);
+  const backendChanged = await call<VersionResult>("recordServe", { workspace: "server-history", name: "overview", source: client, server_source: "server two\n", runtime: "sdk", initial_state: {}, mode: "live" });
+  expect(backendChanged.version).toMatchObject({ revision: 2, source: client, server_source: "server two\n" });
+  const preview = await call<{ source: string; server_source: string | null }>("preview", { workspace: "server-history", version_id: backendChanged.version.id });
+  expect(preview).toMatchObject({ source: client, server_source: "server two\n" });
+
+  const clientOnly = await call<VersionResult>("recordServe", { workspace: "server-history", name: "client-only", source: client, runtime: "sdk", initial_state: {}, mode: "live" });
+  expect(clientOnly.version.server_source).toBeNull();
+  expect((await call<{ server_source: string | null }>("version", { workspace: "server-history", id: clientOnly.version.id })).server_source).toBeNull();
+});
+
 test("restore preserves the current draft, links a forced revision, and retains working UI state", async () => {
   const original = "export default function Canvas() { return <p>original</p>; }\n";
   await call("writeDraft", { workspace: "restore", name: "overview", source: original });
@@ -153,6 +219,23 @@ test("restore preserves the current draft, links a forced revision, and retains 
   expect(preserved.source).toBe(invalid);
   expect((await call<{ state: { count: number } }>("preview", { workspace: "restore", name: "overview" })).state.count).toBe(9);
   expect(await call<unknown[]>("events", { workspace: "restore", version_id: served.version.id })).toHaveLength(1);
+});
+
+test("restore preserves and restores client and server sources as one versioned pair", async () => {
+  const originalClient = "original client\n";
+  const originalServer = "original server\n";
+  await call("writeDraft", { workspace: "pair-restore", name: "overview", source: originalClient, server_source: originalServer });
+  const served = await call<VersionResult>("recordServe", { workspace: "pair-restore", name: "overview", source: originalClient, server_source: originalServer, runtime: "sdk-a", initial_state: {}, mode: "live" });
+  const draftClient = "unfinished client\n";
+  const draftServer = "unfinished server\n";
+  await call("writeDraft", { workspace: "pair-restore", name: "overview", source: draftClient, server_source: draftServer });
+
+  const restored = await call<DraftResult & { versionId: string; revision: number }>("restore", { workspace: "pair-restore", id: served.version.id, runtime: "sdk-b" });
+  expect(restored).toMatchObject({ source: originalClient, server_source: originalServer, revision: 3 });
+  const history = await call<Array<{ version_id: string; reason: string }>>("history", { workspace: "pair-restore", name: "overview" });
+  const preserved = await call<{ source: string; server_source: string | null }>("version", { workspace: "pair-restore", id: history.find(row => row.reason === "before-restore")!.version_id });
+  expect(preserved).toMatchObject({ source: draftClient, server_source: draftServer });
+  expect(await call("readRange", { workspace: "pair-restore", name: "overview", part: "server" })).toMatchObject({ source: originalServer, part: "server" });
 });
 
 test("concurrent source captures allocate complete monotonic revisions", async () => {
@@ -225,13 +308,35 @@ test("event pagination defaults to 20 and version exposes a stable continuation 
   await fails("version", { workspace: "page-events", id: versionId, events_offset: -1 }, "offset");
 });
 
+test("constructor migrates legacy draft and version tables without losing client-only data", async () => {
+  const library = "legacy-migration";
+  const source = "legacy client\n";
+  await call("writeDraft", { workspace: "legacy", name: "overview", source }, library);
+  const served = await call<VersionResult>("recordServe", { workspace: "legacy", name: "overview", source, runtime: "old-sdk", initial_state: {}, mode: "live" }, library);
+  const storage = await runtime.unsafeGetDurableObjectStorage("canvas-library-test", "CanvasLibrary", { name: library });
+  await storage.exec("alter table drafts drop column server_source");
+  await storage.exec("alter table versions drop column server_source");
+  await runtime.unsafeEvictDurableObject("canvas-library-test", "CanvasLibrary", { name: library });
+
+  const draft = await call<{ source: string; server_source: string | null }>("preview", { workspace: "legacy", name: "overview" }, library);
+  const version = await call<{ source: string; server_source: string | null }>("version", { workspace: "legacy", id: served.version.id }, library);
+  expect(draft).toMatchObject({ source, server_source: null });
+  expect(version).toMatchObject({ source, server_source: null });
+  const draftColumns = await storage.exec<{ name: string }>("pragma table_info(drafts)");
+  const versionColumns = await storage.exec<{ name: string }>("pragma table_info(versions)");
+  expect(draftColumns.map(column => column.name)).toContain("server_source");
+  expect(versionColumns.map(column => column.name)).toContain("server_source");
+});
+
 test("source and serialized state are bounded for drafts, edits, serves, and UI state", async () => {
   await fails("writeDraft", { workspace: "limits", name: "large", source: "x".repeat(256 * 1024 + 1) }, "256 KiB");
+  await fails("writeDraft", { workspace: "limits", name: "large-server", source: "ok", server_source: "x".repeat(256 * 1024 + 1) }, "256 KiB");
   const source = "x".repeat(256 * 1024 - 1) + "\n";
   await call("writeDraft", { workspace: "limits", name: "edge", source });
   await fails("editDraft", { workspace: "limits", name: "edge", edits: [{ old_text: source, new_text: `${source}x` }] }, "256 KiB");
   expect((await call<DraftResult>("readRange", { workspace: "limits", name: "edge", start_line: 1 })).source.length).toBe(256 * 1024);
   await fails("recordServe", { workspace: "limits", name: "edge", source: "x".repeat(256 * 1024 + 1), runtime: "sdk", initial_state: {}, mode: "live" }, "256 KiB");
+  await fails("recordServe", { workspace: "limits", name: "edge", source: "ok", server_source: "x".repeat(256 * 1024 + 1), runtime: "sdk", initial_state: {}, mode: "live" }, "256 KiB");
   await fails("setState", { workspace: "limits", name: "edge", key: "large", value: "x".repeat(64 * 1024) }, "64 KiB");
   await fails("recordServe", { workspace: "limits", name: "edge", source: "ok", runtime: "sdk", initial_state: { large: "x".repeat(64 * 1024) }, mode: "live" }, "64 KiB");
 });

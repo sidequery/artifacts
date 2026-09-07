@@ -1,6 +1,7 @@
 import { App, type McpUiHostContext } from "@modelcontextprotocol/ext-apps";
 import type { CanvasAppPayload } from "../mcpApp";
 import type { CanvasAction, HostBridge } from "../sdk/hooks";
+import type { CanvasHttpRequest, CanvasHttpResponse } from "../sdk/server";
 
 // Measure intrinsic content rather than the iframe's document height, so views
 // can grow and shrink even when the host clamps or ignores a resize request.
@@ -112,6 +113,20 @@ async function action(value: CanvasAction) {
   } catch (error) { status.textContent = error instanceof Error ? error.message : String(error); }
 }
 
+async function serverRequest(canvas: CanvasAppPayload, request: CanvasHttpRequest): Promise<CanvasHttpResponse> {
+  const result = await app.callServerTool({
+    name: "canvas_request",
+    arguments: { version_id: canvas.versionId, request },
+  });
+  if (result.isError) {
+    const message = result.content?.filter(item => item.type === "text").map(item => item.text).join("\n");
+    throw new Error(message || "Canvas server request failed.");
+  }
+  const structured = result.structuredContent as { response?: CanvasHttpResponse } | undefined;
+  if (!structured?.response) throw new Error("Canvas server response was missing.");
+  return structured.response;
+}
+
 function clear() {
   hostWindow.__herdrCanvasUnmount?.();
   delete hostWindow.__herdrCanvasUnmount;
@@ -133,7 +148,9 @@ app.ontoolresult = result => {
     status.textContent = "No canvas preview was returned.";
     return;
   }
-  hostWindow.__herdrCanvas = { canvasId: canvas.name, state: canvas.state, onAction: value => { void action(value); } };
+  const bridge: HostBridge = { canvasId: canvas.name, state: canvas.state, onAction: value => { void action(value); } };
+  if (canvas.server === true) bridge.onRequest = request => serverRequest(canvas, request);
+  hostWindow.__herdrCanvas = bridge;
   hasCanvas = true;
   theme(context.theme);
   updateDisplay();

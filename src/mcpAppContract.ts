@@ -8,5 +8,5 @@ export const CANVAS_RESOURCE = {
 
 export type CanvasAppPayload = {
   name: string; versionId: string; eventId: string; sourceHash: string;
-  js: string; state: Record<string, unknown>;
+  js: string; state: Record<string, unknown>; server?: boolean;
 };

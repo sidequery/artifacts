@@ -1,5 +1,7 @@
 export type { CanvasAction, SetCanvasState } from "./hooks";
+export { useEffect } from "react";
 export { useCanvasAction, useCanvasState, useHostTheme } from "./hooks";
+export { canvasFetch, type CanvasHttpRequest, type CanvasHttpResponse } from "./server";
 export {
   canvasPaletteDark,
   canvasPaletteLight,
