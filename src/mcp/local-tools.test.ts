@@ -1,14 +1,14 @@
 import { expect, test } from "bun:test";
 
-import { handleMcpRequest } from "./mcp";
-import { encodeMessage, parseMessages } from "./mcpProtocol";
-import { CanvasService } from "./service";
-import { VALID_CANVAS, tempDir } from "./test/fixtures";
+import { handleMcpRequest } from "./local-tools";
+import { encodeMessage, parseMessages } from "./protocol";
+import { CanvasService } from "../service";
+import { VALID_CANVAS, tempDir } from "../test/fixtures";
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
-import { CanvasHistory } from "./history";
-import { CANVAS_GUIDE_EXPORTS } from "./canvasGuide";
-import * as sdk from "./sdk";
+import { CanvasHistory } from "../history";
+import { CANVAS_GUIDE_EXPORTS } from "./guide";
+import * as sdk from "../sdk";
 
 test("guide documents exactly the installed SDK runtime exports", () => {
   expect([...CANVAS_GUIDE_EXPORTS].sort()).toEqual(Object.keys(sdk).sort());

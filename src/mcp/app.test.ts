@@ -3,11 +3,11 @@ import { join } from "node:path";
 import { readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { CANVAS_APP_URI, CANVAS_APP_MIME, canvasAppResult } from "./mcpApp";
-import { handleMcpRequest } from "./mcp";
-import { CanvasHistory } from "./history";
-import { CanvasService } from "./service";
-import { tempDir, VALID_CANVAS, writeCanvas } from "./test/fixtures";
+import { CANVAS_APP_URI, CANVAS_APP_MIME, canvasAppResult } from "./app";
+import { handleMcpRequest } from "./local-tools";
+import { CanvasHistory } from "../history";
+import { CanvasService } from "../service";
+import { tempDir, VALID_CANVAS, writeCanvas } from "../test/fixtures";
 
 function fixture() {
   const dir = tempDir();
@@ -94,7 +94,7 @@ test("official MCP client can initialize, discover UI, create and show over stan
   const client = new Client({ name: "canvas-test", version: "1" });
   const transport = new StdioClientTransport({
     command: process.execPath,
-    args: ["run", join(import.meta.dir, "cli.ts"), "mcp", "--dir", dir, "--history-db", join(dir, "history.sqlite")],
+    args: ["run", join(import.meta.dir, "../cli.ts"), "mcp", "--dir", dir, "--history-db", join(dir, "history.sqlite")],
     stderr: "pipe",
   });
   try {

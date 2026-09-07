@@ -5,7 +5,7 @@ import {
   ListResourceTemplatesRequestSchema, ReadResourceRequestSchema,
   ErrorCode, McpError,
 } from "@modelcontextprotocol/sdk/types.js";
-import { CANVAS_APP_URI, CANVAS_RESOURCE } from "../src/mcpAppContract";
+import { CANVAS_APP_URI, CANVAS_RESOURCE } from "../src/mcp/app-contract";
 import shell from "../dist/cloudflare/mcp-app.json";
 import * as validators from "../dist/cloudflare/tool-validators.js";
 import { CLOUD_MCP_TOOLS } from "./tool-contract";

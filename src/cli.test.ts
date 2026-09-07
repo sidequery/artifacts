@@ -6,7 +6,7 @@ import { PLUGIN_ROOT } from "./paths";
 import { VALID_CANVAS, tempDir, writeCanvas } from "./test/fixtures";
 import { CanvasHistory } from "./history";
 import { createCanvasServer } from "./serve";
-import { handleMcpRequest } from "./mcp";
+import { handleMcpRequest } from "./mcp/local-tools";
 import { CanvasService } from "./service";
 import { parseArgs } from "./args";
 import { runServerCommand } from "./cli";
@@ -86,6 +86,29 @@ test("CLI compile bundles a valid canvas", async () => {
   expect(payload.bytes).toBeGreaterThan(100);
 });
 
+test("CLI open uses the plugin canvas name fallback and prefers an explicit name", async () => {
+  const dir = tempDir();
+  const fallbackPath = writeCanvas(dir, "fallback", VALID_CANVAS);
+  const explicitPath = writeCanvas(dir, "explicit", VALID_CANVAS);
+  const dbPath = join(dir, "history.sqlite");
+  const server = await createCanvasServer({ canvasesDir: dir, historyPath: dbPath });
+  const common = ["--dir", dir, "--history-db", dbPath, "--no-open"];
+  const env = { HERDR_CANVAS_NAME: "fallback", HERDR_CANVAS_SERVER_URL: server.url };
+  try {
+    const fallback = await runCli(["open", ...common], env);
+    expect(fallback.exitCode).toBe(0);
+    expect(JSON.parse(fallback.stdout)).toMatchObject({ ok: true, path: fallbackPath });
+    const explicit = await runCli(["open", "explicit", ...common], env);
+    expect(explicit.exitCode).toBe(0);
+    expect(JSON.parse(explicit.stdout)).toMatchObject({ ok: true, path: explicitPath });
+    for (const versionFlags of [["--version"], ["--version="]]) {
+      const invalidVersion = await runCli(["open", ...versionFlags, ...common], env);
+      expect(invalidVersion.exitCode).toBe(1);
+      expect(invalidVersion.stderr).toContain("provide a canvas name or --version ID");
+    }
+  } finally { server.stop(); }
+}, { timeout: 30_000 });
+
 test("CLI history, show, open --version and restore work for an archived canvas whose file was deleted", async () => {
   const dir = tempDir();
   const path = writeCanvas(dir, "overview", VALID_CANVAS);
@@ -104,7 +127,7 @@ test("CLI history, show, open --version and restore work for an archived canvas 
     const shown = await runCli(["show", version.id, ...common]);
     expect(JSON.parse(shown.stdout).source).toBe(VALID_CANVAS);
     expect((await runCli(["show", version.id, "--source", ...common])).stdout).toBe(VALID_CANVAS);
-    const reopened = await runCli(["open", "--version", version.id, "--event", eventId, ...common, "--no-open"], { HERDR_CANVAS_SERVER_URL: server.url });
+    const reopened = await runCli(["open", "--version", version.id, "--event", eventId, ...common, "--no-open"], { HERDR_CANVAS_SERVER_URL: server.url, HERDR_CANVAS_NAME: "unrelated" });
     expect(reopened.exitCode).toBe(0);
     const url = JSON.parse(reopened.stdout).url;
     expect(url).toBe(`${server.url}/v/${version.id}?event=${eventId}`);

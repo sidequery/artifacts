@@ -11,8 +11,8 @@ import {
   writeServerReady,
   type CommandResult,
   type RunCommand,
-} from "./celldDaemon";
-import { tempDir } from "./test/fixtures";
+} from "./server-daemon";
+import { tempDir } from "../test/fixtures";
 
 const ok = (stdout = ""): CommandResult => ({ exitCode: 0, stdout, stderr: "" });
 const missing = (): CommandResult => ({ exitCode: 1, stdout: "", stderr: "not found" });

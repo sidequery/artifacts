@@ -4,8 +4,8 @@ import { mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/prom
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
-import { canvasDataRoot, ensureCelldRuntime } from "./celldRuntime";
-import { CLI_ENTRY, PLUGIN_ROOT } from "./paths";
+import { canvasDataRoot, ensureCelldRuntime } from "./celld-runtime";
+import { CLI_ENTRY, PLUGIN_ROOT } from "../paths";
 
 export const SERVER_PORT = 4786;
 export const LAUNCHD_LABEL = "com.sidequery.canvas.server";

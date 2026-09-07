@@ -1,14 +1,14 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { canvasIdFromFile, assertRegularCanvas, ensureCanvasFileName } from "./canvasFile";
-import { compileCanvas } from "./compile";
-import { formatCanvasCheck } from "./diagnostics";
-import { CanvasHistory, historyPath, runtimeIdentity } from "./history";
-import { PLUGIN_ROOT } from "./paths";
-import type { CanvasService } from "./service";
+import { canvasIdFromFile, assertRegularCanvas, ensureCanvasFileName } from "../canvasFile";
+import { compileCanvas } from "../compile";
+import { formatCanvasCheck } from "../diagnostics";
+import { CanvasHistory, historyPath, runtimeIdentity } from "../history";
+import { PLUGIN_ROOT } from "../paths";
+import type { CanvasService } from "../service";
 
-export * from "./mcpAppContract";
-import type { CanvasAppPayload } from "./mcpAppContract";
+export * from "./app-contract";
+import type { CanvasAppPayload } from "./app-contract";
 
 let shell: Promise<string> | undefined;
 export function canvasAppHtml(): Promise<string> {

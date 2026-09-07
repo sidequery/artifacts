@@ -1,5 +1,5 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
-import { MCP_TOOLS } from "../src/mcpTools";
+import { MCP_TOOLS } from "../src/mcp/tools";
 
 // Share the local tool contract. A hosted service cannot open a terminal pane.
 export const CLOUD_MCP_TOOLS: Tool[] = JSON.parse(JSON.stringify(MCP_TOOLS));

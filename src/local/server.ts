@@ -2,8 +2,8 @@ import { Database } from "bun:sqlite";
 import { createRequire } from "node:module";
 import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { canvasDataRoot, ensureCelldRuntime } from "./celldRuntime";
-import { PLUGIN_ROOT } from "./paths";
+import { canvasDataRoot, ensureCelldRuntime } from "./celld-runtime";
+import { PLUGIN_ROOT } from "../paths";
 
 export async function runCelldServer(options: { port?: number; stateDir?: string; signal: AbortSignal; onReady?: (url: string) => void | Promise<void> }): Promise<void> {
   const port = options.port ?? 4786;

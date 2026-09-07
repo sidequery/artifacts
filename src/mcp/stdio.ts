@@ -1,6 +1,6 @@
-import { encodeMessage, parseMessages, type JsonRpcRequest } from "./mcpProtocol";
-import { handleMcpRequest } from "./mcp";
-import { CanvasService } from "./service";
+import { encodeMessage, parseMessages, type JsonRpcRequest } from "./protocol";
+import { handleMcpRequest } from "./local-tools";
+import { CanvasService } from "../service";
 
 export async function runMcpServer(service: CanvasService): Promise<void> {
   let buffer: Buffer = Buffer.alloc(0);

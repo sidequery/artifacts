@@ -1,6 +1,6 @@
 import { canvasIdFromFile } from "./canvasFile";
 import { compileCanvas } from "./compile";
-import { ensureCanvasServer } from "./daemon";
+import { ensureCanvasServer } from "./local/preview-daemon";
 import { formatCanvasCheck } from "./diagnostics";
 import {
   canvasPaneOpenArgs,
