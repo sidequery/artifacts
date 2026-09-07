@@ -43,6 +43,32 @@ export default function Resizable() {
 }
 `;
 
+const SERVER_CANVAS = `import { Button, H1, Stack, Text, canvasFetch, useCanvasState } from "herdr/canvas";
+
+export default function ServerCanvas() {
+  const [result, setResult] = useCanvasState<string>("result", "idle");
+  const load = async () => {
+    try {
+      const response = await canvasFetch("/api/items?limit=2", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ source: "canvas" }),
+      });
+      setResult(String(response.status) + ":" + await response.text());
+    } catch (error) {
+      setResult("error:" + (error instanceof Error ? error.message : String(error)));
+    }
+  };
+  return (
+    <Stack gap={8}>
+      <H1>Server canvas</H1>
+      <Button onClick={() => { void load(); }}>Load server data</Button>
+      <Text>Result: {result}</Text>
+    </Stack>
+  );
+}
+`;
+
 let browser: Browser;
 let server: ReturnType<typeof Bun.serve>;
 let hostHtml: string;
@@ -358,6 +384,63 @@ test("negotiates fullscreen while preserving state and survives external, declin
   expect(await expand.isEnabled()).toBe(true);
   await app.getByRole("button", { name: "Increment" }).click();
   await app.getByText("Count: 6").waitFor();
+  expect(errors).toEqual([]);
+  await page.close();
+}, 30_000);
+
+test("routes canvasFetch through canvas_request only for server-enabled MCP canvases", async () => {
+  const meta = await resultFor(SERVER_CANVAS, "server-data");
+  meta.canvas.server = true;
+  const { page, app, errors } = await openHost();
+  await page.evaluate(() => window.mcpHost!.setServerToolResult({
+    content: [],
+    structuredContent: {
+      response: {
+        status: 202,
+        statusText: "Accepted",
+        headers: [["content-type", "application/json"]],
+        body: btoa('{"rows":2}'),
+      },
+    },
+  }));
+  await page.evaluate(meta => window.mcpHost!.sendResult({
+    content: [{ type: "text", text: "Server canvas ready" }],
+    _meta: meta,
+  }), meta);
+  await app.getByRole("heading", { name: "Server canvas" }).waitFor();
+  const load = app.getByRole("button", { name: "Load server data" });
+  await load.click();
+  await app.getByText('Result: 202:{"rows":2}').waitFor();
+
+  const calls = await page.evaluate(() => window.mcpHost!.serverToolCalls);
+  expect(calls).toHaveLength(1);
+  expect(calls[0]?.name).toBe("canvas_request");
+  expect(Object.keys(calls[0]?.arguments ?? {}).sort()).toEqual(["request", "version_id"]);
+  expect(calls[0]?.arguments?.version_id).toBe(meta.canvas.versionId);
+  const request = calls[0]?.arguments?.request as {
+    path: string; method: string; headers: [string, string][]; body: string;
+  };
+  expect(request.path).toBe("/api/items?limit=2");
+  expect(request.method).toBe("POST");
+  expect(new Headers(request.headers).get("content-type")).toBe("application/json");
+  expect(atob(request.body)).toBe('{"source":"canvas"}');
+
+  await page.evaluate(() => window.mcpHost!.setServerToolResult({
+    content: [{ type: "text", text: "Database unavailable" }],
+    isError: true,
+  }));
+  await load.click();
+  await app.getByText("Result: error:Database unavailable").waitFor();
+  await page.evaluate(() => window.mcpHost!.setServerToolResult({ content: [], structuredContent: {} }));
+  await load.click();
+  await app.getByText("Result: error:Canvas server response was missing.").waitFor();
+
+  const withoutServer = { canvas: { ...meta.canvas, server: false } };
+  await page.evaluate(meta => window.mcpHost!.sendResult({ content: [], _meta: meta }), withoutServer);
+  await app.getByRole("heading", { name: "Server canvas" }).waitFor();
+  await load.click();
+  await app.getByText("Result: error:Canvas server requests are unavailable in this view.").waitFor();
+  expect(await page.evaluate(() => window.mcpHost!.serverToolCalls.length)).toBe(3);
   expect(errors).toEqual([]);
   await page.close();
 }, 30_000);

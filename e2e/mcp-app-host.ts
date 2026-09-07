@@ -17,12 +17,14 @@ declare global {
       links: string[];
       sizeChanges: Array<{ width?: number; height?: number }>;
       requestedModes: McpUiDisplayMode[];
+      serverToolCalls: Array<{ name: string; arguments?: Record<string, unknown> }>;
       sendResult(result: CallToolResult): Promise<void>;
       cancel(reason: string): Promise<void>;
       setTheme(theme: "dark" | "light"): void;
       configure(update: Partial<McpUiHostContext>): void;
       setInlineFrameLimit(limit?: number): void;
       setRequestBehavior(behavior: RequestBehavior): void;
+      setServerToolResult(result: CallToolResult): void;
       context(): McpUiHostContext;
     };
   }
@@ -33,6 +35,10 @@ const messages: unknown[] = [];
 const links: string[] = [];
 const sizeChanges: Array<{ width?: number; height?: number }> = [];
 const requestedModes: McpUiDisplayMode[] = [];
+const serverToolCalls: Array<{ name: string; arguments?: Record<string, unknown> }> = [];
+let serverToolResult: CallToolResult = { content: [], structuredContent: {
+  response: { status: 200, statusText: "OK", headers: [] },
+} };
 let requestBehavior: RequestBehavior = "accept";
 let lastRequestedHeight = 1;
 let inlineFrameLimit: number | undefined;
@@ -46,7 +52,7 @@ let hostContext: McpUiHostContext = {
 const bridge = new AppBridge(
   null,
   { name: "Canvas browser test host", version: "1.0.0" },
-  { message: { text: {} }, openLinks: {} },
+  { message: { text: {} }, openLinks: {}, serverTools: {} },
   { hostContext },
 );
 
@@ -74,6 +80,7 @@ window.mcpHost = {
   links,
   sizeChanges,
   requestedModes,
+  serverToolCalls,
   async sendResult(result) {
     await bridge.sendToolResult(result);
   },
@@ -96,6 +103,9 @@ window.mcpHost = {
   setRequestBehavior(behavior) {
     requestBehavior = behavior;
   },
+  setServerToolResult(result) {
+    serverToolResult = result;
+  },
   context() {
     return structuredClone(hostContext);
   },
@@ -115,6 +125,10 @@ bridge.onrequestdisplaymode = async ({ mode }) => {
   applyFrameSize();
   bridge.setHostContext(hostContext);
   return { mode };
+};
+bridge.oncalltool = async params => {
+  serverToolCalls.push(params);
+  return serverToolResult;
 };
 bridge.onmessage = async params => {
   messages.push(params);

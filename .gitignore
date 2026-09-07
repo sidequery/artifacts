@@ -22,4 +22,5 @@ node_modules/
 .dev.vars
 .dev.vars.*
 .celld/
+/wrangler.celld.jsonc
 *.tgz

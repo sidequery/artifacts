@@ -6,6 +6,7 @@ import { sandboxToDiagnostics, type Diagnostic } from "../src/diagnostics";
 import { scanCanvasSource } from "../src/sandbox";
 
 const sourcePath = "canvas.canvas.tsx";
+const serverPath = "canvas.canvas.server.ts";
 const sdkPath = "src/sdk/index.ts";
 const compilerFiles: Record<string, string> = files;
 const options: ts.CompilerOptions = {
@@ -18,21 +19,23 @@ const options: ts.CompilerOptions = {
 };
 const normalize = (path: string) => path.replace(/^\//, "");
 let currentSource = "";
+let serverMode = false;
 let sourceVersion = 0;
-const read = (path: string) => normalize(path) === sourcePath ? currentSource : compilerFiles[normalize(path)];
+const serverOptions: ts.CompilerOptions = { ...options, paths: {}, lib: ["lib.es2022.d.ts"] };
+const read = (path: string) => normalize(path) === (serverMode ? serverPath : sourcePath) ? currentSource : compilerFiles[normalize(path)];
 // A single bounded language-service project retains the immutable SDK/lib ASTs.
 // Typechecking is synchronous, so overlapping requests cannot observe another
 // source while checking. No per-user project/program cache accumulates here.
 const host: ts.LanguageServiceHost = {
-    getCompilationSettings: () => options,
-    getScriptFileNames: () => [`/${sourcePath}`],
-    getScriptVersion: path => normalize(path) === sourcePath ? String(sourceVersion) : "0",
+    getCompilationSettings: () => serverMode ? serverOptions : options,
+    getScriptFileNames: () => serverMode ? [`/${serverPath}`, "/node_modules/@cloudflare/workers-types/index.d.ts"] : [`/${sourcePath}`],
+    getScriptVersion: path => [sourcePath, serverPath].includes(normalize(path)) ? String(sourceVersion) : "0",
     getProjectVersion: () => String(sourceVersion),
     getScriptSnapshot: path => {
       const text = read(path);
       return text === undefined ? undefined : ts.ScriptSnapshot.fromString(text);
     },
-    getDefaultLibFileName: () => "/node_modules/typescript/lib/lib.es2022.full.d.ts",
+    getDefaultLibFileName: () => `/node_modules/typescript/lib/lib.es2022${serverMode ? "" : ".full"}.d.ts`,
     writeFile: () => { throw new Error("Canvas typechecking does not emit files"); },
     getCurrentDirectory: () => "/",
     useCaseSensitiveFileNames: () => true, getNewLine: () => "\n",
@@ -45,12 +48,21 @@ let languageService: ts.LanguageService | undefined;
 export function typecheckCanvasSource(source: string): Diagnostic[] {
   const violations = scanCanvasSource(source);
   if (violations.length) return sandboxToDiagnostics(sourcePath, violations);
+  return typecheckSource(source, false);
+}
+
+export function typecheckCanvasServerSource(source: string): Diagnostic[] {
+  return typecheckSource(source, true);
+}
+
+function typecheckSource(source: string, server: boolean): Diagnostic[] {
+  serverMode = server;
   currentSource = source;
   sourceVersion++;
   languageService ??= ts.createLanguageService(host);
   const program = languageService.getProgram();
   if (!program) throw new Error("Could not initialize Canvas TypeScript project");
-  return ts.getPreEmitDiagnostics(program)
+  const diagnostics: Diagnostic[] = ts.getPreEmitDiagnostics(program)
     .filter(diagnostic => diagnostic.category === ts.DiagnosticCategory.Error)
     .map(diagnostic => {
       const position = diagnostic.file && diagnostic.start !== undefined
@@ -58,23 +70,104 @@ export function typecheckCanvasSource(source: string): Diagnostic[] {
       return {
         severity: "error" as const,
         message: ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"),
-        file: diagnostic.file?.fileName.replace(/^\//, "") ?? sourcePath,
+        file: diagnostic.file?.fileName.replace(/^\//, "") ?? (server ? serverPath : sourcePath),
         ...(position ? { line: position.line + 1, column: position.character + 1 } : {}),
       };
     });
+  if (server) diagnostics.push(...validateCanvasServerClass(program));
+  return diagnostics;
+}
+
+function validateCanvasServerClass(program: ts.Program): Diagnostic[] {
+  const file = program.getSourceFiles().find(source => normalize(source.fileName) === serverPath);
+  if (!file) return [serverClassDiagnostic()];
+  const checker = program.getTypeChecker();
+  const resolve = (symbol: ts.Symbol | undefined) => symbol && (symbol.flags & ts.SymbolFlags.Alias) !== 0
+    ? checker.getAliasedSymbol(symbol) : symbol;
+  const workersModule = file.statements
+    .filter(ts.isImportDeclaration)
+    .find(node => ts.isStringLiteral(node.moduleSpecifier) && node.moduleSpecifier.text === "cloudflare:workers")
+    ?.moduleSpecifier;
+  const moduleSymbol = workersModule && checker.getSymbolAtLocation(workersModule);
+  const durableObject = resolve(moduleSymbol && checker.getExportsOfModule(moduleSymbol)
+    .find(symbol => symbol.name === "DurableObject"));
+  const fileSymbol = checker.getSymbolAtLocation(file);
+  const canvasServer = resolve(fileSymbol && checker.getExportsOfModule(fileSymbol)
+    .find(symbol => symbol.name === "CanvasServer"));
+  const declaration = canvasServer?.declarations?.find(node => ts.isClassDeclaration(node) && node.getSourceFile() === file);
+  if (!durableObject || !canvasServer || !declaration) return [serverClassDiagnostic(declaration)];
+
+  const seen = new Set<ts.Type>();
+  const inheritsDurableObject = (type: ts.Type): boolean => {
+    if (seen.has(type)) return false;
+    seen.add(type);
+    return (type.getBaseTypes() ?? []).some(base => {
+      const symbol = resolve(base.getSymbol());
+      return symbol === durableObject || inheritsDurableObject(base);
+    });
+  };
+  return inheritsDurableObject(checker.getDeclaredTypeOfSymbol(canvasServer)) ? [] : [serverClassDiagnostic(declaration)];
+}
+
+function serverClassDiagnostic(node?: ts.Node): Diagnostic {
+  const position = node?.getSourceFile().getLineAndCharacterOfPosition(node.getStart());
+  return {
+    severity: "error",
+    message: "Server code must export class CanvasServer extending DurableObject from cloudflare:workers",
+    file: serverPath,
+    ...(position ? { line: position.line + 1, column: position.character + 1 } : {}),
+  };
 }
 
 let compilationTail: Promise<unknown> = Promise.resolve();
 let pendingCompilations = 0;
 
 export async function compileCanvasSource(source: string) {
+  return queueCompile(source, false);
+}
+
+let lastServer: { source: string; result: ReturnType<typeof queueCompile> } | undefined;
+export async function compileCanvasServerSource(source: string) {
+  if (lastServer?.source === source) return lastServer.result;
+  const result = queueCompile(source, true);
+  lastServer = { source, result };
+  try {
+    const compiled = await result;
+    if (!compiled.ok && lastServer?.result === result) lastServer = undefined;
+    return compiled;
+  } catch (error) {
+    if (lastServer?.result === result) lastServer = undefined;
+    throw error;
+  }
+}
+
+async function queueCompile(source: string, server: boolean) {
   // esbuild WASM and semantic checking share the isolate's 128 MiB budget.
   // Serialize builds and bound retained request sources under load.
-  if (pendingCompilations >= 8) return { ok: false, diagnostics: [{ severity: "error" as const, message: "Compiler is busy; retry shortly", file: sourcePath }] };
+  if (pendingCompilations >= 8) return { ok: false, diagnostics: [{ severity: "error" as const, message: "Compiler is busy; retry shortly", file: server ? serverPath : sourcePath }] };
   pendingCompilations++;
-  const result = compilationTail.then(() => compileSource(source));
+  const result = compilationTail.then(() => server ? compileServer(source) : compileSource(source));
   compilationTail = result.catch(() => undefined);
   try { return await result; } finally { pendingCompilations--; }
+}
+
+async function compileServer(source: string) {
+  const diagnostics = typecheckCanvasServerSource(source);
+  if (diagnostics.length) return { ok: false, diagnostics };
+  try {
+    // celld 0.4.1 requires a default Worker export even when only the named
+    // Durable Object class is used. Keep that packaging detail out of user code.
+    const result = await createWorker({ files: {
+      [serverPath]: source,
+      "server-entry.ts": `export { CanvasServer } from "./${serverPath}"; export default { fetch() { return new Response("Not found", { status: 404 }); } };`,
+    }, entryPoint: "server-entry.ts", target: "es2022", sourcemap: false });
+    if (result.warnings?.length) throw new Error(result.warnings.join("\n"));
+    const js = result.modules[result.mainModule];
+    if (typeof js !== "string") throw new Error("Server compiler did not return JavaScript");
+    return { ok: true, js, diagnostics: [] as Diagnostic[] };
+  } catch (error) {
+    return { ok: false, diagnostics: [{ severity: "error" as const, message: error instanceof Error ? error.message : String(error), file: serverPath }] };
+  }
 }
 
 async function compileSource(source: string) {

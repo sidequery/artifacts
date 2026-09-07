@@ -123,6 +123,7 @@ function App() {
   const galleryController = useRef<AbortController | null>(null);
   const galleryRequest = useRef(0);
   const sourceRequest = useRef(0);
+  const previewFrame = useRef<HTMLIFrameElement>(null);
 
   const loadGallery = useCallback(async () => {
     galleryController.current?.abort();
@@ -211,6 +212,38 @@ function App() {
   const downloadUrl = selectedArtifact && resolvedVersion
     ? artifactUrl("/api/source", selectedArtifact, resolvedVersion, true)
     : "";
+
+  useEffect(() => {
+    const pending = new Set<string>();
+    const request = async (event: MessageEvent) => {
+      const frame = previewFrame.current;
+      if (!frame || event.source !== frame.contentWindow || !selectedArtifact
+        || event.data?.type !== "canvas/http-request" || typeof event.data.id !== "string"
+        || event.data.id.length > 64 || typeof event.data.versionId !== "string" || pending.has(event.data.id)) return;
+      const target = frame.contentWindow!;
+      const id = event.data.id;
+      try {
+        if (pending.size >= 16) throw new Error("Too many pending canvas requests");
+        pending.add(id);
+        const params = new URLSearchParams({ workspace: selectedArtifact.workspace });
+        const library = new URLSearchParams(window.location.search).get("library");
+        if (library) params.set("library", library);
+        const response = await fetch(`/api/canvas/request?${params}`, {
+          method: "POST", headers: { "content-type": "application/json" },
+          // The frame selects its pinned code version, but cannot redirect a
+          // request to another canvas or private/team library.
+          body: JSON.stringify({ name: selectedArtifact.name, version_id: event.data.versionId, request: event.data.request }),
+        });
+        const result = await response.json() as { response?: unknown; error?: string };
+        if (!response.ok) throw new Error(result.error ?? `Canvas request failed (${response.status})`);
+        target.postMessage({ type: "canvas/http-response", id, response: result.response }, "*");
+      } catch (error) {
+        target.postMessage({ type: "canvas/http-response", id, error: error instanceof Error ? error.message : String(error) }, "*");
+      } finally { pending.delete(id); }
+    };
+    window.addEventListener("message", request);
+    return () => window.removeEventListener("message", request);
+  }, [selectedArtifact]);
 
   useEffect(() => {
     if (tab !== "source" || !selectedArtifact || !resolvedVersion) {
@@ -342,6 +375,7 @@ function App() {
               <>
                 {previewLoading ? <div className="preview-loading" role="status">Loading preview…</div> : null}
                 <iframe
+                  ref={previewFrame}
                   key={previewUrl}
                   className="preview-frame"
                   src={previewUrl}

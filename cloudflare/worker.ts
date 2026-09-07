@@ -5,10 +5,15 @@ import { authenticate, type AuthEnvironment } from "./auth";
 import { CloudCanvasService } from "./service";
 import { handleCloudMcp } from "./mcp";
 import { readRequestText } from "./http";
+import { CanvasBackend } from "./backend";
+import { canvas_request as validateRequest } from "../dist/cloudflare/tool-validators.js";
+import type { CanvasHttpRequest } from "../src/httpTypes";
+import galleryBridge from "../dist/cloudflare/gallery-request.json";
 
-export { CanvasLibrary };
+export { CanvasLibrary, CanvasBackend };
 export type Env = AuthEnvironment & {
   LIBRARIES: DurableObjectNamespace<CanvasLibrary>;
+  BACKENDS: DurableObjectNamespace<CanvasBackend>;
   ASSETS: Fetcher;
   DEFAULT_WORKSPACE?: string;
 };
@@ -31,7 +36,7 @@ app.use("*", async (c, next) => {
   // selected only from the verified subject, never a caller-supplied user ID.
   const libraryKey = libraryScope === "team" ? "team" : JSON.stringify(["private", c.env.ACCESS_TEAM_DOMAIN ?? "local", identity.subject]);
   c.set("libraryScope", libraryScope);
-  c.set("service", new CloudCanvasService(c.env.LIBRARIES.getByName(libraryKey), workspace));
+  c.set("service", new CloudCanvasService(c.env.LIBRARIES.getByName(libraryKey), workspace, c.env.BACKENDS, libraryKey));
   await next();
 });
 
@@ -48,6 +53,14 @@ app.get("/api/gallery", async c => {
   if (!Number.isSafeInteger(offset) || offset < 0) return c.json({ error: "Invalid offset" }, 400);
   return c.json({ ...await c.get("service").gallery(c.req.query("all") === "1", offset), libraryScope: c.get("libraryScope") });
 });
+app.post("/api/canvas/request", async c => {
+  let input: unknown;
+  try { input = JSON.parse(await readRequestText(c.req.raw, 1024 * 1024)); }
+  catch (error) { return c.json({ error: error instanceof RangeError ? "Request exceeds 1 MiB" : "Invalid JSON" }, error instanceof RangeError ? 413 : 400); }
+  if (!validateRequest(input)) return c.json({ error: "Invalid canvas request" }, 400);
+  const args = input as { name?: string; version_id?: string; request: CanvasHttpRequest };
+  return c.json({ response: await c.get("service").request({ name: args.name, version_id: args.version_id }, args.request) });
+});
 app.get("/api/source", async c => {
   const snapshot = await c.get("service").snapshot({ name: c.req.query("name"), version_id: c.req.query("version") });
   c.header("Content-Type", "text/plain; charset=utf-8");
@@ -63,7 +76,7 @@ app.get("/gallery/preview", async c => {
   // Enforce isolation even if somebody opens the preview URL directly instead
   // of through the gallery's sandboxed iframe. Preview state is page-local.
   c.header("Content-Security-Policy", "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'");
-  return c.html(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Canvas preview</title><style>body{margin:0;background:#181818;color:#f0f0f0;font-family:system-ui,sans-serif}#root{padding:24px}</style></head><body><div id="root"></div><script>window.__herdrCanvas=${JSON.stringify({ canvasId: payload.name, state: payload.state, theme: { kind: "dark" } }).replaceAll("<", "\\u003c")};</script><script type="module">${payload.js.replace(/<\/script/gi, "<\\/script")}</script></body></html>`);
+  return c.html(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Canvas preview</title><style>body{margin:0;background:#181818;color:#f0f0f0;font-family:system-ui,sans-serif}#root{padding:24px}</style></head><body><div id="root"></div><script>window.__herdrCanvas=${JSON.stringify({ canvasId: payload.name, state: payload.state, theme: { kind: "dark" }, ...(payload.server ? { serverVersionId: payload.versionId } : {}) }).replaceAll("<", "\\u003c")};${galleryBridge.replace(/<\/script/gi, "<\\/script")}</script><script type="module">${payload.js.replace(/<\/script/gi, "<\\/script")}</script></body></html>`);
 });
 app.get("/", c => c.env.ASSETS.fetch(new Request(new URL("/index.html", c.req.url))));
 app.get("/gallery", c => c.env.ASSETS.fetch(new Request(new URL("/index.html", c.req.url))));

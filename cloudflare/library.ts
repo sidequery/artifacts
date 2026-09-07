@@ -10,10 +10,11 @@ const encoder = new TextEncoder();
 export type CanvasEdit = { old_text: string; new_text: string };
 
 type DraftRow = {
-  workspace: string; name: string; source: string; source_hash: string;
+  workspace: string; name: string; source: string; server_source: string | null; source_hash: string;
   state: string; created_at: string; updated_at: string;
 };
 type DraftListRow = Pick<DraftRow, "workspace" | "name" | "source_hash" | "updated_at">;
+type StoredVersion = Version & { server_source: string | null };
 
 function bytes(value: string): number { return encoder.encode(value).byteLength; }
 
@@ -73,6 +74,7 @@ function jsonState(value: unknown): string {
 function now(): string { return new Date().toISOString(); }
 function uuid(): string { return crypto.randomUUID(); }
 function sourcePath(workspace: string, name: string): string { return `${workspace}/${name}${CANVAS_SUFFIX}`; }
+function serverSourcePath(workspace: string, name: string): string { return `${workspace}/${name}.canvas.server.ts`; }
 function rows<Row extends Record<string, SqlStorageValue>>(cursor: SqlStorageCursor<Row>): Row[] { return cursor.toArray(); }
 function first<Row extends Record<string, SqlStorageValue>>(cursor: SqlStorageCursor<Row>): Row | null { return rows(cursor)[0] ?? null; }
 export function sha256(value: string): string { return createHash("sha256").update(value).digest("hex"); }
@@ -88,7 +90,7 @@ export class CanvasLibrary extends DurableObject<unknown> {
     state.storage.transactionSync(() => {
       this.sql.exec("pragma foreign_keys = on");
       this.sql.exec(`create table if not exists drafts (
-        workspace text not null, name text not null, source text not null, source_hash text not null,
+        workspace text not null, name text not null, source text not null, server_source text, source_hash text not null,
         state text not null default '{}', created_at text not null, updated_at text not null,
         primary key (workspace, name)
       )`);
@@ -98,13 +100,19 @@ export class CanvasLibrary extends DurableObject<unknown> {
       )`);
       this.sql.exec(`create table if not exists versions (
         id text primary key, artifact_id text not null references artifacts(id), revision integer not null,
-        source text not null, source_hash text not null, runtime text not null, created_at text not null,
+        source text not null, server_source text, source_hash text not null, runtime text not null, created_at text not null,
         reason text not null, restored_from text references versions(id), unique(artifact_id, revision)
       )`);
       this.sql.exec(`create table if not exists serve_events (
         id text primary key, version_id text not null references versions(id), served_at text not null,
         pane_id text, session_id text, mode text not null, initial_state text not null, runtime text not null
       )`);
+      if (!rows(this.sql.exec<{ name: string }>("pragma table_info(drafts)")).some(column => column.name === "server_source")) {
+        this.sql.exec("alter table drafts add column server_source text");
+      }
+      if (!rows(this.sql.exec<{ name: string }>("pragma table_info(versions)")).some(column => column.name === "server_source")) {
+        this.sql.exec("alter table versions add column server_source text");
+      }
       this.sql.exec("create index if not exists serve_events_version on serve_events(version_id, served_at)");
     });
   }
@@ -121,23 +129,33 @@ export class CanvasLibrary extends DurableObject<unknown> {
     }));
   }
 
-  writeDraft(input: { workspace: string; name: string; source: string }) {
+  writeDraft(input: { workspace: string; name: string; source: string; server_source?: string | null }) {
     const workspace = workspaceName(input.workspace); const name = canvasName(input.name);
     const source = sourceText(input.source, true); const source_hash = sha256(source); const timestamp = now();
+    const requestedServer = input.server_source === undefined ? undefined
+      : input.server_source === null ? null : sourceText(input.server_source);
     return this.state.storage.transactionSync(() => {
-      this.sql.exec(`insert into drafts (workspace,name,source,source_hash,state,created_at,updated_at)
-        values (?, ?, ?, ?, '{}', ?, ?)
-        on conflict(workspace,name) do update set source=excluded.source, source_hash=excluded.source_hash, updated_at=excluded.updated_at`,
-      workspace, name, source, source_hash, timestamp, timestamp);
+      const current = first(this.sql.exec<DraftRow>("select * from drafts where workspace = ? and name = ?", workspace, name));
+      const server_source = requestedServer === undefined ? current?.server_source ?? null : requestedServer;
+      this.sql.exec(`insert into drafts (workspace,name,source,server_source,source_hash,state,created_at,updated_at)
+        values (?, ?, ?, ?, ?, '{}', ?, ?)
+        on conflict(workspace,name) do update set source=excluded.source, server_source=excluded.server_source,
+          source_hash=excluded.source_hash, updated_at=excluded.updated_at`,
+      workspace, name, source, server_source, source_hash, timestamp, timestamp);
       const saved = this.draft(workspace, name);
-      return { ok: true, path: sourcePath(workspace, name), workspace, name, source, source_hash, state: JSON.parse(saved.state) as Record<string, unknown> };
+      return { ok: true, path: sourcePath(workspace, name), workspace, name, source, server_source: saved.server_source,
+        source_hash, state: JSON.parse(saved.state) as Record<string, unknown> };
     });
   }
 
-  readRange(input: { workspace: string; name: string; start_line?: number; end_line?: number }) {
+  readRange(input: { workspace: string; name: string; part?: "client" | "server"; start_line?: number; end_line?: number }) {
     const workspace = workspaceName(input.workspace); const name = canvasName(input.name);
     const row = this.draft(workspace, name);
-    const lines = row.source === "" ? [""] : row.source.match(/[^\n]*\n|[^\n]+$/g) ?? [];
+    const part = input.part ?? "client";
+    if (part !== "client" && part !== "server") throw new Error("part must be client or server");
+    if (part === "server" && row.server_source === null) throw new Error("canvas has no server source");
+    const selected = part === "client" ? row.source : row.server_source!;
+    const lines = selected === "" ? [""] : selected.match(/[^\n]*\n|[^\n]+$/g) ?? [];
     const start = input.start_line === undefined ? 1 : input.start_line;
     const end = input.end_line === undefined ? start + 199 : input.end_line;
     if (!Number.isSafeInteger(start) || start < 1 || !Number.isSafeInteger(end) || end < start) {
@@ -146,37 +164,47 @@ export class CanvasLibrary extends DurableObject<unknown> {
     if (start > Math.max(1, lines.length)) throw new Error("start_line is past the end of the canvas");
     const actualEnd = Math.min(end, lines.length);
     return {
-      path: sourcePath(workspace, name), source_hash: row.source_hash, total_lines: lines.length,
+      path: part === "client" ? sourcePath(workspace, name) : serverSourcePath(workspace, name),
+      part, source_hash: part === "client" ? row.source_hash : sha256(selected),
+      total_lines: lines.length,
       start_line: start, end_line: actualEnd, source: lines.slice(start - 1, actualEnd).join(""),
       next_line: actualEnd < lines.length ? actualEnd + 1 : null,
     };
   }
 
-  editDraft(input: { workspace: string; name: string; edits: CanvasEdit[]; expected_hash?: string }) {
+  editDraft(input: { workspace: string; name: string; part?: "client" | "server"; edits: CanvasEdit[]; expected_hash?: string }) {
     const workspace = workspaceName(input.workspace); const name = canvasName(input.name);
+    const part = input.part ?? "client";
+    if (part !== "client" && part !== "server") throw new Error("part must be client or server");
     if (!Array.isArray(input.edits) || input.edits.length === 0) throw new Error("edits must be a non-empty array");
     if (input.expected_hash !== undefined && (typeof input.expected_hash !== "string" || !/^[a-f0-9]{64}$/.test(input.expected_hash))) {
       throw new Error("expected_hash must be a SHA-256 hex string");
     }
     return this.state.storage.transactionSync(() => {
       const original = this.draft(workspace, name);
-      if (input.expected_hash !== undefined && original.source_hash !== input.expected_hash) {
+      if (part === "server" && original.server_source === null) throw new Error("canvas has no server source");
+      const originalSelected = part === "client" ? original.source : original.server_source!;
+      const originalHash = part === "client" ? original.source_hash : sha256(originalSelected);
+      if (input.expected_hash !== undefined && originalHash !== input.expected_hash) {
         throw new Error("canvas changed since read; read it again before editing");
       }
-      let source = original.source;
+      let selected = originalSelected;
       for (const [index, edit] of input.edits.entries()) {
         if (!edit || typeof edit.old_text !== "string" || edit.old_text.length === 0 || typeof edit.new_text !== "string") {
           throw new Error(`edit ${index + 1}: old_text must be non-empty and new_text must be a string`);
         }
-        const at = source.indexOf(edit.old_text);
+        const at = selected.indexOf(edit.old_text);
         if (at === -1) throw new Error(`edit ${index + 1}: old_text not found; no changes written`);
-        if (source.indexOf(edit.old_text, at + 1) !== -1) throw new Error(`edit ${index + 1}: old_text is ambiguous; include more context; no changes written`);
-        source = source.slice(0, at) + edit.new_text + source.slice(at + edit.old_text.length);
+        if (selected.indexOf(edit.old_text, at + 1) !== -1) throw new Error(`edit ${index + 1}: old_text is ambiguous; include more context; no changes written`);
+        selected = selected.slice(0, at) + edit.new_text + selected.slice(at + edit.old_text.length);
       }
-      sourceText(source);
-      const changed = source !== original.source; const source_hash = sha256(source);
-      if (changed) this.sql.exec("update drafts set source = ?, source_hash = ?, updated_at = ? where workspace = ? and name = ?", source, source_hash, now(), workspace, name);
-      return { ok: true, applied: true, changed, path: sourcePath(workspace, name), workspace, name, source,
+      sourceText(selected);
+      const changed = selected !== originalSelected; const source_hash = sha256(selected);
+      if (changed && part === "client") this.sql.exec("update drafts set source = ?, source_hash = ?, updated_at = ? where workspace = ? and name = ?", selected, source_hash, now(), workspace, name);
+      if (changed && part === "server") this.sql.exec("update drafts set server_source = ?, updated_at = ? where workspace = ? and name = ?", selected, now(), workspace, name);
+      return { ok: true, applied: true, changed, path: part === "client" ? sourcePath(workspace, name) : serverSourcePath(workspace, name),
+        workspace, name, source: part === "client" ? selected : original.source,
+        server_source: part === "server" ? selected : original.server_source, source_part: part,
         state: JSON.parse(original.state) as Record<string, unknown>, edits_applied: input.edits.length, source_hash };
     });
   }
@@ -199,27 +227,28 @@ export class CanvasLibrary extends DurableObject<unknown> {
   }
 
   recordServe(input: {
-    workspace: string; name: string; source: string; runtime: string;
+    workspace: string; name: string; source: string; server_source?: string | null; runtime: string;
     initial_state: Record<string, unknown>; mode: "live" | "replay" | "preview";
     pane_id?: string; session_id?: string; version_id?: string;
   }) {
     const workspace = workspaceName(input.workspace); const name = canvasName(input.name);
     const source = sourceText(input.source); const runtime = runtimeName(input.runtime);
+    const server_source = input.server_source == null ? null : sourceText(input.server_source);
     const initial_state = jsonState(input.initial_state);
     if (!(["live", "replay", "preview"] as const).includes(input.mode)) throw new Error("invalid serve mode");
     for (const [label, value] of [["pane_id", input.pane_id], ["session_id", input.session_id]] as const) {
       if (value !== undefined && (typeof value !== "string" || bytes(value) > 4096)) throw new Error(`${label} must be a string no longer than 4 KiB`);
     }
     return this.state.storage.transactionSync(() => {
-      let version: Version;
+      let version: StoredVersion;
       if (input.version_id !== undefined) {
         const archived = this.findVersion(workspace, input.version_id);
-        if (!archived || archived.name !== name || archived.source !== source) {
+        if (!archived || archived.name !== name || archived.source !== source || archived.server_source !== server_source) {
           throw new Error("archived serve snapshot does not match version in this workspace");
         }
         version = archived;
       } else {
-        version = this.capture(workspace, name, source, runtime, "served", null, false);
+        version = this.capture(workspace, name, source, server_source, runtime, "served", null, false);
       }
       const event: ServeEvent = {
         id: uuid(), version_id: version.id, served_at: now(), pane_id: input.pane_id ?? null,
@@ -264,16 +293,18 @@ export class CanvasLibrary extends DurableObject<unknown> {
       const target = this.findVersion(workspace, input.id);
       if (!target) throw new Error("version not found in this workspace");
       const current = first(this.sql.exec<DraftRow>("select * from drafts where workspace = ? and name = ?", workspace, target.name));
-      if (current) this.capture(workspace, target.name, current.source, runtime, "before-restore", null, false);
+      if (current) this.capture(workspace, target.name, current.source, current.server_source, runtime, "before-restore", null, false);
       const timestamp = now();
-      this.sql.exec(`insert into drafts (workspace,name,source,source_hash,state,created_at,updated_at)
-        values (?, ?, ?, ?, '{}', ?, ?)
-        on conflict(workspace,name) do update set source=excluded.source, source_hash=excluded.source_hash, updated_at=excluded.updated_at`,
-      workspace, target.name, target.source, target.source_hash, timestamp, timestamp);
-      const revision = this.capture(workspace, target.name, target.source, runtime, "restore", target.id, true);
+      this.sql.exec(`insert into drafts (workspace,name,source,server_source,source_hash,state,created_at,updated_at)
+        values (?, ?, ?, ?, ?, '{}', ?, ?)
+        on conflict(workspace,name) do update set source=excluded.source, server_source=excluded.server_source,
+          source_hash=excluded.source_hash, updated_at=excluded.updated_at`,
+      workspace, target.name, target.source, target.server_source, target.source_hash, timestamp, timestamp);
+      const revision = this.capture(workspace, target.name, target.source, target.server_source, runtime, "restore", target.id, true);
       const restored = this.draft(workspace, target.name);
       return { ok: true, restored: true, path: sourcePath(workspace, target.name), workspace, name: target.name,
-        source: target.source, source_hash: target.source_hash, state: JSON.parse(restored.state) as Record<string, unknown>, versionId: revision.id, revision: revision.revision };
+        source: target.source, server_source: target.server_source, source_hash: target.source_hash,
+        state: JSON.parse(restored.state) as Record<string, unknown>, versionId: revision.id, revision: revision.revision };
     });
   }
 
@@ -283,7 +314,8 @@ export class CanvasLibrary extends DurableObject<unknown> {
     if (input.name) {
       if (input.event_id !== undefined) throw new Error("event_id requires version_id");
       const name = canvasName(input.name); const draft = this.draft(workspace, name);
-      return { workspace, name, path: sourcePath(workspace, name), source: draft.source, state: JSON.parse(draft.state) as Record<string, unknown>, version_id: null, event_id: null };
+      return { workspace, name, path: sourcePath(workspace, name), source: draft.source, server_source: draft.server_source,
+        state: JSON.parse(draft.state) as Record<string, unknown>, version_id: null, event_id: null };
     }
     const version = this.findVersion(workspace, input.version_id!);
     if (!version) throw new Error("version not found in this workspace");
@@ -291,7 +323,8 @@ export class CanvasLibrary extends DurableObject<unknown> {
       ? first(this.sql.exec<ServeEvent>("select * from serve_events where id = ? and version_id = ?", input.event_id, version.id))
       : first(this.sql.exec<ServeEvent>("select * from serve_events where version_id = ? order by (mode = 'live') desc, rowid desc limit 1", version.id));
     if (input.event_id && !event) throw new Error("serve event not found for version");
-    return { workspace, name: version.name, path: version.source_path, source: version.source, state: event ? JSON.parse(event.initial_state) as Record<string, unknown> : {}, version_id: version.id, event_id: event?.id ?? null };
+    return { workspace, name: version.name, path: version.source_path, source: version.source, server_source: version.server_source,
+      state: event ? JSON.parse(event.initial_state) as Record<string, unknown> : {}, version_id: version.id, event_id: event?.id ?? null };
   }
 
   private draft(workspace: string, name: string): DraftRow {
@@ -300,23 +333,24 @@ export class CanvasLibrary extends DurableObject<unknown> {
     return result;
   }
 
-  private findVersion(workspace: string, id: unknown): Version | null {
+  private findVersion(workspace: string, id: unknown): StoredVersion | null {
     if (typeof id !== "string" || !id) return null;
-    return first(this.sql.exec<Version>(`select v.*, a.workspace, a.name, a.source_path from versions v
+    return first(this.sql.exec<StoredVersion>(`select v.*, a.workspace, a.name, a.source_path from versions v
       join artifacts a on a.id = v.artifact_id where v.id = ? and a.workspace = ?`, id, workspace));
   }
 
-  private capture(workspace: string, name: string, source: string, runtime: string, reason: string, restoredFrom: string | null, force: boolean): Version {
+  private capture(workspace: string, name: string, source: string, server_source: string | null, runtime: string, reason: string, restoredFrom: string | null, force: boolean): StoredVersion {
     let artifact = first(this.sql.exec<{ id: string }>("select id from artifacts where workspace = ? and name = ?", workspace, name));
     if (!artifact) {
       artifact = { id: uuid() };
       this.sql.exec("insert into artifacts values (?, ?, ?, ?, ?)", artifact.id, workspace, name, sourcePath(workspace, name), now());
     }
     const source_hash = sha256(source);
-    const latest = first(this.sql.exec<{ id: string; revision: number; source: string; source_hash: string }>("select id,revision,source,source_hash from versions where artifact_id = ? order by revision desc limit 1", artifact.id));
-    if (!force && latest && latest.source_hash === source_hash && latest.source === source) return this.findVersion(workspace, latest.id)!;
+    const latest = first(this.sql.exec<{ id: string; revision: number; source: string; server_source: string | null; source_hash: string }>("select id,revision,source,server_source,source_hash from versions where artifact_id = ? order by revision desc limit 1", artifact.id));
+    if (!force && latest && latest.source_hash === source_hash && latest.source === source && latest.server_source === server_source) return this.findVersion(workspace, latest.id)!;
     const id = uuid(); const created_at = now(); const revision = (latest?.revision ?? 0) + 1;
-    this.sql.exec("insert into versions values (?, ?, ?, ?, ?, ?, ?, ?, ?)", id, artifact.id, revision, source, source_hash, runtime, created_at, reason, restoredFrom);
+    this.sql.exec(`insert into versions (id,artifact_id,revision,source,server_source,source_hash,runtime,created_at,reason,restored_from)
+      values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, artifact.id, revision, source, server_source, source_hash, runtime, created_at, reason, restoredFrom);
     return this.findVersion(workspace, id)!;
   }
 }
