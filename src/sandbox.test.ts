@@ -41,3 +41,10 @@ export default function App() { return <H1>Hi</H1>; }
 test("bad types are not a sandbox violation", () => {
   expect(scanCanvasSource(BAD_TYPE_CANVAS)).toEqual([]);
 });
+
+test("repeated scans keep rejecting dynamic imports and require calls", () => {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    expect(scanCanvasSource('export default function Canvas() { return import("herdr/canvas"); }').some(item => item.message.includes("dynamic import"))).toBe(true);
+    expect(scanCanvasSource('export default function Canvas() { return require("herdr/canvas"); }').some(item => item.message.includes("require()"))).toBe(true);
+  }
+});

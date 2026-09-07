@@ -8,8 +8,8 @@ const ALLOWED_MODULES = new Set(["herdr/canvas", "cursor/canvas"]);
 
 const IMPORT_FROM_RE = /(?:^|\n)\s*(?:import|export)\s+(?:type\s+)?[\s\S]*?\sfrom\s+["']([^"']+)["']/g;
 const SIDE_EFFECT_IMPORT_RE = /(?:^|\n)\s*import\s+["']([^"']+)["']/g;
-const DYNAMIC_IMPORT_RE = /\bimport\s*\(/g;
-const REQUIRE_RE = /\brequire\s*\(/g;
+const DYNAMIC_IMPORT_RE = /\bimport\s*\(/;
+const REQUIRE_RE = /\brequire\s*\(/;
 
 const FORBIDDEN_APIS: Array<{ kind: SandboxViolation["kind"]; pattern: RegExp; message: string }> = [
   { kind: "api", pattern: /\bfetch\s*\(/, message: "fetch() is not allowed in canvas files; embed data inline" },

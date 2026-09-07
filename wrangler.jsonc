@@ -1,0 +1,51 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "canvas",
+  "main": "cloudflare/worker.ts",
+  "compatibility_date": "2026-09-06",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "workers_dev": true,
+  "dev": {
+    "ip": "127.0.0.1",
+    "port": 4785
+  },
+  "build": {
+    "command": "bun run scripts/prepare-cloudflare.ts",
+    "watch_dir": [
+      "src/sdk",
+      "src/runtime",
+      "src/gallery"
+    ]
+  },
+  "assets": {
+    "directory": "./dist/cloudflare/assets",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "LIBRARIES",
+        "class_name": "CanvasLibrary"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "CanvasLibrary"
+      ]
+    }
+  ],
+  "vars": {
+    "ENVIRONMENT": "production",
+    "ACCESS_TEAM_DOMAIN": "",
+    "ACCESS_AUD": ""
+  },
+  "limits": {
+    "cpu_ms": 30000
+  }
+}

@@ -17,19 +17,33 @@
     "test": "bun test src --timeout 30000",
     "test:e2e": "bun test e2e/herdr.e2e.test.ts",
     "test:mcp-ui": "bun test e2e/mcp-app.test.ts --timeout 30000",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "dev:cloudflare": "wrangler dev --local --var ENVIRONMENT:local",
+    "build:cloudflare": "wrangler deploy --dry-run --outdir dist/worker-app",
+    "build:cloudflare-compiler": "wrangler deploy --config cloudflare/wrangler.compiler.jsonc --dry-run --outdir ../dist/worker",
+    "typecheck:cloudflare": "tsc -p cloudflare/tsconfig.json --noEmit",
+    "test:cloudflare": "bun run build:cloudflare-compiler && bun run build:cloudflare && bun test cloudflare --timeout 60000",
+    "deploy:cloudflare": "wrangler deploy",
+    "seed:cloudflare": "bun run scripts/seed-cloudflare.ts"
   },
   "dependencies": {
+    "@cloudflare/worker-bundler": "0.2.3",
     "@modelcontextprotocol/ext-apps": "^1.7.5",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
+    "ajv": "8.20.0",
+    "hono": "4.13.7",
+    "jose": "6.2.12",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "typescript": "5.9.3"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "5.20260907.1",
     "@types/bun": "^1.3.14",
-    "playwright": "^1.63.0"
+    "miniflare": "5.20260903.0-alpha",
+    "playwright": "^1.63.0",
+    "wrangler": "4.129.0"
   }
 }

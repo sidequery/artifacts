@@ -73,15 +73,23 @@ function isGalleryResponse(value: unknown): value is GalleryData {
   return typeof candidate.workspace === "string" && Array.isArray(candidate.artifacts);
 }
 
-function galleryUrl(scope: Scope): string {
+function galleryUrl(scope: Scope, offset = 0): string {
   const params = new URLSearchParams();
+  const library = new URLSearchParams(window.location.search).get("library");
+  if (library) params.set("library", library);
+  const workspace = new URLSearchParams(window.location.search).get("workspace");
+  if (workspace) params.set("workspace", workspace);
   if (scope === "all") params.set("all", "1");
+  if (offset) params.set("offset", String(offset));
   const query = params.toString();
   return `/api/gallery${query ? `?${query}` : ""}`;
 }
 
 function artifactUrl(path: "/api/source" | "/gallery/preview", artifact: GalleryArtifact, version: string, download = false): string {
   const params = new URLSearchParams();
+  const library = new URLSearchParams(window.location.search).get("library");
+  if (library) params.set("library", library);
+  params.set("workspace", artifact.workspace);
   if (version === WORKING_VERSION) params.set("name", artifact.name);
   else params.set("version", version);
   if (download) params.set("download", "1");
@@ -125,13 +133,27 @@ function App() {
     setGalleryError("");
 
     try {
-      const response = await fetch(galleryUrl(scope), {
-        signal: controller.signal,
-        headers: { Accept: "application/json" },
-      });
-      if (!response.ok) throw new Error(`Gallery request failed (${response.status})`);
-      const payload: unknown = await response.json();
-      if (!isGalleryResponse(payload)) throw new Error("The gallery returned an unexpected response.");
+      let offset = 0;
+      let payload: GalleryData;
+      const artifacts = new Map<string, GalleryArtifact>();
+      do {
+        const response = await fetch(galleryUrl(scope, offset), {
+          signal: controller.signal,
+          headers: { Accept: "application/json" },
+        });
+        if (!response.ok) throw new Error(`Gallery request failed (${response.status})`);
+        const page: unknown = await response.json();
+        if (!isGalleryResponse(page)) throw new Error("The gallery returned an unexpected response.");
+        for (const artifact of page.artifacts) {
+          const previous = artifacts.get(artifact.key);
+          const versions = new Map([...(previous?.versions ?? []), ...artifact.versions].map(version => [version.id, version]));
+          artifacts.set(artifact.key, { ...artifact, working: artifact.working || !!previous?.working, versions: [...versions.values()] });
+        }
+        payload = { ...page, artifacts: [...artifacts.values()].sort((a, b) => a.name.localeCompare(b.name) || a.workspace.localeCompare(b.workspace)) };
+        if (page.nextOffset === undefined || page.nextOffset === null) break;
+        if (!Number.isSafeInteger(page.nextOffset) || page.nextOffset <= offset) throw new Error("Invalid gallery pagination.");
+        offset = page.nextOffset;
+      } while (!controller.signal.aborted);
       if (request !== galleryRequest.current) return;
 
       setGallery(payload);
@@ -238,6 +260,16 @@ function App() {
       <style>{styles}</style>
       <main className="gallery-app">
         <div className="toolbar" aria-label="Canvas controls">
+          {gallery?.libraryScope ? (
+            <select aria-label="Library" value={gallery.libraryScope} onChange={event => {
+              const url = new URL(window.location.href);
+              url.searchParams.set("library", event.target.value);
+              window.location.assign(url.href);
+            }}>
+              <option value="private">My library</option>
+              <option value="team">Team library</option>
+            </select>
+          ) : null}
           <input
             className="search-input"
             type="search"

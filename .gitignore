@@ -18,4 +18,8 @@ node_modules/
 /e2e/*.png
 /coverage/
 /dist/
+.wrangler/
+.dev.vars
+.dev.vars.*
+.celld/
 *.tgz

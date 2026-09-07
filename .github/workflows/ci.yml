@@ -22,3 +22,5 @@ jobs:
       - run: bun run test
       - run: bun x playwright install --with-deps chromium
       - run: bun run test:mcp-ui
+      - run: bun run test:cloudflare
+      - run: bun run typecheck:cloudflare
