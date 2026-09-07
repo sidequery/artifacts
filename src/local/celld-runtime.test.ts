@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
-import { canvasDataRoot, celldArtifact, ensureCelldRuntime } from "./celldRuntime";
+import { canvasDataRoot, celldArtifact, ensureCelldRuntime } from "./celld-runtime";
 
 const directories: string[] = [];
 afterEach(async () => { for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true }); });

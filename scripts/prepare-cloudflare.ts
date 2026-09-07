@@ -1,6 +1,6 @@
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
-import { canvasAppHtml } from "../src/mcpApp";
+import { canvasAppHtml } from "../src/mcp/app";
 import { galleryBundle, galleryHtml } from "../src/gallery/server";
 import { authBundle, authPageHtml } from "../src/auth/server";
 import Ajv from "ajv";

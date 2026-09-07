@@ -1,5 +1,5 @@
 import { App, type McpUiHostContext } from "@modelcontextprotocol/ext-apps";
-import type { CanvasAppPayload } from "../mcpApp";
+import type { CanvasAppPayload } from "../mcp/app";
 import type { CanvasAction, HostBridge } from "../sdk/hooks";
 import type { CanvasHttpRequest, CanvasHttpResponse } from "../sdk/server";
 

@@ -4,9 +4,9 @@ import { spawn as spawnProcess } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { CLI_ENTRY } from "./paths";
-import { createCanvasServer, type CanvasServer } from "./serve";
-import { historyPath } from "./history";
+import { CLI_ENTRY } from "../paths";
+import { createCanvasServer, type CanvasServer } from "../serve";
+import { historyPath } from "../history";
 
 export type DaemonState = {
   pid: number;

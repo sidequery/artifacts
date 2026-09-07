@@ -1,13 +1,13 @@
-import { CanvasService, type CanvasEdit, type ReadOptions } from "./service";
-import { canvasIdFromFile } from "./canvasFile";
-import { canvasGuideResult } from "./canvasGuide";
-import type { JsonRpcRequest, JsonRpcResponse } from "./mcpProtocol";
-import { CANVAS_APP_URI, CANVAS_RESOURCE, canvasAppHtml, canvasAppResult } from "./mcpApp";
+import { CanvasService, type CanvasEdit, type ReadOptions } from "../service";
+import { canvasIdFromFile } from "../canvasFile";
+import { canvasGuideResult } from "./guide";
+import type { JsonRpcRequest, JsonRpcResponse } from "./protocol";
+import { CANVAS_APP_URI, CANVAS_RESOURCE, canvasAppHtml, canvasAppResult } from "./app";
 
 const PROTOCOL_VERSION = "2025-06-18";
 
-export { MCP_TOOLS } from "./mcpTools";
-import { MCP_TOOLS } from "./mcpTools";
+export { MCP_TOOLS } from "./tools";
+import { MCP_TOOLS } from "./tools";
 
 export async function handleMcpRequest(
   request: JsonRpcRequest,

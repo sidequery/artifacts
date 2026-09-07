@@ -21,4 +21,4 @@ command = ["bun", "run", "src/cli.ts", "list"]
 id = "open"
 title = "Open canvas"
 contexts = ["workspace"]
-command = ["bun", "run", "src/actions/open.ts"]
+command = ["bun", "run", "src/cli.ts", "open"]

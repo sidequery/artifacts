@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
 import { join } from "node:path";
 
-import { daemonStatePath, ensureCanvasServer, writeDaemonState } from "./daemon";
-import { tempDir } from "./test/fixtures";
-import { historyPath } from "./history";
+import { daemonStatePath, ensureCanvasServer, writeDaemonState } from "./preview-daemon";
+import { tempDir } from "../test/fixtures";
+import { historyPath } from "../history";
 
 test("ensureCanvasServer reuses a healthy daemon", async () => {
   const dir = tempDir();

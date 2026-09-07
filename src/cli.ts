@@ -5,11 +5,11 @@ import { join, resolve } from "node:path";
 
 import { flagBoolean, flagString, parseArgs, type ParsedArgs } from "./args";
 import { canvasesDirFrom } from "./canvasFile";
-import { clearServerReady, ServerDaemonManager, writeServerReady } from "./celldDaemon";
-import { runCelldServer } from "./celldServer";
-import { writeDaemonState, daemonStatePath } from "./daemon";
+import { clearServerReady, ServerDaemonManager, writeServerReady } from "./local/server-daemon";
+import { runCelldServer } from "./local/server";
+import { writeDaemonState, daemonStatePath } from "./local/preview-daemon";
 import { createHerdrClient, type PanePlacement } from "./herdr";
-import { runMcpServer } from "./mcpServer";
+import { runMcpServer } from "./mcp/stdio";
 import { createCanvasServer } from "./serve";
 import { CanvasService } from "./service";
 import { historyPath } from "./history";
@@ -200,7 +200,7 @@ async function main(): Promise<void> {
   }
 
   if (args.command === "open") {
-    const name = args.positionals[0];
+    const name = args.positionals[0] ?? (args.flags.version === undefined ? process.env.HERDR_CANVAS_NAME : undefined);
     const versionId = flagString(args.flags, "version");
     if (Boolean(name) === Boolean(versionId)) throw new Error("provide a canvas name or --version ID, but not both");
     const result = await service.open(name ?? "", {

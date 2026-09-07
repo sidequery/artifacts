@@ -362,6 +362,9 @@ or delete action; restoring working source remains an explicit CLI/MCP operation
 
 ## Development
 
+See the [source map](docs/architecture.md) for runtime boundaries, MCP modules,
+hosted services, and Herdr action entrypoints.
+
 ```bash
 bun run test
 bun run test:e2e

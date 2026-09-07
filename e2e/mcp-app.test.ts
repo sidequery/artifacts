@@ -3,7 +3,7 @@ import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser, type FrameLocator, type Page } from "playwright";
 
-import { canvasAppHtml, canvasAppResult, type CanvasAppPayload } from "../src/mcpApp";
+import { canvasAppHtml, canvasAppResult, type CanvasAppPayload } from "../src/mcp/app";
 import { CanvasService } from "../src/service";
 import { tempDir, writeCanvas } from "../src/test/fixtures";
 

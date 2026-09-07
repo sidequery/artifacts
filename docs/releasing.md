@@ -59,7 +59,7 @@ The user enables it explicitly through the [daemon commands](daemon.md).
 
 ## celld upgrades
 
-The managed runtime is pinned in `src/celldRuntime.ts`. For an upgrade, obtain the
+The managed runtime is pinned in `src/local/celld-runtime.ts`. For an upgrade, obtain the
 archive SHA-256 values from the upstream release, verify each platform archive,
 and compute the decompressed executable hashes before updating the manifest.
 Do not select `latest` dynamically. The cache is keyed by celld version and target;

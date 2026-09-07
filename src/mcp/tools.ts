@@ -1,4 +1,4 @@
-import { CANVAS_APP_META } from "./mcpAppContract";
+import { CANVAS_APP_META } from "./app-contract";
 
 export const MCP_TOOLS = [
   {
