@@ -1,0 +1,21 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "canvas-compiler-dev",
+  "main": "dev.ts",
+  "compatibility_date": "2026-09-06",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "workers_dev": false,
+  "dev": {
+    "ip": "127.0.0.1",
+    "port": 4785
+  },
+  "build": {
+    "command": "bun run scripts/prepare-cloudflare.ts",
+    "watch_dir": [
+      "../src/sdk",
+      "../src/runtime"
+    ]
+  }
+}

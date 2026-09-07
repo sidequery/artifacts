@@ -6,9 +6,9 @@ Local, source-backed React artifacts for agents. Browse them in a web gallery,
 read and edit them through CLI or MCP, and retain raw-source version history.
 Herdr is an optional integration for opening artifacts beside a terminal agent.
 
-This version runs on Bun with local files and SQLite. MCP Apps hosts render the
+The local runtime uses Bun with local files and SQLite. MCP Apps hosts render the
 interactive canvas directly inside chat when an agent creates or shows it.
-Cloudflare runtime support remains deferred. The repository is named `canvas`; an existing
+An experimental Cloudflare runtime provides an HTTP MCP server and gallery in your own or a shared account; see [Cloudflare setup](docs/cloudflare.md). The repository is named `canvas`; an existing
 checkout can remain in a folder named `herdr-canvas`.
 
 ## Requirements
