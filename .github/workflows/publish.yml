@@ -34,9 +34,9 @@ jobs:
           bun -e 'const p = await Bun.file("package.json").json(); if (p.name !== "@sidequery/canvas" || p.version !== process.env.RELEASE_VERSION) throw new Error("Release input must match @sidequery/canvas package.json version");'
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
-      - run: bun run typecheck:cloudflare
       - run: bun run test
       - run: bun run build:package
+      - run: bun run typecheck:cloudflare
       - name: Pack once
         run: bun pm pack --ignore-scripts --filename "$RUNNER_TEMP/canvas.tgz"
       - name: Test release archive including native server persistence
