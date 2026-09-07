@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from "react";
 
+import { Link as RouterLink, type LinkProps } from "react-router";
 import { useHostTheme } from "./hooks";
 import { canvasTypography, toneColor, type Tone } from "./tokens";
 
@@ -224,21 +225,11 @@ export function Code({ children, style }: { children?: ReactNode; style?: CSSPro
   );
 }
 
-export function Link({
-  children,
-  href,
-  style,
-}: {
-  children?: ReactNode;
-  href: string;
-  style?: CSSProperties;
-}): JSX.Element {
+export function Link(props: LinkProps | { children?: ReactNode; href: string; style?: CSSProperties }): JSX.Element {
   const theme = useHostTheme();
-  return (
-    <a href={href} style={mergeStyle({ color: theme.text.link, textDecoration: "underline" }, style)}>
-      {children}
-    </a>
-  );
+  const style = mergeStyle({ color: theme.text.link, textDecoration: "underline" }, props.style);
+  if ("to" in props) return <RouterLink {...props} style={style} />;
+  return <a href={props.href} style={style}>{props.children}</a>;
 }
 
 export type CardProps = {

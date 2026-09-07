@@ -25,8 +25,8 @@ async function collect(directory: string, accept: (path: string) => boolean) {
 await collect("src/sdk", path => /\.(ts|tsx)$/.test(path) && !path.endsWith(".test.ts"));
 files["src/httpTypes.ts"] = await readFile(join(root, "src/httpTypes.ts"), "utf8");
 files["src/plugins/types.ts"] = await readFile(join(root, "src/plugins/types.ts"), "utf8");
-for (const name of ["react", "react-dom", "scheduler", "@types/react", "@types/react-dom", "csstype", "@types/node", "undici-types"]) {
-  await collect(`node_modules/${name}`, path => path.endsWith(".d.ts") || path.endsWith("/package.json"));
+for (const name of ["react", "react-dom", "scheduler", "@types/react", "@types/react-dom", "csstype", "@types/node", "undici-types", "react-router", "cookie", "set-cookie-parser"]) {
+  await collect(`node_modules/${name}`, path => /\.d\.[cm]?ts$/.test(path) || path.endsWith("/package.json"));
 }
 await collect("node_modules/typescript/lib", path => /\/lib\.[^/]+\.d\.ts$/.test(path));
 files["node_modules/@cloudflare/workers-types/index.d.ts"] = await readFile(join(root, "node_modules/@cloudflare/workers-types/index.d.ts"), "utf8");
@@ -79,3 +79,7 @@ for (const tool of CLOUD_MCP_TOOLS) ajv.addSchema(tool.inputSchema, tool.name);
 await writeFile(join(dirname(output), "tool-validators.js"), standaloneCode(ajv, Object.fromEntries(CLOUD_MCP_TOOLS.map(tool => [tool.name, tool.name]))));
 await writeFile(join(dirname(output), "tool-validators.d.ts"), 'import type { ValidateFunction } from "ajv";\n' + CLOUD_MCP_TOOLS.map(tool => `export const ${tool.name}: ValidateFunction;`).join("\n"));
 console.log(`Prepared ${Object.keys(files).length} compiler files: ${relative(root, output)}`);
+
+const navigation = await Bun.build({ entrypoints: [join(root, "src/runtime/navigation-host.ts")], target: "browser", format: "iife", minify: true });
+if (!navigation.success) throw new Error(navigation.logs.join("\n"));
+await writeFile(join(dirname(output), "navigation-host.json"), JSON.stringify(await navigation.outputs[0]!.text()));

@@ -12,6 +12,7 @@ export type CanvasAction =
 export type SetCanvasState<T> = Dispatch<SetStateAction<T>>;
 
 export type HostBridge = {
+  route?: import("./routing").CanvasRoute;
   canvasId?: string;
   state?: Record<string, unknown>;
   theme?: { kind?: string };

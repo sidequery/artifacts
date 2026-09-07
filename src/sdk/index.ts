@@ -63,3 +63,5 @@ export {
   type TextInputProps,
   type ToggleProps,
 } from "./forms";
+
+export { Routes, Route, Outlet, Navigate, NavLink, useNavigate, useParams, useLocation, useSearchParams, useMatch, useResolvedPath, type RouteObject, type NavigateOptions, type To } from "./routing";

@@ -36,7 +36,9 @@ export function canvasAliasPlugin(canvasPath: string, source?: string, plugins: 
       build.onResolve({ filter: /^herdr-canvas-entry$/ }, () => ({
         path: absCanvas,
       }));
-      build.onResolve({ filter: /^(react|react-dom)(\/.*)?$/ }, (args) => ({
+      // Resolve shared runtimes to one package entry. Bun plugin builds can drop
+      // React Router ESM re-export chunks; the package CJS entry preserves them.
+      build.onResolve({ filter: /^(react|react-dom|react-router)(\/.*)?$/ }, (args) => ({
         path: requireFromPlugin.resolve(args.path),
       }));
     },

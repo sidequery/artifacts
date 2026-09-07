@@ -1,6 +1,7 @@
 import { dirname, join, relative, resolve } from "node:path";
 import ts from "typescript";
 import { build } from "esbuild";
+import * as ReactRouter from "react-router";
 import * as React from "react";
 import * as ReactDOM from "react-dom";
 import * as ReactDOMClient from "react-dom/client";
@@ -10,7 +11,7 @@ import type { CanvasPlugin } from "../src/plugins/config";
 import type { BrowserPlugins } from "../src/plugins/types";
 import { PLUGIN_ROOT, SDK_ENTRY } from "../src/paths";
 
-const shared = ["react", "react-dom", "react-dom/client", "react/jsx-runtime", "react/jsx-dev-runtime", "sidequery/canvas", "herdr/canvas", "cursor/canvas", "@sidequery/canvas"];
+const shared = ["react-router", "react", "react-dom", "react-dom/client", "react/jsx-runtime", "react/jsx-dev-runtime", "sidequery/canvas", "herdr/canvas", "cursor/canvas", "@sidequery/canvas"];
 
 /** Only browser entries enter this graph. Configuration and handlers are never bundled. */
 export async function prepareBrowserPlugins(plugins: readonly CanvasPlugin[], configDir: string): Promise<BrowserPlugins> {
@@ -30,7 +31,7 @@ export async function prepareBrowserPlugins(plugins: readonly CanvasPlugin[], co
     collectTypes(plugin, resolve(configDir), result);
   }
   for (const [specifier, namespace, exports] of [
-    ["react", "react", React], ["react-dom", "reactDom", ReactDOM],
+    ["react-router", "reactRouter", ReactRouter], ["react", "react", React], ["react-dom", "reactDom", ReactDOM],
     ["react-dom/client", "reactDomClient", ReactDOMClient],
     ["react/jsx-runtime", "jsx", JSX], ["react/jsx-dev-runtime", "jsxDev", JSXDev],
   ] as const) {
