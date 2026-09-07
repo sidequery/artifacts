@@ -70,7 +70,7 @@ test("CLI and MCP read/edit share range, batch, stale-source and diagnostic cont
   const mcpDir = tempDir();
   writeCanvas(cliDir, "overview", VALID_CANVAS);
   writeCanvas(mcpDir, "overview", VALID_CANVAS);
-  const service = new CanvasService({ canvasesDir: mcpDir });
+  const service = new CanvasService({ canvasesDir: mcpDir, env: { HERDR_CANVAS_HISTORY_DB: join(mcpDir, "history.sqlite") } });
   const call = async (name: string, args: Record<string, unknown>) => {
     const response = await handleMcpRequest({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: { name: "overview", ...args } } }, service);
     return response!;

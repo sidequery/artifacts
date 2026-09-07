@@ -8,11 +8,18 @@ import { join } from "node:path";
 import { readFileSync } from "node:fs";
 import { CanvasHistory } from "./history";
 
-test("parseMessages reads Content-Length framed JSON-RPC", () => {
+test("encodeMessage writes standard newline-delimited MCP JSON-RPC", () => {
   const encoded = encodeMessage({ jsonrpc: "2.0", id: 1, method: "ping" });
+  expect(encoded.toString()).toBe('{"jsonrpc":"2.0","id":1,"method":"ping"}\n');
   const { messages, rest } = parseMessages(encoded);
   expect(rest.length).toBe(0);
   expect(messages).toEqual([{ jsonrpc: "2.0", id: 1, method: "ping" }]);
+});
+
+test("parseMessages retains legacy Content-Length input compatibility", () => {
+  const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" });
+  const framed = Buffer.from(`Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);
+  expect(parseMessages(framed).messages).toEqual([{ jsonrpc: "2.0", id: 1, method: "ping" }]);
 });
 
 test("parseMessages reads newline-delimited JSON-RPC", () => {
@@ -40,7 +47,8 @@ test("MCP initialize and tools/list", async () => {
 test(
   "MCP canvas_write returns typecheck diagnostics",
   async () => {
-    const service = new CanvasService({ canvasesDir: tempDir() });
+    const dir = tempDir();
+    const service = new CanvasService({ canvasesDir: dir, env: { HERDR_CANVAS_HISTORY_DB: join(dir, "history.sqlite") } });
     const response = await handleMcpRequest(
       {
         jsonrpc: "2.0",
@@ -105,7 +113,7 @@ test("MCP history tools read archived source, reopen a managed pane, and restore
   };
   expect((await call("canvas_history", {})).versions[0].version_id).toBe(version.id);
   expect((await call("canvas_version", { version_id: version.id })).source).toBe(VALID_CANVAS);
-  expect((await call("canvas_open", { version_id: version.id, event_id: eventId })).ok).toBe(true);
+  expect((await call("canvas_open", { version_id: version.id, event_id: eventId, target: "herdr" })).ok).toBe(true);
   expect(calls[0]).toContain(`HERDR_CANVAS_VERSION=${version.id}`);
   expect(calls[0]).toContain(`HERDR_CANVAS_EVENT=${eventId}`);
   expect(calls[0]).toContain(`HERDR_CANVAS_HISTORY_DB=${dbPath}`);

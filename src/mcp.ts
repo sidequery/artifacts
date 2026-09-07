@@ -1,7 +1,9 @@
 import { CanvasService, type CanvasEdit, type ReadOptions } from "./service";
+import { canvasIdFromFile } from "./canvasFile";
 import type { JsonRpcRequest, JsonRpcResponse } from "./mcpProtocol";
+import { CANVAS_APP_META, CANVAS_APP_URI, CANVAS_RESOURCE, canvasAppHtml, canvasAppResult } from "./mcpApp";
 
-const PROTOCOL_VERSION = "2024-11-05";
+const PROTOCOL_VERSION = "2025-06-18";
 
 export const MCP_TOOLS = [
   {
@@ -11,6 +13,7 @@ export const MCP_TOOLS = [
   },
   {
     name: "canvas_edit",
+    _meta: CANVAS_APP_META,
     description: "Apply sequential exact-text replacements to a working canvas. Every non-empty old_text must match exactly once; empty new_text deletes. Optional expected_hash guards against changes since canvas_read. Invalid batches write nothing. Atomically replaces source then typechecks once; failed diagnostics leave edits applied. Returns compact summary, hash and diagnostics, not source. Rejects symlinks and names with slashes.",
     inputSchema: {
       type: "object",
@@ -34,6 +37,7 @@ export const MCP_TOOLS = [
   },
   {
     name: "canvas_restore",
+    _meta: CANVAS_APP_META,
     description: "Replace a working canvas with archived TSX. Saves the current working source first, adds a new revision, and preserves later history and current UI state. Returns typecheck diagnostics after restoration.",
     inputSchema: { type: "object", properties: { version_id: { type: "string" } }, required: ["version_id"], additionalProperties: false },
   },
@@ -44,14 +48,16 @@ export const MCP_TOOLS = [
   },
   {
     name: "canvas_write",
+    _meta: CANVAS_APP_META,
     description:
-      "Write a canvas file, then typecheck it. Pass kebab-case name without slashes. Returns Canvas TypeScript check diagnostics.",
+      "Create or replace a canvas and display it inline in chat after typechecking. Pass kebab-case name without slashes. Returns Canvas TypeScript check diagnostics.",
     inputSchema: {
       type: "object",
       properties: {
         name: { type: "string", description: "Canvas name, e.g. billing-review or billing-review.canvas.tsx" },
         contents: { type: "string", description: "Full .canvas.tsx source" },
-        open: { type: "boolean", description: "Compile and open in Terminal Browser after a successful typecheck" },
+        open: { type: "boolean", description: "Legacy flag; successful writes now always show the canvas inline." },
+        target: { type: "string", enum: ["inline", "herdr"], default: "inline", description: "Use herdr only to explicitly open a terminal pane as well." },
       },
       required: ["name", "contents"],
       additionalProperties: false,
@@ -79,13 +85,15 @@ export const MCP_TOOLS = [
   },
   {
     name: "canvas_open",
-    description: "Open a managed Canvas pane. Supply name for a working canvas, or version_id for saved raw TSX rebuilt with the installed SDK and isolated initial state. Optional event_id selects an archived version's initial state.",
+    _meta: CANVAS_APP_META,
+    description: "Show the interactive canvas inline in chat. Supply name for a working canvas, or version_id for an archived canvas. Optional event_id selects archived initial state. Use target: herdr only to explicitly open a terminal pane instead.",
     inputSchema: {
       type: "object",
       properties: {
         name: { type: "string" },
         version_id: { type: "string" },
         event_id: { type: "string" },
+        target: { type: "string", enum: ["inline", "herdr"], default: "inline" },
         placement: { type: "string", enum: ["split", "tab", "zoomed", "overlay"] },
       },
       oneOf: [{ required: ["name"] }, { required: ["version_id"] }],
@@ -106,7 +114,7 @@ export async function handleMcpRequest(
     if (request.method === "initialize") {
       return ok(request.id, {
         protocolVersion: PROTOCOL_VERSION,
-        capabilities: { tools: {} },
+        capabilities: { tools: {}, resources: {} },
         serverInfo: { name: "canvas", version: "0.1.0" },
       });
     }
@@ -115,6 +123,13 @@ export async function handleMcpRequest(
     }
     if (request.method === "tools/list") {
       return ok(request.id, { tools: MCP_TOOLS });
+    }
+    if (request.method === "resources/list") return ok(request.id, { resources: [CANVAS_RESOURCE] });
+    if (request.method === "resources/templates/list") return ok(request.id, { resourceTemplates: [] });
+    if (request.method === "resources/read") {
+      const params = request.params as { uri?: string } | undefined;
+      if (params?.uri !== CANVAS_APP_URI) return error(request.id, -32002, "unknown resource");
+      return ok(request.id, { contents: [{ ...CANVAS_RESOURCE, text: await canvasAppHtml() }] });
     }
     if (request.method === "tools/call") {
       const params = (request.params ?? {}) as { name?: string; arguments?: Record<string, unknown> };
@@ -131,32 +146,33 @@ async function callTool(
   service: CanvasService,
   name: string,
   args: Record<string, unknown>,
-): Promise<{ content: Array<{ type: "text"; text: string }>; isError?: boolean }> {
+): Promise<{ content: Array<{ type: "text"; text: string }>; isError?: boolean; structuredContent?: Record<string, unknown>; _meta?: Record<string, unknown> }> {
   if (name === "canvas_read" || name === "canvas_edit") {
     if (typeof args.name !== "string") throw new Error("canvas name must be a string");
     if (name === "canvas_read") {
       return text(JSON.stringify(service.readRange(args.name, { start_line: args.start_line, end_line: args.end_line } as ReadOptions)));
     }
     const result = service.edit(args.name, args.edits as CanvasEdit[], args.expected_hash as string | undefined);
-    return text(JSON.stringify(result), !result.ok);
+    return withPreview(service, result, { name: args.name });
   }
   if (name === "canvas_history") return text(JSON.stringify({ versions: service.history(args.name === undefined ? undefined : String(args.name)) }, null, 2));
   if (name === "canvas_version") return text(JSON.stringify(service.version(String(args.version_id)), null, 2));
   if (name === "canvas_restore") {
     const result = service.restore(String(args.version_id));
-    return text(JSON.stringify(result, null, 2), !result.ok);
+    return withPreview(service, result, { name: canvasIdFromFile(result.path) });
   }
   if (name === "canvas_list") {
     return text(JSON.stringify({ canvases: service.list() }, null, 2));
   }
   if (name === "canvas_write") {
+    if (args.target !== undefined && args.target !== "inline" && args.target !== "herdr") throw new Error("target must be inline or herdr");
     const written = service.write(String(args.name), String(args.contents ?? ""));
     let opened: unknown;
-    if (args.open && written.ok) {
+    if (args.target === "herdr" && written.ok) {
       opened = await service.open(written.path);
     }
     const payload = { ...written, opened };
-    return text(`${written.check}\n\n${JSON.stringify(payload, null, 2)}`, !written.ok);
+    return withPreview(service, payload, { name: String(args.name) });
   }
   if (name === "canvas_typecheck") {
     const result = service.typecheck(String(args.name));
@@ -171,6 +187,11 @@ async function callTool(
   }
   if (name === "canvas_open") {
     if (Boolean(args.name) === Boolean(args.version_id)) throw new Error("provide name or version_id, but not both");
+    if (args.target !== undefined && args.target !== "inline" && args.target !== "herdr") throw new Error("target must be inline or herdr");
+    if (args.target !== "herdr") {
+      const result = await canvasAppResult(service, args as { name?: string; version_id?: string; event_id?: string });
+      return previewResult(result);
+    }
     const result = await service.open(args.name === undefined ? "" : String(args.name), {
       versionId: args.version_id === undefined ? undefined : String(args.version_id),
       eventId: args.event_id === undefined ? undefined : String(args.event_id),
@@ -179,6 +200,25 @@ async function callTool(
     return text(`${result.check}\n\n${JSON.stringify(result, null, 2)}`, !result.ok);
   }
   throw new Error(`unknown tool: ${name}`);
+}
+
+function previewResult(result: Awaited<ReturnType<typeof canvasAppResult>>) {
+  const { _meta, ...payload } = result;
+  return { ...text(`${result.check}\n\n${JSON.stringify(payload, null, 2)}`, !result.ok), structuredContent: payload, ...(_meta ? { _meta } : {}) };
+}
+
+async function withPreview(service: CanvasService, result: { ok: boolean; check: string; [key: string]: unknown }, selection: { name: string }) {
+  if (!result.ok) return { ...text(JSON.stringify(result, null, 2), true), structuredContent: result };
+  // Write/edit/restore have already applied. Preview failure must not imply rollback.
+  try {
+    const preview = await canvasAppResult(service, selection);
+    const { _meta, ...details } = preview;
+    const payload = { ...result, preview: details };
+    return { ...text(JSON.stringify(preview.ok ? result : payload, null, 2), !preview.ok), structuredContent: payload, ...(_meta ? { _meta } : {}) };
+  } catch (error) {
+    const payload = { ...result, preview: { ok: false, error: error instanceof Error ? error.message : String(error) } };
+    return { ...text(JSON.stringify(payload), true), structuredContent: payload };
+  }
 }
 
 function text(value: string, isError = false) {
