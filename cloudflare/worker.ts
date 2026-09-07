@@ -55,7 +55,9 @@ app.all("/api/auth/*", async c => c.env.AUTH_MODE === "better-auth"
 app.all("/.well-known/*", async c => c.env.AUTH_MODE === "better-auth"
   ? (await getCanvasAuth(c.env)).handler(c.req.raw) : c.notFound());
 app.use("*", async (c, next) => {
-  const artifact = await artifactRoute(c.req.raw, c.env);
+  const artifactOperation = artifactRoute(c.req.raw, c.env);
+  c.executionCtx.waitUntil(artifactOperation);
+  const artifact = await artifactOperation;
   if (artifact) return artifact;
   c.header("Cache-Control", "private, no-store");
   c.header("X-Content-Type-Options", "nosniff");
@@ -79,7 +81,11 @@ app.use("*", async (c, next) => {
     : JSON.stringify(["private", c.env.ACCESS_TEAM_DOMAIN ?? "local", identity.subject]);
   c.set("libraryScope", libraryScope);
   c.set("service", new CloudCanvasService(c.env.LIBRARIES.getByName(libraryKey), workspace, c.env.BACKENDS, libraryKey, { links: c.env.LINKS.getByName("deployment"), scripts: c.env.SCRIPTS.getByName(libraryKey), scriptBackends: c.env.SCRIPT_BACKENDS, origin: url.origin }));
-  await next();
+  // Compilation uses shared isolate resources. Let an admitted operation finish
+  // after a client disconnects rather than abandoning its native compiler I/O.
+  const operation = next();
+  c.executionCtx.waitUntil(operation);
+  await operation;
 });
 app.get("/api/session", c => {
   const user = c.get("user");

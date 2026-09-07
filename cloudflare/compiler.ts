@@ -121,26 +121,21 @@ function serverClassDiagnostic(node?: ts.Node): Diagnostic {
   };
 }
 
-let compilationTail: Promise<unknown> = Promise.resolve();
 let pendingCompilations = 0;
+let nextCompilation = 0;
+let activeCompilation = 0;
 
 export async function compileCanvasSource(source: string) {
   return queueCompile(source, false);
 }
 
-let lastServer: { source: string; result: ReturnType<typeof queueCompile> } | undefined;
+let lastServer: { source: string; result: Awaited<ReturnType<typeof queueCompile>> } | undefined;
 export async function compileCanvasServerSource(source: string) {
   if (lastServer?.source === source) return lastServer.result;
-  const result = queueCompile(source, true);
-  lastServer = { source, result };
-  try {
-    const compiled = await result;
-    if (!compiled.ok && lastServer?.result === result) lastServer = undefined;
-    return compiled;
-  } catch (error) {
-    if (lastServer?.result === result) lastServer = undefined;
-    throw error;
-  }
+  const result = await queueCompile(source, true);
+  // Share completed code, never another request's in-flight native operations.
+  if (result.ok) lastServer = { source, result };
+  return result;
 }
 
 async function queueCompile(source: string, server: boolean, script = false) {
@@ -148,9 +143,13 @@ async function queueCompile(source: string, server: boolean, script = false) {
   // Serialize builds and bound retained request sources under load.
   if (pendingCompilations >= 8) return { ok: false, diagnostics: [{ severity: "error" as const, message: "Compiler is busy; retry shortly", file: server ? serverPath : sourcePath }] };
   pendingCompilations++;
-  const result = compilationTail.then(() => script ? compileScript(source) : server ? compileServer(source) : compileSource(source));
-  compilationTail = result.catch(() => undefined);
-  try { return await result; } finally { pendingCompilations--; }
+  const ticket = nextCompilation++;
+  // celld 0.4.1 attributes native timers to the request driving a continuation.
+  // Wait on this request's own timer instead of another request's promise, so
+  // disconnecting a preview cannot cancel the next build's esbuild operations.
+  while (ticket !== activeCompilation) await new Promise(resolve => setTimeout(resolve, 5));
+  try { return await (script ? compileScript(source) : server ? compileServer(source) : compileSource(source)); }
+  finally { activeCompilation++; pendingCompilations--; }
 }
 
 async function compileServer(source: string) {

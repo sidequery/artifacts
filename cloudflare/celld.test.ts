@@ -105,6 +105,7 @@ async function withClient<T>(run: (client: Client) => Promise<T>) {
 async function write(client: Client, server: string) {
   const result = await client.callTool({ name: "canvas_write", arguments: { name: "native-counter", contents: clientSource, server } });
   expect(result.isError, JSON.stringify(result.content)).toBe(false);
+  return (result._meta as { canvas: { versionId: string } }).canvas.versionId;
 }
 
 async function request(client: Client, method: string) {
@@ -174,3 +175,29 @@ celldTest("runs native canvas SQLite and KV across code update and celld restart
     expect(await request(client, "GET")).toEqual({ code: 2, value: 3, kv: 3 });
   });
 });
+
+celldTest("aborted previews do not block subsequent compilation", async () => {
+  const version = await withClient(client => write(client, serverV1));
+  await withClient(client => write(client, serverV2));
+  const url = `${baseUrl}/gallery/preview?version=${version}`;
+  // Exercise disconnects at different points in the real preview pipeline,
+  // including the asynchronous compiler used by subsequent requests.
+  for (const delay of [10, 25, 50]) {
+    // Select the current server first so the archived preview must compile its
+    // different server source after compiling the client, even after disconnect.
+    await withClient(client => request(client, "GET"));
+    const controller = new AbortController();
+    const interrupted = fetch(url, { signal: controller.signal })
+      .then(response => response.text()).catch(error => {
+        if (!controller.signal.aborted) throw error;
+      });
+    await Bun.sleep(delay);
+    controller.abort();
+    await interrupted;
+    const response = await fetch(url, { signal: AbortSignal.timeout(10_000) }).catch(error => {
+      throw new Error(`Preview after ${delay}ms disconnect: ${String(error)}\n${processLogs}`);
+    });
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain("serverVersionId");
+  }
+}, 45_000);
