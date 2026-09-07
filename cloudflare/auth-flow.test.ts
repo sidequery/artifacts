@@ -227,6 +227,9 @@ test("real OIDC and MCP OAuth share per-user gallery, source and database bounda
     expect(await counter(bob)).toBe(0);
     await bobPage.reload();
     await bobPage.getByLabel("Library", { exact: true }).selectOption("team");
+    // Library selection navigates the whole page. Both documents contain a
+    // counter button, so wait for the team document before interacting with it.
+    await bobPage.waitForURL(url => url.searchParams.get("library") === "team");
     await bobPage.getByRole("button", { name: "counter", exact: true }).click();
     await bobPage.frameLocator("iframe").getByText("Count: 2", { exact: true }).waitFor();
     expect((await aliceContext.request.post(`${origin}/api/canvas/request`, { headers: { Origin: "https://evil.example" }, data: {} })).status()).toBe(403);
