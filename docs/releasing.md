@@ -4,6 +4,42 @@ Canvas requires Bun 1.4 or newer. The bun package includes the CLI, its source
 assets used by Bun at runtime, and the prebuilt Worker/assets used by the optional
 local celld server. Consumers do not need Wrangler or a source checkout.
 
+## GitHub Actions releases
+
+The `Publish npm package` workflow (`.github/workflows/publish.yml`) uses npm
+trusted publishing (OIDC). It runs only when manually dispatched on `main` in
+`sidequery/canvas`; merging a PR does not publish. Enter the exact `package.json`
+version when dispatching. The workflow checks types and source tests, builds one
+tarball, exercises that archive in an isolated consumer including native server
+persistence, then publishes the same archive from a separate GitHub-hosted job.
+Only the publish job can request an OIDC token. Bun handles installation, builds,
+and tests; Node 24's npm CLI handles the OIDC publish exchange. No registry token
+is stored in GitHub or 1Password for routine releases.
+
+### One-time npm setup
+
+The package must first exist on npm before its trusted publisher can be configured.
+For the first approved release, use the local validation and publication steps
+below with interactive npm authentication (or a temporary bootstrap credential).
+Then open `@sidequery/canvas` package settings on npm and add this trusted publisher:
+
+| Field | Value |
+| --- | --- |
+| Provider | GitHub Actions |
+| Organization | `sidequery` |
+| Repository | `canvas` |
+| Workflow filename | `publish.yml` |
+| Environment | Leave blank |
+| Allowed actions | Enable direct `npm publish` |
+
+After a successful OIDC release, set package publishing access to **Require
+two-factor authentication and disallow tokens** and revoke any temporary bootstrap
+token. See [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/).
+Saving the configuration alone does not validate it; the first successful OIDC
+publication verifies the connection. Subsequent releases need a new package version.
+
+## Local validation and first publication
+
 1. Update `version` in `package.json` and refresh `bun.lock` with `bun install`.
 2. Run `bun run typecheck`, `bun run typecheck:cloudflare`, and `bun test src`.
 3. Run `bun run test:package`. This builds the Worker and installs the actual
@@ -11,9 +47,10 @@ local celld server. Consumers do not need Wrangler or a source checkout.
    and MCP.
 4. Run the native package check on a supported platform:
    `CELLD_PACKAGE_INTEGRATION=1 bun run test:package`.
-5. Run `bun pm pack --destination /tmp` to build a release tarball. Inspect the
-   contents and retain the exact tested tarball for the release.
-6. After release approval and bun authentication for the `@sidequery` scope,
+5. Run `bun pm pack --destination /tmp` to build a release tarball. Test that exact
+   archive with `CANVAS_PACKAGE_ARCHIVE=/tmp/sidequery-canvas-VERSION.tgz
+   CELLD_PACKAGE_INTEGRATION=1 bun test scripts/package.integration.test.ts --timeout 360000`.
+6. After release approval and authentication for the `@sidequery` scope,
    publish that tarball with `bun publish /tmp/sidequery-canvas-VERSION.tgz --access public`.
 
 A package build is not a registry publication. CI validates packaging without

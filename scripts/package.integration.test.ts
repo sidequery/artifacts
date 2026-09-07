@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 const root = join(import.meta.dir, "..");
 
@@ -121,10 +121,15 @@ test("published tarball runs the CLI, gallery, and stdio MCP outside a checkout"
   };
   let gallery: ReturnType<typeof Bun.spawn> | undefined;
   try {
-    const archive = join(archiveDirectory, "sidequery-canvas-0.1.0.tgz");
-    await run([
-      process.execPath, "pm", "pack", "--ignore-scripts", "--destination", archiveDirectory,
-    ], root, isolatedEnv);
+    // Release jobs supply the exact archive that will be published.
+    const archive = process.env.CANVAS_PACKAGE_ARCHIVE
+      ? resolve(process.env.CANVAS_PACKAGE_ARCHIVE)
+      : join(archiveDirectory, `sidequery-canvas-${(await Bun.file(join(root, "package.json")).json()).version}.tgz`);
+    if (!process.env.CANVAS_PACKAGE_ARCHIVE) {
+      await run([
+        process.execPath, "pm", "pack", "--ignore-scripts", "--destination", archiveDirectory,
+      ], root, isolatedEnv);
+    }
     const listing = await run(["tar", "-tzf", archive], root, isolatedEnv);
     expect(listing.stdout).toContain("package/dist/celld/wrangler.jsonc");
     expect(listing.stdout).toContain("package/dist/worker-app/worker.js");
