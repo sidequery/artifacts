@@ -32,4 +32,5 @@ jobs:
           gzip -d "$RUNNER_TEMP/celld-x86_64-unknown-linux-gnu.gz"
           chmod +x "$RUNNER_TEMP/celld-x86_64-unknown-linux-gnu"
           echo "CELLD_BIN=$RUNNER_TEMP/celld-x86_64-unknown-linux-gnu" >> "$GITHUB_ENV"
+      - run: CELLD_PACKAGE_INTEGRATION=1 bun run test:package:prebuilt
       - run: bun run test:celld
