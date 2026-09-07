@@ -2,6 +2,7 @@ export type { CanvasAction, SetCanvasState } from "./hooks";
 export { useState, useReducer, useRef, useMemo, useCallback, useEffect } from "react";
 export { useCanvasAction, useCanvasState, useHostTheme } from "./hooks";
 export { canvasFetch, type CanvasHttpRequest, type CanvasHttpResponse } from "./server";
+export { pluginCall, type PluginRequest } from "./plugins";
 export {
   canvasPaletteDark,
   canvasPaletteLight,

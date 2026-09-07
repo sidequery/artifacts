@@ -4,7 +4,7 @@ export const CANVAS_GUIDE_EXPORTS = [
   "BarChart", "Button", "Callout", "Card", "CardBody", "CardHeader", "Checkbox",
   "Code", "Divider", "Grid", "H1", "H2", "H3", "LineChart", "Link", "PieChart",
   "Pill", "Row", "Select", "Spacer", "Stack", "Stat", "Table", "Text", "TextArea",
-  "TextInput", "Toggle", "canvasFetch", "canvasPaletteDark", "canvasPaletteLight", "canvasTypography",
+  "TextInput", "Toggle", "canvasFetch", "pluginCall", "canvasPaletteDark", "canvasPaletteLight", "canvasTypography",
   "mergeStyle", "themeFromKind", "tokensFromPalette", "useCanvasAction", "useCanvasState", "useState", "useReducer", "useRef", "useMemo", "useCallback", "useEffect", "useHostTheme",
 ];
 
@@ -15,7 +15,7 @@ Read this guide before your first canvas_write in the conversation. Reuse it for
 
 ## Source and imports
 
-Submit a complete TSX module with a default-exported React component. Use a kebab-case canvas name without slashes. Import from "sidequery/canvas" ("herdr/canvas" and "cursor/canvas" are compatibility aliases). Do not import react, other packages, relative files, or use dynamic imports or require.
+Submit a complete TSX module with a default-exported React component. Use a kebab-case canvas name without slashes. Import from "sidequery/canvas" ("herdr/canvas" and "cursor/canvas" are compatibility aliases). Hosted deployments may also expose browser packages listed by plugins_list. Do not import react, unlisted packages, relative files, or use dynamic imports or require.
 
 These are the installed SDK's runtime exports:
 ${CANVAS_GUIDE_EXPORTS.join(", ")}
@@ -26,6 +26,10 @@ ${CANVAS_GUIDE_EXPORTS.join(", ")}
 - useCanvasState<T>(key: string, defaultValue: T): [T, setter] for host-backed state. Keys must be stable and distinct. The setter accepts a value or updater. Live local views persist through the host; MCP and gallery views keep isolated in-memory state.
 - useHostTheme(): returns the host theme with color and typography tokens.
 - useCanvasAction(): returns a dispatcher accepting {type: "openFile", path, selection?}, {type: "promptAgent", prompt}, or {type: "openUrl", url}. In MCP Apps, promptAgent and HTTP(S) openUrl depend on host approval; openFile is unavailable.
+
+## Deployment plugins
+
+pluginCall<T>(plugin, operation, input, { signal }?) calls an authenticated deployment function. Use plugins_list for installed names and schemas and plugin_guide for access rules. Installed browser libraries may wrap this helper with their own typed API. A view without the hosted plugin bridge rejects calls.
 
 ## Hosted servers and SQLite
 

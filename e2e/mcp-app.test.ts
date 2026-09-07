@@ -475,3 +475,32 @@ test("ordinary React hooks update component state through the canonical and lega
     await page.close();
   }
 }, 30000);
+
+
+test("routes plugin calls through MCP and removes the bridge for an unavailable view", async () => {
+  const source = `import { Button, pluginCall, useState } from "sidequery/canvas";
+export default function Canvas() {
+  const [value, setValue] = useState("idle");
+  return <><Button onClick={() => { pluginCall<string>("directory", "lookup", {id:"one"}).then(setValue).catch(e => setValue(e.message)); }}>Lookup</Button><p>{value}</p></>;
+}`;
+  const meta = await resultFor(source, "plugin-call");
+  meta.canvas.plugins = true;
+  const { page, app, errors } = await openHost();
+  await page.evaluate(() => window.mcpHost!.setServerToolResult({ content: [], structuredContent: { result: "Found one" } }));
+  await page.evaluate(meta => window.mcpHost!.sendResult({ content: [], _meta: meta }), meta);
+  await app.getByRole("button", { name: "Lookup" }).click();
+  await app.getByText("Found one").waitFor();
+  expect(await page.evaluate(() => window.mcpHost!.serverToolCalls.map(({ name, arguments: args }) => ({ name, arguments: args })))).toEqual([
+    { name: "canvas_plugin_call", arguments: { plugin: "directory", operation: "lookup", input: { id: "one" } } },
+  ]);
+  await page.evaluate(() => window.mcpHost!.setServerToolResult({ content: [{ type: "text", text: "Operation denied" }], isError: true }));
+  await app.getByRole("button", { name: "Lookup" }).click();
+  await app.getByText("Operation denied").waitFor();
+  meta.canvas.plugins = false;
+  await page.evaluate(meta => window.mcpHost!.sendResult({ content: [], _meta: meta }), meta);
+  await app.getByRole("button", { name: "Lookup" }).click();
+  await app.getByText("Plugin functions are unavailable in this view").waitFor();
+  expect(await page.evaluate(() => window.mcpHost!.serverToolCalls.length)).toBe(2);
+  expect(errors).toEqual([]);
+  await page.close();
+}, 30_000);

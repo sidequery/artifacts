@@ -5,6 +5,8 @@ import { join, resolve } from "node:path";
 
 import { sandboxToDiagnostics, type Diagnostic } from "./diagnostics";
 import { PLUGIN_ROOT, SDK_ENTRY, WRAPPER_ENTRY } from "./paths";
+import { loadBrowserPlugins } from "./plugins/browser";
+import type { BrowserPlugins } from "./plugins/types";
 import { scanCanvasSource } from "./sandbox";
 
 const requireFromPlugin = createRequire(join(PLUGIN_ROOT, "package.json"));
@@ -15,15 +17,20 @@ export type CompileResult = {
   diagnostics: Diagnostic[];
 };
 
-export function canvasAliasPlugin(canvasPath: string, source?: string): BunPlugin {
+export function canvasAliasPlugin(canvasPath: string, source?: string, plugins: BrowserPlugins = loadBrowserPlugins()): BunPlugin {
   const absCanvas = resolve(canvasPath);
   return {
     name: "herdr-canvas-alias",
     setup(build) {
+      build.onResolve({ filter: /.*/ }, args => Object.hasOwn(plugins.paths, args.path)
+        ? { path: args.path, namespace: "canvas-browser-plugin" } : undefined);
+      build.onLoad({ filter: /.*/, namespace: "canvas-browser-plugin" }, args => ({
+        contents: plugins.modules[args.path], loader: "js", resolveDir: PLUGIN_ROOT,
+      }));
       if (source !== undefined) {
         build.onLoad({ filter: /\.canvas\.tsx$/ }, (args) => args.path === absCanvas ? { contents: source, loader: "tsx" } : undefined);
       }
-      build.onResolve({ filter: /^(sidequery\/canvas|herdr\/canvas|cursor\/canvas)$/ }, () => ({
+      build.onResolve({ filter: /^(@sidequery\/canvas|sidequery\/canvas|herdr\/canvas|cursor\/canvas)$/ }, () => ({
         path: SDK_ENTRY,
       }));
       build.onResolve({ filter: /^herdr-canvas-entry$/ }, () => ({
@@ -36,10 +43,10 @@ export function canvasAliasPlugin(canvasPath: string, source?: string): BunPlugi
   };
 }
 
-export async function compileCanvas(canvasPath: string, snapshot?: string): Promise<CompileResult> {
+export async function compileCanvas(canvasPath: string, snapshot?: string, plugins: BrowserPlugins = loadBrowserPlugins()): Promise<CompileResult> {
   const absCanvas = resolve(canvasPath);
   const source = snapshot ?? readFileSync(absCanvas, "utf8");
-  const violations = scanCanvasSource(source);
+  const violations = scanCanvasSource(source, Object.keys(plugins.paths));
   if (violations.length > 0) {
     return {
       ok: false,
@@ -58,7 +65,7 @@ export async function compileCanvas(canvasPath: string, snapshot?: string): Prom
       define: {
         "process.env.NODE_ENV": JSON.stringify("production"),
       },
-      plugins: [canvasAliasPlugin(absCanvas, source)],
+      plugins: [canvasAliasPlugin(absCanvas, source, plugins)],
     });
   } catch (error) {
     return {

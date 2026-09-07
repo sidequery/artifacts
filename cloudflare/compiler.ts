@@ -1,6 +1,7 @@
 import { createWorker } from "@cloudflare/worker-bundler";
 import ts from "../dist/cloudflare/typescript.js";
 import files from "../dist/cloudflare/compiler-files.json";
+import browserPlugins from "../dist/cloudflare/plugin-browser.json";
 import browserRuntime from "../dist/cloudflare/browser-runtime.json";
 import { sandboxToDiagnostics, type Diagnostic } from "../src/diagnostics";
 import { scanCanvasSource } from "../src/sandbox";
@@ -8,13 +9,13 @@ import { scanCanvasSource } from "../src/sandbox";
 const sourcePath = "canvas.canvas.tsx";
 const serverPath = "canvas.canvas.server.ts";
 const sdkPath = "src/sdk/index.ts";
-const compilerFiles: Record<string, string> = files;
+const compilerFiles: Record<string, string> = { ...files, ...browserPlugins.files };
 const options: ts.CompilerOptions = {
     target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
     moduleResolution: ts.ModuleResolutionKind.Bundler, jsx: ts.JsxEmit.ReactJSX,
     strict: true, noEmit: true, skipLibCheck: true, esModuleInterop: true,
     allowSyntheticDefaultImports: true, baseUrl: "/",
-    paths: { "sidequery/canvas": [sdkPath], "herdr/canvas": [sdkPath], "cursor/canvas": [sdkPath] },
+    paths: { ...browserPlugins.paths, "@sidequery/canvas": [sdkPath], "sidequery/canvas": [sdkPath], "herdr/canvas": [sdkPath], "cursor/canvas": [sdkPath] },
     types: [],
 };
 const normalize = (path: string) => path.replace(/^\//, "");
@@ -47,7 +48,7 @@ const host: ts.LanguageServiceHost = {
 let languageService: ts.LanguageService | undefined;
 
 export function typecheckCanvasSource(source: string): Diagnostic[] {
-  const violations = scanCanvasSource(source);
+  const violations = scanCanvasSource(source, Object.keys(browserPlugins.paths));
   if (violations.length) return sandboxToDiagnostics(sourcePath, violations);
   return typecheckSource(source, false);
 }
@@ -186,9 +187,11 @@ async function compileSource(source: string) {
       define: { "process.env.NODE_ENV": '"production"' },
       virtualModules: {
         "sidequery/canvas": browserRuntime.sdkModule,
+        "@sidequery/canvas": browserRuntime.sdkModule,
         "herdr/canvas": browserRuntime.sdkModule,
         "cursor/canvas": browserRuntime.sdkModule,
         "react/jsx-runtime": "export const { jsx, jsxs, Fragment } = globalThis.__herdrCanvasRuntime.jsx;",
+        ...browserPlugins.modules,
       },
     });
     if (result.warnings?.length) throw new Error(result.warnings.join("\n"));

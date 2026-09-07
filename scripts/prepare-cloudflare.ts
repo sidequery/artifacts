@@ -8,10 +8,12 @@ import standaloneCode from "ajv/dist/standalone";
 import { CLOUD_MCP_TOOLS } from "../cloudflare/tool-contract";
 import { createHash } from "node:crypto";
 import * as sdk from "../src/sdk";
+import { preparePlugins } from "./prepare-plugins";
 
 // Ship the lockfile-resolved dependencies with the compiler. Compiling a canvas
 // must never install packages or depend on npm being available at request time.
 const root = join(import.meta.dir, "..");
+const plugins = await preparePlugins(root, join(root, "dist/cloudflare"));
 const files: Record<string, string> = {};
 async function collect(directory: string, accept: (path: string) => boolean) {
   for (const entry of await readdir(join(root, directory), { withFileTypes: true })) {
@@ -22,6 +24,7 @@ async function collect(directory: string, accept: (path: string) => boolean) {
 }
 await collect("src/sdk", path => /\.(ts|tsx)$/.test(path) && !path.endsWith(".test.ts"));
 files["src/httpTypes.ts"] = await readFile(join(root, "src/httpTypes.ts"), "utf8");
+files["src/plugins/types.ts"] = await readFile(join(root, "src/plugins/types.ts"), "utf8");
 for (const name of ["react", "react-dom", "scheduler", "@types/react", "@types/react-dom", "csstype", "@types/node", "undici-types"]) {
   await collect(`node_modules/${name}`, path => path.endsWith(".d.ts") || path.endsWith("/package.json"));
 }
@@ -53,6 +56,7 @@ await writeFile(join(dirname(output), "browser-runtime.json"), JSON.stringify({
   sdkModule: Object.keys(sdk).sort().map(name => `export const ${name} = globalThis.__herdrCanvasRuntime.sdk.${name};`).join("\n"),
 }));
 const identity = createHash("sha256").update(JSON.stringify(files)).update(runtimeJs)
+  .update(JSON.stringify(plugins.browser)).update(JSON.stringify(plugins.catalog))
   .update(await readFile(join(root, "bun.lock"), "utf8"))
   .update(await readFile(join(root, "cloudflare/compiler.ts"), "utf8"))
   .update(await readFile(join(root, "scripts/prepare-cloudflare.ts"), "utf8"))

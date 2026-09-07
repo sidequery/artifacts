@@ -17,7 +17,8 @@
     "bun": ">=1.4.0"
   },
   "exports": {
-    ".": "./src/sdk/index.ts"
+    ".": "./src/sdk/index.ts",
+    "./plugins": "./src/plugins/config.ts"
   },
   "bin": {
     "canvas": "src/cli.ts"
@@ -30,6 +31,7 @@
     "docs/daemon.md",
     "docs/releasing.md",
     "docs/scripts.md",
+    "docs/runtime-plugins.md",
     "src/args.ts",
     "src/auth/client-api.ts",
     "src/auth/client.tsx",
@@ -60,6 +62,9 @@
     "src/mcp/tools.ts",
     "src/open.ts",
     "src/paths.ts",
+    "src/plugins/browser.ts",
+    "src/plugins/config.ts",
+    "src/plugins/types.ts",
     "src/runtime/cloud-runtime.ts",
     "src/runtime/gallery-request.ts",
     "src/runtime/herdr-canvas-entry.d.ts",
@@ -70,6 +75,7 @@
     "src/sdk/forms.tsx",
     "src/sdk/hooks.ts",
     "src/sdk/index.ts",
+    "src/sdk/plugins.ts",
     "src/sdk/server.ts",
     "src/sdk/tokens.ts",
     "src/sdk/ui.tsx",
@@ -84,9 +90,9 @@
   "scripts": {
     "canvas": "bun run src/cli.ts",
     "mcp": "bun run src/cli.ts mcp",
-    "test": "bun test src --timeout 30000",
+    "test": "bun test src scripts/prepare-plugins.test.ts --timeout 30000",
     "test:e2e": "bun test e2e/herdr.e2e.test.ts",
-    "test:mcp-ui": "bun test e2e/mcp-app.test.ts e2e/gallery-scripts.test.ts --timeout 30000",
+    "test:mcp-ui": "bun test e2e/mcp-app.test.ts e2e/gallery-scripts.test.ts e2e/browser-plugins.test.ts e2e/plugin-bridge.test.ts --timeout 30000",
     "typecheck": "tsc --noEmit",
     "dev:cloudflare": "wrangler dev --local --var ENVIRONMENT:local",
     "prepare:celld": "bun run scripts/prepare-celld.ts",

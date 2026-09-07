@@ -4,11 +4,13 @@ import ts from "typescript";
 import { sandboxToDiagnostics, type Diagnostic } from "./diagnostics";
 import { PLUGIN_ROOT, SDK_ENTRY } from "./paths";
 import { scanCanvasSource } from "./sandbox";
-import { relative } from "node:path";
+import { relative, resolve } from "node:path";
+import { loadBrowserPlugins } from "./plugins/browser";
+import type { BrowserPlugins } from "./plugins/types";
 
-export function typecheckCanvas(canvasPath: string): Diagnostic[] {
+export function typecheckCanvas(canvasPath: string, plugins: BrowserPlugins = loadBrowserPlugins()): Diagnostic[] {
   const source = readFileSync(canvasPath, "utf8");
-  const violations = scanCanvasSource(source);
+  const violations = scanCanvasSource(source, Object.keys(plugins.paths));
   if (violations.length > 0) {
     return sandboxToDiagnostics(canvasPath, violations);
   }
@@ -25,6 +27,8 @@ export function typecheckCanvas(canvasPath: string): Diagnostic[] {
     allowSyntheticDefaultImports: true,
     baseUrl: PLUGIN_ROOT,
     paths: {
+      ...plugins.paths,
+      "@sidequery/canvas": [relative(PLUGIN_ROOT, SDK_ENTRY)],
       "sidequery/canvas": [relative(PLUGIN_ROOT, SDK_ENTRY)],
       "herdr/canvas": [relative(PLUGIN_ROOT, SDK_ENTRY)],
       "cursor/canvas": [relative(PLUGIN_ROOT, SDK_ENTRY)],
@@ -32,6 +36,15 @@ export function typecheckCanvas(canvasPath: string): Diagnostic[] {
   };
 
   const host = ts.createCompilerHost(compilerOptions);
+  const virtual = new Map(Object.entries(plugins.files).map(([path, text]) => [resolve(PLUGIN_ROOT, path), text]));
+  const read = host.readFile.bind(host), exists = host.fileExists.bind(host), directory = host.directoryExists?.bind(host);
+  host.readFile = path => virtual.get(resolve(path)) ?? read(path);
+  host.fileExists = path => virtual.has(resolve(path)) || exists(path);
+  host.directoryExists = path => [...virtual.keys()].some(file => file.startsWith(resolve(path) + "/")) || Boolean(directory?.(path));
+  host.getSourceFile = (path, version) => {
+    const text = host.readFile(path);
+    return text === undefined ? undefined : ts.createSourceFile(path, text, version);
+  };
   host.resolveModuleNameLiterals = (literals, containingFile) =>
     literals.map((literal) => ({
       resolvedModule: resolveSpecifier(literal.text, containingFile, compilerOptions, host),

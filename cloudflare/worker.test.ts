@@ -89,6 +89,29 @@ test("official HTTP MCP client lists contracts, writes, edits, restores and retr
   await expect(client.callTool({ name: "canvas_open", arguments: { name: "overview", target: "herdr" } })).rejects.toThrow("Invalid tool arguments");
 }, 60000);
 
+test("plugin HTTP and MCP routes expose catalog hints and validate requests", async () => {
+  const tools = (await client.listTools()).tools;
+  for (const name of ["plugins_list", "plugin_guide"]) expect(tools.find(tool => tool.name === name)?.annotations?.readOnlyHint).toBe(true);
+  expect(tools.find(tool => tool.name === "canvas_plugin_call")?.annotations?.readOnlyHint).toBe(false);
+  const list = await client.callTool({ name: "plugins_list", arguments: {} });
+  expect(list.isError).not.toBe(true);
+  expect(Array.isArray((list.structuredContent as { plugins: unknown[] }).plugins)).toBe(true);
+  expect((await client.callTool({ name: "plugin_guide", arguments: {} })).isError).not.toBe(true);
+  const call = { plugin: "missing-plugin-for-test", operation: "read", input: {} };
+  const missing = await client.callTool({ name: "canvas_plugin_call", arguments: call });
+  expect(missing.isError).toBe(true);
+  expect(JSON.stringify(missing)).toContain("Plugin operation not found");
+  await expect(client.callTool({ name: "canvas_plugin_call", arguments: { ...call, library: "team" } })).rejects.toThrow("Invalid tool arguments");
+  for (const library of ["private", "team"]) {
+    const response = await fetch(`${origin}/api/plugins/call?library=${library}`, { method: "POST", body: JSON.stringify(call) });
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: "Plugin operation not found" });
+  }
+  expect((await fetch(`${origin}/api/plugins/call`, { method: "POST", body: "{}" })).status).toBe(400);
+  expect((await fetch(`${origin}/api/plugins/call`, { method: "POST", body: " ".repeat(256 * 1024 + 1) })).status).toBe(413);
+  expect((await fetch(`${origin}/api/plugins/call`, { method: "POST", headers: { Origin: "https://evil.example" }, body: JSON.stringify(call) })).status).toBe(403);
+});
+
 test("invalid drafts remain readable with diagnostics and no preview", async () => {
   const result = await client.callTool({ name: "canvas_write", arguments: { name: "invalid", contents: 'const n: number = "bad"; export default function Canvas() { return <div>{n}</div>; }' } });
   expect(result.isError).toBe(true);
@@ -192,7 +215,7 @@ test("all hosted surfaces fail closed off loopback, and mutations enforce origin
   expect((await fetch(`${origin}/api/source?workspace=other&version=${version}`)).status).toBe(404);
   const production = new Miniflare({ cf: false, port: 0, workers: [{ ...runtimeOptions.workers![0]!, config: { ...runtimeOptions.workers![0]!.config, env: { ...runtimeOptions.workers![0]!.config.env, ENVIRONMENT: { type: "text", value: "production" } } } }] });
   try {
-  for (const path of ["/", "/index.html", "/gallery.js", "/mcp", "/api/gallery", "/api/source", "/gallery/preview", "/api/canvas/request"]) {
+  for (const path of ["/", "/index.html", "/gallery.js", "/mcp", "/api/gallery", "/api/source", "/gallery/preview", "/api/canvas/request", "/api/plugins/call"]) {
     expect((await production.dispatchFetch(`https://canvas.example${path}`)).status).toBe(503);
   }
   } finally { await production.dispose(); }
@@ -297,10 +320,19 @@ test("verified users have isolated private libraries and can collaborate in the 
     expect((await fetch(address+"/private-canvas")).status).toBe(401);
     expect((await fetch(address+"/private-canvas",{headers:{"Cf-Access-Jwt-Assertion":bobToken}})).status).toBe(404);
     expect((await fetch(address+"/private-canvas",{headers:{"Cf-Access-Jwt-Assertion":aliceToken}})).status).toBe(200);
+    const pluginBody = JSON.stringify({ plugin: "missing-plugin-for-test", operation: "read", input: {} });
+    expect((await fetch(address+"/private-canvas/_canvas/plugins",{method:"POST",body:pluginBody})).status).toBe(401);
+    expect((await fetch(address+"/private-canvas/_canvas/plugins",{method:"POST",headers:{"Cf-Access-Jwt-Assertion":bobToken},body:pluginBody})).status).toBe(404);
+    const privatePlugin = await fetch(address+"/private-canvas/_canvas/plugins",{method:"POST",headers:{"Cf-Access-Jwt-Assertion":aliceToken},body:pluginBody});
+    expect(privatePlugin.status).toBe(404);
+    expect(await privatePlugin.json()).toEqual({error:"Plugin operation not found"});
     expect((await alice.callTool({name:"canvas_write",arguments:{name:"secret",slug:"private-canvas",access:"public",contents:"export default function {"}})).isError).toBe(true);
     expect((await fetch(address+"/private-canvas")).status).toBe(401);
     expect((await alice.callTool({name:"artifact_link",arguments:{kind:"canvas",name:"secret",slug:"private-canvas",access:"public"}})).isError).not.toBe(true);
     expect((await fetch(address+"/private-canvas")).status).toBe(200);
+    for (const headers of [{}, {"Cf-Access-Jwt-Assertion":aliceToken}, {Cookie:"session=ambient"}]) {
+      expect((await fetch(address+"/private-canvas/_canvas/plugins",{method:"POST",headers,body:pluginBody})).status).toBe(401);
+    }
     expect((await alice.callTool({name:"artifact_link",arguments:{kind:"canvas",name:"secret",slug:"private-canvas",access:"private"}})).isError).not.toBe(true);
     expect((await fetch(address+"/private-canvas")).status).toBe(401);
     // Restore a valid draft for the existing gallery assertion below.
@@ -328,7 +360,7 @@ test("verified users have isolated private libraries and can collaborate in the 
     await Promise.all(clients.map(remote => remote.close()));
     await production.dispose();
   }
-}, 60000);
+}, 120000);
 
 test("standalone scripts serve arbitrary HTTP responses at chosen root slugs and retain last valid code", async () => {
   const code = `export default { async fetch(request: Request, env: ScriptEnv) {

@@ -5,7 +5,7 @@ export type AuthEnvironment = {
   ACCESS_TEAM_DOMAIN?: string;
   ACCESS_AUD?: string;
 };
-export type Identity = { subject: string };
+export type Identity = { subject: string; authority: string };
 
 export function createAuthenticator(jwksFetch?: FetchImplementation) {
   const keySets = new Map<string, JWTVerifyGetKey>();
@@ -14,7 +14,7 @@ export function createAuthenticator(jwksFetch?: FetchImplementation) {
     // Only the explicitly selected local environment can skip Access, and only
     // on loopback. A production deployment with missing settings stays closed.
     if (env.ENVIRONMENT === "local" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) {
-      return { subject: "local" };
+      return { subject: "local", authority: "local" };
     }
     if (!env.ACCESS_AUD || !env.ACCESS_TEAM_DOMAIN || !/^[a-z0-9-]+\.cloudflareaccess\.com$/.test(env.ACCESS_TEAM_DOMAIN)) {
       return Response.json({ error: "Configure ACCESS_TEAM_DOMAIN and ACCESS_AUD, then enable Cloudflare Access with managed OAuth for this Worker." }, { status: 503 });
@@ -35,7 +35,7 @@ export function createAuthenticator(jwksFetch?: FetchImplementation) {
         requiredClaims: ["sub", "exp", "iat"],
       });
       if (typeof payload.sub !== "string" || !payload.sub) throw new Error("Missing identity");
-      return { subject: payload.sub };
+      return { subject: payload.sub, authority: issuer };
     } catch {
       return Response.json({ error: "Invalid Cloudflare Access assertion" }, { status: 401 });
     }

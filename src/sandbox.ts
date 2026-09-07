@@ -6,8 +6,8 @@ export type SandboxViolation = {
 
 const ALLOWED_MODULES = new Set(["sidequery/canvas", "herdr/canvas", "cursor/canvas"]);
 
-const IMPORT_FROM_RE = /(?:^|\n)\s*(?:import|export)\s+(?:type\s+)?[\s\S]*?\sfrom\s+["']([^"']+)["']/g;
-const SIDE_EFFECT_IMPORT_RE = /(?:^|\n)\s*import\s+["']([^"']+)["']/g;
+const IMPORT_FROM_RE = /(?:^|[;\n}])\s*(?:import|export)\s*(?:type\s+)?[\s\S]*?\bfrom\s*["']([^"']+)["']/g;
+const SIDE_EFFECT_IMPORT_RE = /(?:^|[;\n}])\s*import\s*["']([^"']+)["']/g;
 const DYNAMIC_IMPORT_RE = /\bimport\s*\(/;
 const REQUIRE_RE = /\brequire\s*\(/;
 
@@ -29,13 +29,13 @@ export function stripCommentsForScan(source: string): string {
     .replace(/(^|[^:\\\n])\/\/.*$/gm, "$1");
 }
 
-export function scanCanvasSource(source: string): SandboxViolation[] {
+export function scanCanvasSource(source: string, publicImports: readonly string[] = []): SandboxViolation[] {
   const stripped = stripCommentsForScan(source);
   const violations: SandboxViolation[] = [];
 
   for (const match of stripped.matchAll(IMPORT_FROM_RE)) {
     const specifier = match[1];
-    if (!ALLOWED_MODULES.has(specifier)) {
+    if (!ALLOWED_MODULES.has(specifier) && !publicImports.includes(specifier)) {
       violations.push({
         kind: "import",
         message: `import from "${specifier}" is not allowed; import only from "sidequery/canvas"`,
@@ -46,7 +46,7 @@ export function scanCanvasSource(source: string): SandboxViolation[] {
 
   for (const match of stripped.matchAll(SIDE_EFFECT_IMPORT_RE)) {
     const specifier = match[1];
-    if (!ALLOWED_MODULES.has(specifier)) {
+    if (!ALLOWED_MODULES.has(specifier) && !publicImports.includes(specifier)) {
       violations.push({
         kind: "import",
         message: `side-effect import of "${specifier}" is not allowed`,

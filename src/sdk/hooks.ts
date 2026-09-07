@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from
 
 import { themeFromKind, type CanvasHostTheme } from "./tokens";
 import type { CanvasHttpRequest, CanvasHttpResponse } from "./server";
+import type { PluginRequest } from "../plugins/types";
 
 export type CanvasAction =
   | { type: "openFile"; path: string; selection?: { startLine?: number; endLine?: number } }
@@ -18,6 +19,7 @@ export type HostBridge = {
   actionUrl?: string;
   onAction?: (action: CanvasAction) => void;
   onRequest?: (request: CanvasHttpRequest) => Promise<CanvasHttpResponse>;
+  onPluginCall?: (request: PluginRequest) => Promise<unknown>;
 };
 
 function hostBridge(): HostBridge {
