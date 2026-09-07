@@ -1,5 +1,6 @@
 export type Version = {
   id: string; artifact_id: string; revision: number; source: string;
+  server_source?: string | null;
   source_hash: string; runtime: string;
   created_at: string; reason: string; restored_from: string | null;
   workspace: string; name: string; source_path: string;

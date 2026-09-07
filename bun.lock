@@ -25,6 +25,9 @@
       },
     },
   },
+  "patchedDependencies": {
+    "@cloudflare/worker-bundler@0.2.3": "patches/@cloudflare%2Fworker-bundler@0.2.3.patch",
+  },
   "packages": {
     "@cloudflare/kv-asset-handler": ["@cloudflare/kv-asset-handler@0.5.0", "", {}, "sha512-jxQYkj8dSIzc0cD6cMMNdOc1UVjqSqu8BZdor5s8cGjW2I8BjODt/kWPVdY+u9zj3ms75Q5qaZgnxUad83+eAg=="],
 

@@ -1,0 +1,26 @@
+diff --git a/dist/index.js b/dist/index.js
+index 9ddcbac086bbd60fece6571299c86f92d33412a6..48b0f5521f5c430182e89c964c38a698890c12f1 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -1,3 +1,4 @@
++import esbuildWasmModule from "./esbuild.wasm";
+ import { n as hasDependencies, r as installDependencies } from "./installer-DDvaMqav.js";
+ import * as esbuild from "esbuild-wasm/lib/browser.js";
+ import { parse } from "es-module-lexer/js";
+@@ -424,7 +425,7 @@ const NOT_IN_WORKERS_ERROR = "@cloudflare/worker-bundler is only supported insid
+ */
+ let pendingWasmImport = null;
+ if (isCloudflareWorkersRuntime()) {
+-	pendingWasmImport = import("./esbuild.wasm");
++	pendingWasmImport = Promise.resolve({ default: esbuildWasmModule });
+ 	pendingWasmImport.catch(() => {});
+ }
+ /**
+@@ -438,6 +439,7 @@ async function initializeEsbuild() {
+ 		if (!isCloudflareWorkersRuntime() || pendingWasmImport === null) throw new Error(NOT_IN_WORKERS_ERROR);
+ 		try {
+ 			const wasmModule = (await pendingWasmImport).default;
++			if (!("self" in globalThis)) Object.defineProperty(globalThis, "self", { value: globalThis });
+ 			await esbuild.initialize({
+ 				wasmModule,
+ 				worker: false

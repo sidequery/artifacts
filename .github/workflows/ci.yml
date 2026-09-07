@@ -24,3 +24,12 @@ jobs:
       - run: bun run test:mcp-ui
       - run: bun run test:cloudflare
       - run: bun run typecheck:cloudflare
+      - name: Install celld 0.4.1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download v0.4.1 --repo denoland/celld --pattern celld-x86_64-unknown-linux-gnu.gz --dir "$RUNNER_TEMP"
+          gzip -d "$RUNNER_TEMP/celld-x86_64-unknown-linux-gnu.gz"
+          chmod +x "$RUNNER_TEMP/celld-x86_64-unknown-linux-gnu"
+          echo "CELLD_BIN=$RUNNER_TEMP/celld-x86_64-unknown-linux-gnu" >> "$GITHUB_ENV"
+      - run: bun run test:celld

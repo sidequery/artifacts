@@ -11,6 +11,8 @@ let runtimeOptions: ConstructorParameters<typeof Miniflare>[0];
 let client: Client;
 let origin: string;
 const source = 'import { Button, H1, Stack, useCanvasState } from "herdr/canvas";\nexport default function Canvas() { const [n, setN] = useCanvasState("n", 0); return <Stack><H1>Hosted canvas</H1><Button onClick={() => setN(n+1)}>Count {n}</Button></Stack>; }\n';
+const counterClient = await readFile(new URL("../examples/counter.canvas.tsx", import.meta.url), "utf8");
+const counterServer = await readFile(new URL("../examples/counter.canvas.server.ts", import.meta.url), "utf8");
 let version: string;
 beforeAll(async () => {
   const modulesRoot = join(import.meta.dir, "../dist/worker-app");
@@ -26,10 +28,12 @@ beforeAll(async () => {
     env: {
       ENVIRONMENT: { type: "text", value: "local" },
       LIBRARIES: { type: "durable-object", worker: "canvas-app-test", exportName: "CanvasLibrary" },
+      BACKENDS: { type: "durable-object", worker: "canvas-app-test", exportName: "CanvasBackend" },
+      LOADER: { type: "worker-loader" },
       ASSETS: { type: "assets" },
     },
-    exports: { CanvasLibrary: { type: "durable-object", storage: "sqlite" } },
-    assets: { directory: join(import.meta.dir, "../dist/cloudflare/assets"), hasUserWorker: true, runWorkerFirst: true },
+    exports: { CanvasLibrary: { type: "durable-object", storage: "sqlite" }, CanvasBackend: { type: "durable-object", storage: "sqlite" } },
+    assets: { directory: join(import.meta.dir, "../dist/cloudflare/assets"), hasUserWorker: true, runWorkerFirst: true, htmlHandling: "none" },
   }, dev: {} }] };
   runtime = new Miniflare(runtimeOptions);
   origin = (await runtime.ready).origin;
@@ -81,6 +85,59 @@ test("invalid drafts remain readable with diagnostics and no preview", async () 
   expect(payload(await client.callTool({ name: "canvas_read", arguments: { name: "invalid" } })).source).toContain('"bad"');
 }, 30000);
 
+test("native canvas SQLite works through MCP and the gallery, persists across code changes, and restores paired source", async () => {
+  const written = await client.callTool({ name: "canvas_write", arguments: { name: "counter", contents: counterClient, server: counterServer } });
+  expect(written.isError).not.toBe(true);
+  const savedVersion = (written._meta as { canvas: { versionId: string; server: boolean } }).canvas;
+  expect(savedVersion.server).toBe(true);
+  expect(JSON.stringify(written.content)).not.toContain("create table");
+  const callCounter = async (method = "GET", name = "counter") => {
+    const result = await client.callTool({ name: "canvas_request", arguments: { name, request: { path: "/counter", method } } });
+    expect(result.isError).not.toBe(true);
+    const response = (result.structuredContent as { response: { status: number; body: string } }).response;
+    expect(response.status).toBe(200);
+    return JSON.parse(atob(response.body));
+  };
+  expect((await callCounter()).value).toBe(0);
+  expect((await callCounter("POST")).value).toBe(1);
+  expect((await callCounter("POST")).lastUpdated).toBeString();
+  await client.callTool({ name: "canvas_write", arguments: { name: "other-counter", contents: counterClient, server: counterServer } });
+  expect((await callCounter("GET", "other-counter")).value).toBe(0);
+  const otherWorkspace = new Client({ name: "other-workspace", version: "1" });
+  try {
+    await otherWorkspace.connect(new StreamableHTTPClientTransport(new URL(`${origin}/mcp?workspace=other`)));
+    expect((await otherWorkspace.callTool({ name: "canvas_write", arguments: { name: "counter", contents: counterClient, server: counterServer } })).isError).not.toBe(true);
+    const isolated = await otherWorkspace.callTool({ name: "canvas_request", arguments: { name: "counter", request: { path: "/counter" } } });
+    expect(isolated.isError).not.toBe(true);
+    expect(JSON.parse(atob((isolated.structuredContent as { response: { body: string } }).response.body)).value).toBe(0);
+  } finally { await otherWorkspace.close(); }
+  const edited = await client.callTool({ name: "canvas_edit", arguments: { name: "counter", part: "server", edits: [{ old_text: "value: row.value", new_text: "value: row.value, generation: 2" }] } });
+  expect(edited.isError).not.toBe(true);
+  expect(await callCounter()).toMatchObject({ value: 2, generation: 2 });
+  const restored = await client.callTool({ name: "canvas_restore", arguments: { version_id: savedVersion.versionId } });
+  expect(restored.isError).not.toBe(true);
+  expect(await callCounter()).toMatchObject({ value: 2 });
+  expect((await callCounter()).generation).toBeUndefined();
+  const serverRead = payload(await client.callTool({ name: "canvas_read", arguments: { name: "counter", part: "server", start_line: 1, end_line: 1 } }));
+  expect(serverRead.source).toBe('import { DurableObject } from "cloudflare:workers";\n');
+  expect(serverRead.server_source).toBeUndefined();
+  const mismatch = await client.callTool({ name: "canvas_request", arguments: { name: "other-counter", version_id: savedVersion.versionId, request: { path: "/counter" } } });
+  expect(mismatch.isError).toBe(true);
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.goto(`${origin}/?workspace=test`);
+    await page.getByRole("button", { name: "counter", exact: true }).click();
+    const frame = page.frameLocator("iframe");
+    await frame.getByText("Count: 2", { exact: true }).waitFor();
+    await frame.getByRole("button", { name: "Increment" }).click();
+    await frame.getByText("Count: 3", { exact: true }).waitFor();
+    await page.reload();
+    await page.getByRole("button", { name: "counter", exact: true }).click();
+    await page.frameLocator("iframe").getByText("Count: 3", { exact: true }).waitFor();
+  } finally { await browser.close(); }
+}, 60000);
+
 test("gallery renders interactive sandboxed previews and serves exact archived source", async () => {
   const response = await fetch(`${origin}/api/source?workspace=test&version=${version}&download=1`);
   expect(response.headers.get("content-disposition")).toContain("attachment");
@@ -115,12 +172,15 @@ test("gallery renders interactive sandboxed previews and serves exact archived s
 
 test("all hosted surfaces fail closed off loopback, and mutations enforce origin and request bounds", async () => {
   expect((await fetch(`${origin}/api/gallery`, { headers: { Origin: "https://evil.example" } })).status).toBe(403);
+  expect((await fetch(`${origin}/api/canvas/request`, { method: "POST", headers: { Origin: "https://evil.example" }, body: "{}" })).status).toBe(403);
+  expect((await fetch(`${origin}/api/canvas/request`, { method: "POST", body: "{}" })).status).toBe(400);
+  expect((await fetch(`${origin}/api/canvas/request`, { method: "POST", body: " ".repeat(1024 * 1024 + 1) })).status).toBe(413);
   expect((await fetch(`${origin}/mcp`, { method: "POST", body: "invalid" })).status).toBe(400);
   expect((await fetch(`${origin}/mcp`, { method: "POST", body: " ".repeat(1024 * 1024 + 1) })).status).toBe(413);
   expect((await fetch(`${origin}/api/source?workspace=other&version=${version}`)).status).toBe(404);
   const production = new Miniflare({ cf: false, port: 0, workers: [{ ...runtimeOptions.workers![0]!, config: { ...runtimeOptions.workers![0]!.config, env: { ...runtimeOptions.workers![0]!.config.env, ENVIRONMENT: { type: "text", value: "production" } } } }] });
   try {
-  for (const path of ["/", "/index.html", "/gallery.js", "/mcp", "/api/gallery", "/api/source", "/gallery/preview"]) {
+  for (const path of ["/", "/index.html", "/gallery.js", "/mcp", "/api/gallery", "/api/source", "/gallery/preview", "/api/canvas/request"]) {
     expect((await production.dispatchFetch(`https://canvas.example${path}`)).status).toBe(503);
   }
   } finally { await production.dispose(); }
@@ -184,6 +244,27 @@ test("verified users have isolated private libraries and can collaborate in the 
       expect((await fetch(address + path + "&workspace=test", { headers: { "Cf-Access-Jwt-Assertion": bobToken } })).status).toBe(404);
     }
     expect((await fetch(`${address}/api/gallery?library=alice`, { headers: { "Cf-Access-Jwt-Assertion": bobToken } })).status).toBe(400);
+    // The same canvas name must identify different databases across private
+    // subjects, while both team members operate on one shared database.
+    for (const remote of [alice, bob, teamAlice]) {
+      expect((await remote.callTool({ name: "canvas_write", arguments: { name: "database", contents: counterClient, server: counterServer } })).isError).not.toBe(true);
+    }
+    const database = async (remote: Client, method = "GET") => {
+      const result = await remote.callTool({ name: "canvas_request", arguments: { name: "database", request: { path: "/counter", method } } });
+      expect(result.isError).not.toBe(true);
+      const response = (result.structuredContent as { response: { status: number; body: string } }).response;
+      expect(response.status).toBe(200);
+      return JSON.parse(atob(response.body));
+    };
+    expect((await database(alice, "POST")).value).toBe(1);
+    expect((await database(bob)).value).toBe(0);
+    expect((await database(teamAlice)).value).toBe(0);
+    expect((await database(teamAlice, "POST")).value).toBe(1);
+    expect((await database(teamBob, "POST")).value).toBe(2);
+    expect((await database(teamAlice)).value).toBe(2);
+    expect((await database(alice)).value).toBe(1);
+    expect((await database(bob)).value).toBe(0);
+    expect((await bob.callTool({ name: "canvas_request", arguments: { version_id: privateVersion, request: { path: "/counter" } } })).isError).toBe(true);
     const browser = await chromium.launch({ headless: true });
     try {
       const page = await browser.newPage({ extraHTTPHeaders: { "Cf-Access-Jwt-Assertion": aliceToken } });
@@ -191,7 +272,7 @@ test("verified users have isolated private libraries and can collaborate in the 
       await page.getByRole("button", { name: "secret", exact: true }).waitFor();
       expect(await page.getByLabel("Library", { exact: true }).inputValue()).toBe("private");
       await page.getByLabel("Library", { exact: true }).selectOption("team");
-      await page.getByRole("button", { name: "shared", exact: true }).waitFor();
+      await page.getByRole("button", { name: "shared", exact: true }).click();
       await page.frameLocator("iframe").getByRole("heading", { name: "Team canvas" }).waitFor();
       expect(await page.getByRole("button", { name: "secret", exact: true }).count()).toBe(0);
       expect(new URL(page.url()).searchParams.get("library")).toBe("team");

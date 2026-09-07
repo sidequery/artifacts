@@ -19,10 +19,13 @@
     "test:mcp-ui": "bun test e2e/mcp-app.test.ts --timeout 30000",
     "typecheck": "tsc --noEmit",
     "dev:cloudflare": "wrangler dev --local --var ENVIRONMENT:local",
+    "prepare:celld": "bun run scripts/prepare-celld.ts",
+    "dev:celld": "bun run build:cloudflare && bun run prepare:celld && bun run scripts/dev-celld.ts",
     "build:cloudflare": "wrangler deploy --dry-run --outdir dist/worker-app",
     "build:cloudflare-compiler": "wrangler deploy --config cloudflare/wrangler.compiler.jsonc --dry-run --outdir ../dist/worker",
     "typecheck:cloudflare": "tsc -p cloudflare/tsconfig.json --noEmit",
     "test:cloudflare": "bun run build:cloudflare-compiler && bun run build:cloudflare && bun test cloudflare --timeout 60000",
+    "test:celld": "bun run build:cloudflare && bun run prepare:celld && CELLD_INTEGRATION=1 bun test cloudflare/celld.test.ts --timeout 180000",
     "deploy:cloudflare": "wrangler deploy",
     "seed:cloudflare": "bun run scripts/seed-cloudflare.ts"
   },
@@ -45,5 +48,8 @@
     "miniflare": "5.20260903.0-alpha",
     "playwright": "^1.63.0",
     "wrangler": "4.129.0"
+  },
+  "patchedDependencies": {
+    "@cloudflare/worker-bundler@0.2.3": "patches/@cloudflare%2Fworker-bundler@0.2.3.patch"
   }
 }
