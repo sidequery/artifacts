@@ -1,15 +1,18 @@
 import { createRoot } from "react-dom/client";
 import * as react from "react";
+import * as reactRouter from "react-router";
 import * as reactDom from "react-dom";
 import * as reactDomClient from "react-dom/client";
 import * as jsxDev from "react/jsx-dev-runtime";
 import type { ComponentType } from "react";
 import * as jsx from "react/jsx-runtime";
+import { CanvasRouter } from "../sdk/routing";
 import * as sdk from "../sdk";
 
 const runtime = {
   sdk,
   react,
+  reactRouter,
   reactDom,
   reactDomClient,
   jsxDev,
@@ -19,7 +22,7 @@ const runtime = {
     if (!element) throw new Error("missing #root");
     const root = createRoot(element);
     (window as Window & { __herdrCanvasUnmount?: () => void }).__herdrCanvasUnmount = () => root.unmount();
-    root.render(jsx.jsx(Component, {}));
+    root.render(jsx.jsx(CanvasRouter, { children: jsx.jsx(Component, {}) }));
   },
 };
 

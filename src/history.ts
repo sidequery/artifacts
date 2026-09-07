@@ -33,7 +33,7 @@ export function runtimeIdentity(): string {
   const manifestPath = join(PLUGIN_ROOT, "package.json");
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as { version: string };
   const requireFromPlugin = createRequire(manifestPath);
-  const dependencies = Object.fromEntries(["react", "react-dom", "typescript"].map(name => {
+  const dependencies = Object.fromEntries(["react", "react-dom", "react-router", "typescript"].map(name => {
     const dependency = JSON.parse(readFileSync(requireFromPlugin.resolve(`${name}/package.json`), "utf8")) as { version: string };
     return [name, dependency.version];
   }));

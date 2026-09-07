@@ -5,6 +5,7 @@ import { Miniflare } from "miniflare";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { chromium } from "playwright";
+import { ROUTING_CANVAS } from "../src/test/routing";
 
 let runtime: Miniflare;
 let runtimeOptions: ConstructorParameters<typeof Miniflare>[0];
@@ -13,6 +14,16 @@ let origin: string;
 const source = 'import { Button, H1, Stack, useCanvasState } from "sidequery/canvas";\nexport default function Canvas() { const [n, setN] = useCanvasState("n", 0); return <Stack><H1>Hosted canvas</H1><Button onClick={() => setN(n+1)}>Count {n}</Button></Stack>; }\n';
 const counterClient = await readFile(new URL("../examples/counter.canvas.tsx", import.meta.url), "utf8");
 const counterServer = await readFile(new URL("../examples/counter.canvas.server.ts", import.meta.url), "utf8");
+const apiServer = `import { DurableObject } from "cloudflare:workers";
+export class CanvasServer extends DurableObject {
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    if (url.pathname === "/api/headers") return Response.json(Object.fromEntries(request.headers));
+    if (url.pathname === "/api/html") return new Response("<h1>API page</h1>", {headers:{"content-type":"text/html","set-cookie":"session=forged"}});
+    if (url.pathname !== "/api" && url.pathname !== "/api/echo") return Response.json({error:"API route not found"}, {status:404});
+    return new Response(request.method === "HEAD" ? null : await request.arrayBuffer(), {status:201, headers:{"content-type":"application/octet-stream","x-path":url.pathname + url.search,"x-method":request.method,"x-result":"api"}});
+  }
+}`;
 let version: string;
 beforeAll(async () => {
   const modulesRoot = join(import.meta.dir, "../dist/worker-app");
@@ -107,9 +118,20 @@ test("plugin HTTP and MCP routes expose catalog hints and validate requests", as
     expect(response.status).toBe(404);
     expect(await response.json()).toEqual({ error: "Plugin operation not found" });
   }
-  expect((await fetch(`${origin}/api/plugins/call`, { method: "POST", body: "{}" })).status).toBe(400);
-  expect((await fetch(`${origin}/api/plugins/call`, { method: "POST", body: " ".repeat(256 * 1024 + 1) })).status).toBe(413);
-  expect((await fetch(`${origin}/api/plugins/call`, { method: "POST", headers: { Origin: "https://evil.example" }, body: JSON.stringify(call) })).status).toBe(403);
+  // Rejection probes can leave the request unread or cancel its stream. Keep
+  // their closing sockets out of the pool used by the shared MCP client.
+  for (const [status, body, requestOrigin] of [
+    [400, "{}", undefined],
+    [413, " ".repeat(256 * 1024 + 1), undefined],
+    [403, JSON.stringify(call), "https://evil.example"],
+  ] as const) {
+    const response = await fetch(`${origin}/api/plugins/call`, {
+      method: "POST", body, headers: { Connection: "close", ...(requestOrigin ? { Origin: requestOrigin } : {}) },
+    });
+    expect(response.status).toBe(status);
+    expect(await response.text()).not.toBe("");
+  }
+  expect((await client.callTool({ name: "plugin_guide", arguments: {} })).isError).not.toBe(true);
 });
 
 test("invalid drafts remain readable with diagnostics and no preview", async () => {
@@ -260,6 +282,15 @@ test("verified users have isolated private libraries and can collaborate in the 
     const bob = await connect(bobToken, "private");
     const teamAlice = await connect(aliceToken, "team");
     const teamBob = await connect(bobToken, "team");
+    expect((await alice.callTool({ name: "canvas_write", arguments: { name: "private-api", slug: "private-api", contents: source, server: apiServer } })).isError).not.toBe(true);
+    expect((await fetch(`${address}/private-api/api/headers`)).status).toBe(401);
+    expect((await fetch(`${address}/private-api/api/headers`, { headers: { "Cf-Access-Jwt-Assertion": bobToken } })).status).toBe(404);
+    expect((await fetch(`${address}/private-api/api/headers`, { headers: { "Cf-Access-Jwt-Assertion": aliceToken, Origin: "https://evil.example" } })).status).toBe(403);
+    const privateApi = await fetch(`${address}/private-api/api/headers`, { headers: { "Cf-Access-Jwt-Assertion": aliceToken, Authorization: "Bearer private-management", Cookie: "session=private", "Cf-Access-Client-Id": "id", "Cf-Access-Client-Secret": "secret", "x-kept": "yes" } });
+    expect(privateApi.status).toBe(200);
+    const privateHeaders = await privateApi.json() as Record<string, string>;
+    expect(privateHeaders["x-kept"]).toBe("yes");
+    for (const name of ["authorization", "cookie", "cf-access-jwt-assertion", "cf-access-client-id", "cf-access-client-secret"]) expect(privateHeaders[name]).toBeUndefined();
     const privateResult = await alice.callTool({ name: "canvas_write", arguments: { name: "secret", contents: source } });
     expect(privateResult.isError).not.toBe(true);
     const privateVersion = (privateResult._meta as { canvas: { versionId: string } }).canvas.versionId;
@@ -466,3 +497,70 @@ test("correcting initial invalid drafts retains the user-chosen slug and access"
   expect(payload(corrected).url).toBe(`${origin}/chosen-canvas`);
   expect((await fetch(`${origin}/chosen-canvas`)).status).toBe(200);
 });
+
+test("standalone canvas APIs preserve HTTP semantics and never fall back to the page shell", async () => {
+  const saved = await client.callTool({ name: "canvas_write", arguments: { name: "direct-api", slug: "direct-api", access: "public", contents: source, server: apiServer } });
+  expect(saved.isError).not.toBe(true);
+  const bytes = new Uint8Array([0, 255, 128, 10, 13, 42]);
+  for (const path of ["/api", "/api/echo?value=%FF&value=two"]) {
+    const response = await fetch(`${origin}/direct-api${path}`, { method: "PATCH", body: bytes });
+    expect(response.status).toBe(201);
+    expect(response.headers.get("x-path")).toBe(path);
+    expect(response.headers.get("x-method")).toBe("PATCH");
+    expect(response.headers.get("x-result")).toBe("api");
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
+  }
+  const headers = await (await fetch(`${origin}/direct-api/api/headers`, { headers: { Cookie: "session=ambient", "Cf-Access-Jwt-Assertion": "ambient", "Cf-Access-Client-Id": "id", "Cf-Access-Client-Secret": "secret", Authorization: "Bearer application" } })).json() as Record<string, string>;
+  expect(headers.authorization).toBe("Bearer application");
+  for (const name of ["cookie", "cf-access-jwt-assertion", "cf-access-client-id", "cf-access-client-secret"]) expect(headers[name]).toBeUndefined();
+  for (const method of ["GET", "POST"]) expect((await fetch(`${origin}/direct-api/api`, { method, headers: { Origin: "https://evil.example", Cookie: "session=ambient" } })).status).toBe(403);
+  expect((await fetch(`${origin}/direct-api/api`, { method: "POST", body: new Uint8Array(256 * 1024 + 1) })).status).toBe(413);
+  const missing = await fetch(`${origin}/direct-api/api/missing`);
+  expect(missing.status).toBe(404);
+  expect(await missing.json()).toEqual({ error: "API route not found" });
+  const head = await fetch(`${origin}/direct-api/api`, { method: "HEAD" });
+  expect(head.status).toBe(201);
+  expect(head.headers.get("x-method")).toBe("HEAD");
+  expect(await head.text()).toBe("");
+  const html = await fetch(`${origin}/direct-api/api/html`);
+  expect(await html.text()).toBe("<h1>API page</h1>");
+  expect(html.headers.get("set-cookie")).toBeNull();
+  expect(html.headers.get("content-security-policy")).toContain("sandbox allow-scripts allow-forms");
+  expect((await client.callTool({ name: "canvas_write", arguments: { name: "direct-api", contents: source, server: "export class CanvasServer { fetch( }" } })).isError).toBe(true);
+  expect((await fetch(`${origin}/direct-api/api`)).status).toBe(201);
+
+  expect((await client.callTool({ name: "canvas_write", arguments: { name: "pages-only", slug: "pages-only", access: "public", contents: source } })).isError).not.toBe(true);
+  const absent = await fetch(`${origin}/pages-only/api/missing`);
+  expect(absent.status).toBe(404);
+  expect(await absent.json()).toEqual({ error: "Canvas has no server" });
+  const deep = await fetch(`${origin}/pages-only/projects/42?tab=detail`);
+  expect(deep.status).toBe(200);
+  expect(deep.headers.get("content-type")).toContain("text/html");
+  expect(await deep.text()).toContain("/projects/42?tab=detail");
+  const deepHead = await fetch(`${origin}/pages-only/projects/42`, { method: "HEAD" });
+  expect(deepHead.status).toBe(200);
+  expect(deepHead.headers.get("content-type")).toContain("text/html");
+  expect(await deepHead.text()).toBe("");
+  expect((await fetch(`${origin}/pages-only/projects/42`, { method: "POST" })).status).toBe(405);
+  for (const path of ["/_canvas", "/_canvas/unknown", "/_canvas/request/extra", "/_canvas/plugins/extra"]) expect((await fetch(`${origin}/pages-only${path}`)).status).toBe(404);
+}, 60000);
+
+test("standalone nested canvas pages restore browser routes on direct load and refresh", async () => {
+  expect((await client.callTool({ name: "canvas_write", arguments: { name: "linked-routes", slug: "linked-routes", access: "public", contents: ROUTING_CANVAS } })).isError).not.toBe(true);
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.goto(`${origin}/linked-routes/accounts/123?tab=activity#latest`);
+    const frame = page.frameLocator("iframe");
+    await frame.getByRole("heading", { name: "Account 123" }).waitFor();
+    await frame.getByText("Tab: activity", { exact: true }).waitFor();
+    await frame.getByText("Hash: #latest", { exact: true }).waitFor();
+    await frame.getByRole("link", { name: "Next account" }).click();
+    await page.waitForURL(`${origin}/linked-routes/accounts/456`);
+    await page.reload();
+    await frame.getByRole("heading", { name: "Account 456" }).waitFor();
+    await page.goBack();
+    await frame.getByRole("heading", { name: "Account 123" }).waitFor();
+    await frame.getByText("Hash: #latest", { exact: true }).waitFor();
+  } finally { await browser.close(); }
+}, 60000);

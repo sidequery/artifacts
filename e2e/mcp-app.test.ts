@@ -504,3 +504,21 @@ export default function Canvas() {
   expect(errors).toEqual([]);
   await page.close();
 }, 30_000);
+
+
+test("routed canvases navigate inside MCP and reset when a new preview arrives", async () => {
+  const { ROUTING_CANVAS } = await import("../src/test/routing");
+  const meta = await resultFor(ROUTING_CANVAS, "routed");
+  const { page, app, errors } = await openHost();
+  const outerUrl = page.url();
+  await page.evaluate(meta => window.mcpHost!.sendResult({ content: [], _meta: meta }), meta);
+  await app.getByRole("heading", { name: "Home page" }).waitFor();
+  await app.getByRole("link", { name: "Account", exact: true }).click();
+  await app.getByRole("heading", { name: "Account 123" }).waitFor();
+  await app.getByText("Tab: activity", { exact: true }).waitFor();
+  expect(page.url()).toBe(outerUrl);
+  await page.evaluate(meta => window.mcpHost!.sendResult({ content: [], _meta: meta }), meta);
+  await app.getByRole("heading", { name: "Home page" }).waitFor();
+  expect(errors).toEqual([]);
+  await page.close();
+}, 30000);

@@ -8,6 +8,8 @@ import type { CanvasHttpRequest } from "../src/httpTypes";
 import { PluginError, PLUGIN_JSON_LIMIT, type PluginInvocationContext } from "./plugins";
 import type { PluginRequest, PluginUser } from "../src/plugins/types";
 import galleryBridge from "../dist/cloudflare/gallery-request.json";
+import navigationHost from "../dist/cloudflare/navigation-host.json";
+import { canvasApiRequest, canvasApiResponse } from "./canvas-api";
 
 export async function identify(request: Request, env: Env): Promise<{ privateKey: string; user: PluginUser } | Response> {
   if (env.AUTH_MODE && !["access", "better-auth"].includes(env.AUTH_MODE)) return Response.json({ error: "Invalid AUTH_MODE" }, { status: 503 });
@@ -20,8 +22,8 @@ export async function identify(request: Request, env: Env): Promise<{ privateKey
   return identity instanceof Response ? identity : { privateKey: JSON.stringify(["private", env.ACCESS_TEAM_DOMAIN ?? "local", identity.subject]), user: identity };
 }
 const scriptJson = (value: unknown) => JSON.stringify(value).replaceAll("<", "\\u003c");
-function html(body: string, policy: string): Response {
-  return new Response(body, { headers: { "content-type": "text/html; charset=utf-8", "content-security-policy": policy, "cache-control": "private, no-store", "x-content-type-options": "nosniff" } });
+function html(body: string, policy: string, head: boolean): Response {
+  return new Response(head ? null : body, { headers: { "content-type": "text/html; charset=utf-8", "content-security-policy": policy, "cache-control": "private, no-store", "x-content-type-options": "nosniff" } });
 }
 
 /** Root slug dispatch is separate from management authentication. */
@@ -66,6 +68,19 @@ export async function artifactRoute(request: Request, env: Env): Promise<Respons
   }
   if (!link.version_id) return new Response("Canvas has no valid version", { status: 409 });
   const service = new CloudCanvasService(env.LIBRARIES.getByName(link.libraryKey), link.workspace, env.BACKENDS, link.libraryKey, undefined, plugins);
+  if (url.pathname === `/${slug}/api` || url.pathname.startsWith(`/${slug}/api/`)) {
+    const origin = request.headers.get("Origin");
+    if (origin && origin !== url.origin) return new Response("Origin is not allowed", { status: 403 });
+    const selection = { name: link.name, version_id: link.version_id };
+    if ((await service.snapshot({ version_id: link.version_id })).server_source === null) return Response.json({ error: "Canvas has no server" }, { status: 404 });
+    let input: CanvasHttpRequest;
+    try { input = await canvasApiRequest(request, `/${slug}`, link.access === "private"); }
+    catch (error) {
+      if (error instanceof RangeError) return Response.json({ error: error.message }, { status: 413 });
+      throw error;
+    }
+    return canvasApiResponse(await service.request(selection, input), request.method);
+  }
   if (url.pathname === `/${slug}/_canvas/plugins`) {
     if (request.method !== "POST") return new Response("Method not allowed", { status: 405, headers: { Allow: "POST" } });
     let input: PluginRequest;
@@ -88,15 +103,17 @@ export async function artifactRoute(request: Request, env: Env): Promise<Respons
     if (args.version_id !== link.version_id) return Response.json({ error: "Canvas updated; reload the page" }, { status: 409 });
     return Response.json({ response: await service.request({ name: link.name, version_id: link.version_id }, args.request) }, { headers: { "cache-control": "no-store" } });
   }
-  if (url.pathname !== `/${slug}` && url.pathname !== `/${slug}/`) return new Response("Not found", { status: 404 });
+  if (url.pathname === `/${slug}/_canvas` || url.pathname.startsWith(`/${slug}/_canvas/`)) return new Response("Not found", { status: 404 });
   if (request.method !== "GET" && request.method !== "HEAD") return new Response("Method not allowed", { status: 405, headers: { Allow: "GET, HEAD" } });
   const snapshot = await service.snapshot({ version_id: link.version_id });
   const preview = await service.preview(snapshot);
   if (!preview.ok || !preview._meta) return new Response(preview.check, { status: 400 });
   const payload = preview._meta.canvas;
-  const frame = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'"><style>body{margin:0;background:#181818;color:#f0f0f0;font-family:system-ui,sans-serif}#root{padding:24px}</style></head><body><div id="root"></div><script>window.__herdrCanvas=${scriptJson({ canvasId: payload.name, state: payload.state, theme: { kind: "dark" }, plugins: payload.plugins, ...(payload.server ? { serverVersionId: payload.versionId } : {}) })};${galleryBridge.replace(/<\/script/gi, "<\\/script")}</script><script type="module">${payload.js.replace(/<\/script/gi, "<\\/script")}</script></body></html>`;
+  const frame = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'"><style>body{margin:0;background:#181818;color:#f0f0f0;font-family:system-ui,sans-serif}#root{padding:24px}</style></head><body><div id="root"></div><script>window.__herdrCanvas=${scriptJson({ canvasId: payload.name, state: payload.state, theme: { kind: "dark" }, plugins: payload.plugins, route: { path: (url.pathname.slice(slug.length + 1) || "/") + url.search, basePath: `/${slug}`, external: true }, ...(payload.server ? { serverVersionId: payload.versionId } : {}) })};${galleryBridge.replace(/<\/script/gi, "<\\/script")}</script><script type="module">${payload.js.replace(/<\/script/gi, "<\\/script")}</script></body></html>`;
   return html(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Canvas</title><style>html,body,iframe{width:100%;height:100%;margin:0;border:0;display:block;background:#181818}</style></head><body><iframe title="Canvas" sandbox="allow-scripts"></iframe><script>
 const frame=document.querySelector('iframe');frame.srcdoc=${scriptJson(frame)};
+window.__canvasNavigationHost={frame,basePath:${scriptJson(`/${slug}`)}};
+${navigationHost.replace(/<\/script/gi, "<\\/script")}
 const pending=new Set();
 window.addEventListener('message',async event=>{
  const data=event.data;
@@ -113,5 +130,5 @@ window.addEventListener('message',async event=>{
   frame.contentWindow.postMessage({type:responseType,id:data.id,...(plugin?{result:result.result}:{response:result.response})},'*');
  }catch(error){frame.contentWindow.postMessage({type:responseType,id:data.id,error:String(error.message||error)},'*');}
  finally{pending.delete(data.id);}
-});</script></body></html>`, "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-src 'self' about:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'");
+});</script></body></html>`, "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-src 'self' about:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'", request.method === "HEAD");
 }

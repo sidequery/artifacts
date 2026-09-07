@@ -4,7 +4,7 @@ export const CANVAS_GUIDE_EXPORTS = [
   "BarChart", "Button", "Callout", "Card", "CardBody", "CardHeader", "Checkbox",
   "Code", "Divider", "Grid", "H1", "H2", "H3", "LineChart", "Link", "PieChart",
   "Pill", "Row", "Select", "Spacer", "Stack", "Stat", "Table", "Text", "TextArea",
-  "TextInput", "Toggle", "canvasFetch", "pluginCall", "canvasPaletteDark", "canvasPaletteLight", "canvasTypography",
+  "TextInput", "Toggle", "canvasFetch", "pluginCall", "Routes", "Route", "Outlet", "Navigate", "NavLink", "useNavigate", "useParams", "useLocation", "useSearchParams", "useMatch", "useResolvedPath", "canvasPaletteDark", "canvasPaletteLight", "canvasTypography",
   "mergeStyle", "themeFromKind", "tokensFromPalette", "useCanvasAction", "useCanvasState", "useState", "useReducer", "useRef", "useMemo", "useCallback", "useEffect", "useHostTheme",
 ];
 
@@ -31,6 +31,10 @@ ${CANVAS_GUIDE_EXPORTS.join(", ")}
 
 pluginCall<T>(plugin, operation, input, { signal }?) calls an authenticated deployment function. Use plugins_list for installed names and schemas and plugin_guide for access rules. Installed browser libraries may wrap this helper with their own typed API. A view without the hosted plugin bridge rejects calls.
 
+## Routing
+
+The runtime supplies React Router. Use Routes, Route, Outlet, Navigate, NavLink and routing hooks from sidequery/canvas. Link to="/accounts/123" navigates within a canvas; existing Link href="https://..." keeps ordinary link behavior. Nested layouts, params, search params and navigation state work normally. Standalone /slug/* URLs support deep links, reload and browser back/forward. Gallery and chat views keep navigation in memory. /api and /api/* are reserved for the canvas backend; /_canvas/* is reserved for runtime bridges.
+
 ## Hosted servers and SQLite
 
 canvasFetch(path: string, init?: RequestInit): Promise<Response> sends a request to the canvas's native server through the host bridge. Use relative paths and standard methods, headers, and bodies; check response.ok before reading response.json() or response.text(). Cross-origin and protocol-relative URLs are rejected. Request and response bodies are limited to 256 KiB.
@@ -44,6 +48,8 @@ Canvas has no application-schema migration runner. For schema changes, keep a sc
 Omitting server preserves existing code; null removes code without deleting the database. Hosted canvas_read/canvas_edit accept part: "server". Browser and server source are versioned together; the database remains live across source edits and restores. Archived code also runs against the current database, not a historical snapshot.
 
 Database identity is library + workspace + canvas name: private libraries isolate users; an authorized team library shares data. Server code has no ordinary D1, R2 or custom Worker bindings and no global outbound access.
+
+Direct HTTP requests to /slug/api and /slug/api/* reach the active canvas backend with the /api path and query preserved. Unknown API routes never fall back to page HTML; a canvas without a backend returns JSON 404. Existing body limits and access rules apply.
 
 Implement fetch(request: Request) on CanvasServer and return a Response; browser code calls it with canvasFetch. SQLite stores durable application data; useState and useCanvasState hold UI state. Agents can also invoke the hosted canvas_request tool with name or version_id and a request envelope (path, method, headers, base64 body).
 

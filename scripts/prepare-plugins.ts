@@ -8,7 +8,7 @@ import type { CanvasPlugin } from "../src/plugins/config";
 import type { PluginInfo } from "../src/plugins/types";
 import { prepareBrowserPlugins } from "./prepare-browser-plugins";
 
-const reserved = new Set(["react", "react-dom", "@sidequery/canvas"]);
+const reserved = new Set(["react", "react-dom", "react-router", "@sidequery/canvas"]);
 export function validatePlugins(value: unknown): readonly CanvasPlugin[] {
   if (!Array.isArray(value) || value.length > 64) throw new Error("Plugin config must export an array of at most 64 plugins");
   const names = new Set<string>();
