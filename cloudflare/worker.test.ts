@@ -58,6 +58,10 @@ test("official HTTP MCP client lists contracts, writes, edits, restores and retr
   expect(guide.isError).not.toBe(true);
   const guideText = (guide.content as { text: string }[])[0]!.text;
   expect(guideText).toContain("sidequery/canvas");
+  expect(tools.find(tool => tool.name === "script_guide")?.annotations?.readOnlyHint).toBe(true);
+  const scriptGuide = await client.callTool({ name: "script_guide", arguments: {} });
+  expect(scriptGuide.isError).not.toBe(true);
+  expect((scriptGuide.content as { text: string }[])[0]!.text).toContain("Third-party dependencies");
   expect((tools.find(tool => tool.name === "canvas_open")!.inputSchema.properties!.target as { enum: string[] }).enum).toEqual(["inline"]);
   const result = await client.callTool({ name: "canvas_write", arguments: { name: "overview", contents: source } });
   expect(result.isError).not.toBe(true);

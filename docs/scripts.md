@@ -83,3 +83,28 @@ Agents use `script_write`, `script_read`, `script_edit`, `script_list`, `script_
   }
 }
 ```
+
+## Third-party dependencies
+
+The hosted compiler does not install bun dependencies or resolve a multi-file project. For a Workers-compatible package, keep your original TypeScript, `package.json`, and lockfile locally. Install an exact package version with `bun add --exact <package>@<version>` and typecheck the original source with your project's TypeScript setup.
+
+Bundle the handler locally before calling `script_write`. For example, a Hono handler can be bundled with this `bundle.ts`:
+
+```ts
+const build = await Bun.build({
+  entrypoints: ["handler.ts"],
+  target: "browser",
+  format: "esm",
+  external: ["node:*", "cloudflare:*"],
+  banner: "// @ts-nocheck",
+  minify: true,
+});
+if (!build.success) throw new Error(build.logs.join("\n"));
+await Bun.write("handler.bundle.js", await build.outputs[0]!.text());
+```
+
+Run `bun run bundle.ts`, read `handler.bundle.js`, and pass its complete contents as `script_write.contents`. The banner applies only to generated JavaScript: it prevents strict implicit-any diagnostics caused by erased TypeScript types. Typecheck handwritten source before bundling. Runtime module initialization and handler-shape validation still apply.
+
+Keep the bundle within the 256 KiB UTF-8 source limit. Packages requiring native addons or a Node process cannot run in Workers. Rebuild from original source when changing bundled scripts; do not use targeted text edits on generated dependency internals. Worker and Node builtins remain external because the runtime supplies them. Scripts cannot import dependencies through adjacent files or package URLs.
+
+Agents can call `script_guide` to retrieve this workflow through MCP. `script_write` points to that guide; hosted `canvas_guide` includes the same script guidance.

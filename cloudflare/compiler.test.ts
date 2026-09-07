@@ -216,3 +216,68 @@ test("scripts compile arbitrary Workers handlers and reject missing handlers, in
   ]) expect((await call(source,"compile-script")).ok).toBe(false);
   expect((await call('import { H1 } from "sidequery/canvas"; export default function Canvas() { return <H1>After script</H1>; }')).ok).toBe(true);
 },60000);
+
+test("a prebundled third-party Hono handler compiles and serves through the script runtime", async () => {
+  // This is the supported upload recipe: resolve dependencies locally, keep
+  // Workers builtins external, and disable semantic checking of generated JS.
+  const bundle = await Bun.build({
+    entrypoints: [new URL("./hono-script-test-fixture.ts", import.meta.url).pathname],
+    target: "browser", format: "esm", minify: true,
+    external: ["node:*", "cloudflare:*"], banner: "// @ts-nocheck",
+  });
+  if (!bundle.success) throw new Error(bundle.logs.join("\n"));
+  expect(bundle.outputs).toHaveLength(1);
+  const upload = await bundle.outputs[0]!.text();
+  expect(new TextEncoder().encode(upload).byteLength).toBeLessThanOrEqual(256 * 1024);
+  const compiled = await call(upload, "compile-script");
+  expect(compiled.diagnostics).toEqual([]);
+  expect(compiled.ok).toBe(true);
+  expect(outbound).toEqual([]);
+
+  const host = await Bun.build({
+    entrypoints: [new URL("./scripts-test-worker.ts", import.meta.url).pathname],
+    target: "node", format: "esm", external: ["cloudflare:workers"],
+  });
+  if (!host.success) throw new Error(host.logs.join("\n"));
+  const execution = new Miniflare({
+    cf: false, port: 0,
+    workers: [{
+      config: {
+        name: "prebundled-script-test", type: "worker",
+        compatibilityDate: "2026-09-06", compatibilityFlags: ["nodejs_compat"],
+        manifest: {
+          mainModule: "test.js", modulesRoot: import.meta.dir,
+          modules: { "test.js": { type: "esm", contents: await host.outputs[0]!.text() } },
+        },
+        env: {
+          SCRIPTS: { type: "durable-object", worker: "prebundled-script-test", exportName: "ScriptLibrary" },
+          SCRIPT_BACKENDS: { type: "durable-object", worker: "prebundled-script-test", exportName: "ScriptBackend" },
+          LOADER: { type: "worker-loader" },
+        },
+        exports: {
+          ScriptLibrary: { type: "durable-object", storage: "sqlite" },
+          ScriptBackend: { type: "durable-object", storage: "sqlite" },
+        },
+      },
+      dev: {},
+    }],
+  });
+  try {
+    await execution.ready;
+    const validation = await execution.dispatchFetch("https://test.invalid/validate", {
+      method: "POST", body: JSON.stringify({ code: compiled.js, hash: "hono", secrets: {} }),
+    });
+    expect(await validation.json()).toEqual({ ok: true });
+    const response = await execution.dispatchFetch("https://test.invalid/run", {
+      method: "POST", body: JSON.stringify({ code: compiled.js, secrets: {}, body: "third-party\r\npayload" }),
+    });
+    expect(response.status).toBe(201);
+    expect(response.headers.get("content-type")).toContain("application/json");
+    expect(await response.json()).toEqual({
+      framework: "hono", segment: "path", query: "two", method: "POST",
+      header: "yes", body: "third-party\r\npayload",
+    });
+  } finally {
+    await execution.dispose();
+  }
+}, 60000);

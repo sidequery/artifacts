@@ -61,7 +61,9 @@ const pageProperty = { offset: { type: "integer", minimum: 0, default: 0 } };
 addScriptTool("artifact_link", "Give a canvas or script a chosen root URL. Canvas links require valid source and work independently of the gallery. Defaults to private access. Renaming a slug changes its URL.", {
   kind: { type: "string", enum: ["canvas", "script"] }, name: { type: "string", minLength: 1 }, ...slugProperties,
 }, ["kind", "name", "slug"]);
-addScriptTool("script_write", "Create or replace arbitrary Workers-compatible TypeScript exporting default { fetch(request, env, ctx) }. Saved drafts and history are retained even when validation fails; only valid updates replace the running code. Scripts have outbound fetch, env.secrets, and env.sql for persistent SQLite. Slug defaults to the name; URLs use /<slug>. This does not execute the handler.", {
+addScriptTool("script_guide", "Read the hosted script and root-URL authoring guide before creating a script. Covers runtime, access, storage, secrets, validation, HTTP requests, and bundling third-party dependencies.", {});
+CLOUD_MCP_TOOLS[CLOUD_MCP_TOOLS.length - 1]!.annotations = { readOnlyHint: true };
+addScriptTool("script_write", "Call script_guide first. Create or replace arbitrary Workers-compatible TypeScript exporting default { fetch(request, env, ctx) }. Saved drafts and history are retained even when validation fails; only valid updates replace the running code. Scripts have outbound fetch, env.secrets, and env.sql for persistent SQLite. Slug defaults to the name; URLs use /<slug>. One module only: Workers/Node builtins or prebundled third-party code (see script_guide). No package installation at request time. This loads the module for validation but does not execute the handler.", {
   ...nameProperty, contents: { type: "string", maxLength: 262144 }, ...slugProperties,
 }, ["name", "contents"]);
 addScriptTool("script_read", "Read script source with bounded line ranges, optionally from a historical version. Does not execute the script.", {
