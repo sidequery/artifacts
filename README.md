@@ -1,5 +1,7 @@
 # Canvas
 
+<img width="1417" height="945" alt="Screenshot 2026-09-06 at 10 36 49 PM" src="https://github.com/user-attachments/assets/87b51b80-660d-449a-8e80-acbeb5db15e9" />
+
 Local, source-backed React artifacts for agents. Browse them in a web gallery,
 read and edit them through CLI or MCP, and retain raw-source version history.
 Herdr is an optional integration for opening artifacts beside a terminal agent.
