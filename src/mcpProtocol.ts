@@ -16,8 +16,7 @@ export type JsonRpcResponse = {
 
 export function encodeMessage(message: object): Buffer {
   const json = JSON.stringify(message);
-  const body = Buffer.from(json, "utf8");
-  return Buffer.concat([Buffer.from(`Content-Length: ${body.length}\r\n\r\n`, "utf8"), body]);
+  return Buffer.from(json + "\n", "utf8");
 }
 
 export function parseMessages(buffer: Buffer): { messages: JsonRpcRequest[]; rest: Buffer } {

@@ -8,4 +8,6 @@ if (!root) {
 }
 
 const Component = Canvas as ComponentType;
-createRoot(root).render(<Component />);
+const reactRoot = createRoot(root);
+(window as Window & { __herdrCanvasUnmount?: () => void }).__herdrCanvasUnmount = () => reactRoot.unmount();
+reactRoot.render(<Component />);

@@ -7,9 +7,9 @@ export async function runMcpServer(service: CanvasService): Promise<void> {
   const stdin = Bun.stdin.stream();
   const reader = stdin.getReader();
 
-  const write = (message: object) => {
+  const write = async (message: object) => {
     const bytes = encodeMessage(message);
-    Bun.write(Bun.stdout, bytes);
+    await Bun.write(Bun.stdout, bytes);
   };
 
   while (true) {
@@ -23,7 +23,7 @@ export async function runMcpServer(service: CanvasService): Promise<void> {
     for (const request of parsed.messages as JsonRpcRequest[]) {
       const response = await handleMcpRequest(request, service);
       if (response) {
-        write(response);
+        await write(response);
       }
     }
   }

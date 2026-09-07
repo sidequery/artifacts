@@ -4,9 +4,9 @@ Local, source-backed React artifacts for agents. Browse them in a web gallery,
 read and edit them through CLI or MCP, and retain raw-source version history.
 Herdr is an optional integration for opening artifacts beside a terminal agent.
 
-This initial version runs on Bun with local files and SQLite. Cloudflare runtime
-support and MCP Apps are deferred; the current MCP interface is a stdio tool
-server, not an embedded MCP UI. The repository is named `canvas`; an existing
+This version runs on Bun with local files and SQLite. MCP Apps hosts render the
+interactive canvas directly inside chat when an agent creates or shows it.
+Cloudflare runtime support remains deferred. The repository is named `canvas`; an existing
 checkout can remain in a folder named `herdr-canvas`.
 
 ## Requirements
@@ -76,6 +76,39 @@ that starts a detached server and returns its URL.
 MCP tools: `canvas_list`, `canvas_read`, `canvas_edit`, `canvas_write`, `canvas_typecheck`, `canvas_compile`,
 `canvas_open`. `canvas_write` returns `Canvas TypeScript check` diagnostics in
 the tool result.
+
+## Inline canvases in chat
+
+Configure the stdio MCP server above in a client that supports MCP Apps. Ask the
+agent to create a canvas: a successful `canvas_write` displays the actual React
+canvas inline, including charts, forms and interactive controls. To show an
+existing canvas, call `canvas_open({name: "overview"})`. Successful `canvas_edit`
+and `canvas_restore` also return an updated inline preview. These are canvas
+views, without the gallery or tool-management controls.
+
+The viewer is a self-contained `ui://canvas/viewer.html` MCP App resource. Tool
+results carry the compiled snapshot in UI-only `_meta`; normal text results stay
+compact. No web server, external asset hosting or Herdr installation is needed.
+Clients without MCP Apps support receive the normal text/diagnostic results;
+they cannot display the interactive canvas.
+
+Inline views begin with saved canvas state and keep subsequent interactions local
+to that view, like gallery previews. They do not overwrite the working canvas's
+state sidecar. Archived views support `version_id` and optional `event_id`, and
+recompile the saved raw source with the installed SDK. Delivering a preview
+archives raw source and records a preview event; it does not prove a human saw it.
+Compiled JavaScript is never stored in the history database.
+
+The canvas follows the chat host's theme. `promptAgent` requests a user message
+through the host, and `openUrl` requests opening an HTTP(S) link. Host rejection
+is shown in the view. `openFile` reports that local file opening is unavailable
+in chat. These actions remain subject to the host's capabilities and permissions.
+
+MCP `canvas_open` now defaults to inline display. To open a Herdr pane explicitly,
+use `canvas_open({name: "overview", target: "herdr"})`. Similarly,
+`canvas_write({name, contents, target: "herdr"})` also opens a pane. The legacy
+write `open` flag is accepted, but inline display is automatic regardless of it.
+CLI `open` continues to open a Herdr pane.
 
 ## Targeted reads and edits
 
@@ -202,6 +235,7 @@ or delete action; restoring working source remains an explicit CLI/MCP operation
 ```bash
 bun run test
 bun run test:e2e
+bun run test:mcp-ui
 bun run typecheck
 ```
 
@@ -212,11 +246,16 @@ pane closes.
 
 GitHub Actions runs the typecheck and unit/service suite with Bun 1.4.0.
 The root Dockerfile is an integration-test environment, not a production image.
+`bun run test:mcp-ui` exercises the real canvas in Chromium with an MCP Apps host.
+Install its browser first with `bun x playwright install chromium`. CI runs this
+browser suite as well as the unit/service suite.
 
 ## Trust boundary
 
 This is a local tool, not an authenticated multi-user service. Keep the web
 server on loopback; do not expose it through a public proxy. Source checks reject
 unsupported imports and APIs, but they are not a general-purpose security sandbox
-for hostile JavaScript. Gallery previews run in isolated browser frames. Artifact
+for hostile JavaScript. Gallery previews run in isolated browser frames. Inline
+canvases execute inside the chat host's MCP Apps sandbox; use trusted local canvas
+source, as for the other local views. Artifact
 source and saved state can contain private data; keep the history database private.

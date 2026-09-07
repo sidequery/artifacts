@@ -1,4 +1,4 @@
-import { useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 
 import { themeFromKind, type CanvasHostTheme } from "./tokens";
 
@@ -9,12 +9,13 @@ export type CanvasAction =
 
 export type SetCanvasState<T> = Dispatch<SetStateAction<T>>;
 
-type HostBridge = {
+export type HostBridge = {
   canvasId?: string;
   state?: Record<string, unknown>;
   theme?: { kind?: string };
   persistUrl?: string;
   actionUrl?: string;
+  onAction?: (action: CanvasAction) => void;
 };
 
 function hostBridge(): HostBridge {
@@ -32,10 +33,16 @@ export function themeKindFromHost(kind: string | undefined, prefersLight: boolea
 }
 
 export function useHostTheme(): CanvasHostTheme {
+  const [generation, setGeneration] = useState(0);
+  useEffect(() => {
+    const changed = () => setGeneration(value => value + 1);
+    window.addEventListener("canvas-theme-change", changed);
+    return () => window.removeEventListener("canvas-theme-change", changed);
+  }, []);
   return useMemo(() => {
     const prefersLight = typeof window !== "undefined" && Boolean(window.matchMedia?.("(prefers-color-scheme: light)").matches);
     return themeFromKind(themeKindFromHost(hostBridge().theme?.kind, prefersLight));
-  }, []);
+  }, [generation]);
 }
 
 export function useCanvasState<T>(key: string, defaultValue: T): [T, SetCanvasState<T>] {
@@ -64,6 +71,10 @@ export function useCanvasState<T>(key: string, defaultValue: T): [T, SetCanvasSt
 export function useCanvasAction(): (action: CanvasAction) => void {
   const actionUrl = hostBridge().actionUrl;
   return (action) => {
+    if (hostBridge().onAction) {
+      hostBridge().onAction!(action);
+      return;
+    }
     if (!actionUrl) {
       return;
     }
