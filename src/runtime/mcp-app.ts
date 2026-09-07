@@ -29,7 +29,7 @@ function reportSize() {
     // Fullscreen/PiP dimensions belong to the host, not the canvas content.
     if (!connected || (context.displayMode && context.displayMode !== "inline")) return;
     const contentHeight = Math.max(root.getBoundingClientRect().height, root.scrollHeight)
-      + status.getBoundingClientRect().height + toolbar.getBoundingClientRect().height
+      + status.getBoundingClientRect().height
       + (viewport.offsetHeight - viewport.clientHeight);
     const height = Math.max(1, Math.ceil(fixedHeight ?? Math.min(inlineLimit, contentHeight)));
     if (height === lastHeight) return;
@@ -47,7 +47,7 @@ function updateDisplay() {
   document.documentElement.dataset.displayMode = mode;
   const target = mode === "fullscreen" ? "inline" : "fullscreen";
   toolbar.hidden = !(hasCanvas || mode === "fullscreen") || !context.availableDisplayModes?.includes(target);
-  displayButton.textContent = mode === "fullscreen" ? "Exit fullscreen" : "Expand";
+  displayButton.title = mode === "fullscreen" ? "Exit fullscreen" : "Expand canvas";
   displayButton.setAttribute("aria-label", mode === "fullscreen" ? "Exit fullscreen" : "Expand canvas");
   displayButton.disabled = changingMode;
   const dimensions = context.containerDimensions;

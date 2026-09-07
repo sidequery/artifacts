@@ -6,6 +6,7 @@ import { formatCanvasCheck } from "../src/diagnostics";
 import type { CanvasAppPayload } from "../src/mcpAppContract";
 import type { GalleryArtifact, GalleryData } from "../src/gallery/types";
 import { runtime } from "../dist/cloudflare/identity.json";
+import { canvasGuideResult } from "../src/canvasGuide";
 
 type Snapshot = {
   workspace: string; name: string; path: string; source: string;
@@ -19,6 +20,7 @@ export class CloudCanvasService {
 
   async callTool(name: string, args: Record<string, unknown>): Promise<CallToolResult> {
     switch (name) {
+      case "canvas_guide": return canvasGuideResult();
       case "canvas_list": {
         const offset = args.offset as number | undefined ?? 0;
         const canvases = await this.library.listDrafts({ workspace: this.workspace, offset });

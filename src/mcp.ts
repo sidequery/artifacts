@@ -1,5 +1,6 @@
 import { CanvasService, type CanvasEdit, type ReadOptions } from "./service";
 import { canvasIdFromFile } from "./canvasFile";
+import { canvasGuideResult } from "./canvasGuide";
 import type { JsonRpcRequest, JsonRpcResponse } from "./mcpProtocol";
 import { CANVAS_APP_URI, CANVAS_RESOURCE, canvasAppHtml, canvasAppResult } from "./mcpApp";
 
@@ -53,6 +54,7 @@ async function callTool(
   name: string,
   args: Record<string, unknown>,
 ): Promise<{ content: Array<{ type: "text"; text: string }>; isError?: boolean; structuredContent?: Record<string, unknown>; _meta?: Record<string, unknown> }> {
+  if (name === "canvas_guide") return canvasGuideResult();
   if (name === "canvas_read" || name === "canvas_edit") {
     if (typeof args.name !== "string") throw new Error("canvas name must be a string");
     if (name === "canvas_read") {

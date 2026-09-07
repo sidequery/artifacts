@@ -169,7 +169,7 @@ test("renders and replaces interactive canvases through the MCP Apps bridge", as
 
   await page.evaluate(() => window.mcpHost!.setTheme("light"));
   await app.getByText("Theme: light").waitFor();
-  expect(await app.locator("body").evaluate(body => getComputedStyle(body).backgroundColor)).toBe("rgb(255, 255, 255)");
+  expect(await app.locator("body").evaluate(body => getComputedStyle(body).backgroundColor)).toBe("rgba(0, 0, 0, 0)");
   expect(readFileSync(sourcePath, "utf8")).toBe(originalSource);
   expect(readFileSync(statePath, "utf8")).toBe(originalSidecar);
 
@@ -285,7 +285,7 @@ test("applies natural, capped, shrinking, narrow, and fixed inline sizes without
   await page.waitForFunction(() => document.querySelector("iframe")!.getBoundingClientRect().height === 420);
   const fixedLayout = await layout(app);
   expect(fixedLayout.shellHeight).toBe(420);
-  expect(fixedLayout.viewportHeight).toBeLessThan(420);
+  expect(fixedLayout.viewportHeight).toBe(420);
 
   await page.waitForTimeout(150);
   const stableCount = await page.evaluate(() => window.mcpHost!.sizeChanges.length);
@@ -309,6 +309,23 @@ test("negotiates fullscreen while preserving state and survives external, declin
   const iframe = page.locator("#app");
   const expand = app.getByRole("button", { name: "Expand canvas" });
   await expand.waitFor();
+  const appearance = await expand.evaluate(button => {
+    const viewport = document.getElementById("canvas-viewport")!;
+    const shell = document.getElementById("canvas-shell")!;
+    return {
+      bodyBackground: getComputedStyle(document.body).backgroundColor,
+      htmlBackground: getComputedStyle(document.documentElement).backgroundColor,
+      viewportTop: viewport.getBoundingClientRect().top,
+      shellTop: shell.getBoundingClientRect().top,
+      width: button.getBoundingClientRect().width,
+      height: button.getBoundingClientRect().height,
+    };
+  });
+  expect(appearance.bodyBackground).toBe("rgba(0, 0, 0, 0)");
+  expect(appearance.htmlBackground).toBe("rgba(0, 0, 0, 0)");
+  expect(appearance.viewportTop).toBe(appearance.shellTop);
+  expect(appearance.width).toBeGreaterThanOrEqual(44);
+  expect(appearance.height).toBeGreaterThanOrEqual(44);
   await app.getByRole("button", { name: "Increment" }).click();
   await app.getByText("Count: 5").waitFor();
 

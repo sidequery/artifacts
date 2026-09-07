@@ -7,6 +7,12 @@ import { VALID_CANVAS, tempDir } from "./test/fixtures";
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
 import { CanvasHistory } from "./history";
+import { CANVAS_GUIDE_EXPORTS } from "./canvasGuide";
+import * as sdk from "./sdk";
+
+test("guide documents exactly the installed SDK runtime exports", () => {
+  expect([...CANVAS_GUIDE_EXPORTS].sort()).toEqual(Object.keys(sdk).sort());
+});
 
 test("encodeMessage writes standard newline-delimited MCP JSON-RPC", () => {
   const encoded = encodeMessage({ jsonrpc: "2.0", id: 1, method: "ping" });
@@ -36,6 +42,7 @@ test("MCP initialize and tools/list", async () => {
   const listed = await handleMcpRequest({ jsonrpc: "2.0", id: 2, method: "tools/list" }, service);
   const tools = (listed?.result as { tools: Array<{ name: string }> }).tools.map((tool) => tool.name);
   expect(tools).toContain("canvas_write");
+  expect(tools).toContain("canvas_guide");
   expect(tools).toContain("canvas_read");
   expect(tools).toContain("canvas_edit");
   expect(tools).toContain("canvas_open");
@@ -43,6 +50,20 @@ test("MCP initialize and tools/list", async () => {
   expect(tools).toContain("canvas_version");
   expect(tools).toContain("canvas_restore");
 });
+
+test("MCP guide is read-only and its example creates a valid canvas", async () => {
+  const dir = tempDir();
+  const service = new CanvasService({ canvasesDir: dir, env: { HERDR_CANVAS_HISTORY_DB: join(dir, "history.sqlite") } });
+  const response = await handleMcpRequest({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "canvas_guide", arguments: {} } }, service);
+  const guide = response?.result as { content: Array<{ text: string }>; isError: boolean };
+  expect(guide.isError).toBe(false);
+  expect(service.list()).toHaveLength(0);
+  const example = guide.content[0]!.text.match(/```tsx\n([\s\S]*?)```/)?.[1];
+  expect(example).toBeDefined();
+  const written = await handleMcpRequest({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "canvas_write", arguments: { name: "guide-counter", contents: example } } }, service);
+  expect((written?.result as { isError: boolean }).isError).toBe(false);
+  expect(service.list()).toHaveLength(1);
+}, { timeout: 30_000 });
 
 test(
   "MCP canvas_write returns typecheck diagnostics",

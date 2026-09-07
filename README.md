@@ -58,6 +58,11 @@ compatibility; the project rename does not migrate or reset stored artifacts.
 
 ## Agent workflow
 
+Call `canvas_guide` before creating a canvas if you have not read it in the current
+conversation. It provides the installed SDK exports, hook signatures, common
+component props, restrictions, and a working interactive example. State uses
+`useCanvasState("count", 0)` from `herdr/canvas`; `useState` is not exported.
+
 Canvases live at `<workspace>/canvases/<name>.canvas.tsx` and may import only
 from `herdr/canvas`. Use the CLI or MCP:
 
