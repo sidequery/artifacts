@@ -150,6 +150,13 @@ app.ontoolresult = result => {
   }
   const bridge: HostBridge = { canvasId: canvas.name, state: canvas.state, onAction: value => { void action(value); } };
   if (canvas.server === true) bridge.onRequest = request => serverRequest(canvas, request);
+  if (canvas.plugins === true) bridge.onPluginCall = async request => {
+    const result = await app.callServerTool({ name: "canvas_plugin_call", arguments: { ...request } });
+    if (result.isError) throw new Error(result.content?.filter(item => item.type === "text").map(item => item.text).join("\n") || "Plugin call failed");
+    const structured = result.structuredContent;
+    if (!structured || !Object.hasOwn(structured, "result")) throw new Error("Plugin result was missing");
+    return structured.result;
+  };
   hostWindow.__herdrCanvas = bridge;
   hasCanvas = true;
   theme(context.theme);

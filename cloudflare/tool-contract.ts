@@ -79,3 +79,12 @@ addScriptTool("script_version", "Read an immutable script source revision. Never
 addScriptTool("script_restore", "Restore a script revision as a new draft and activate it if validation succeeds. Persistent storage remains live.", { ...nameProperty, version_id: { type: "string" } }, ["name", "version_id"]);
 addScriptTool("script_logs", "Read bounded recent execution logs and errors without executing the script.", { ...nameProperty, limit: { type: "integer", minimum: 1, maximum: 100 } }, ["name"]);
 addScriptTool("script_secrets", "Set or delete per-script secrets (null deletes). Omit secrets to list names. Values are never returned or added to source history.", { ...nameProperty, secrets: { type: "object", maxProperties: 32, additionalProperties: { type: ["string", "null"], maxLength: 4096 } } }, ["name"]);
+
+addScriptTool("plugins_list", "List deployment-installed plugins, browser availability, and operation schemas and read-only hints. Does not execute operations.", {});
+CLOUD_MCP_TOOLS[CLOUD_MCP_TOOLS.length - 1]!.annotations = { readOnlyHint: true };
+addScriptTool("plugin_guide", "Read the authenticated deployment plugin calling and authoring guide.", {});
+CLOUD_MCP_TOOLS[CLOUD_MCP_TOOLS.length - 1]!.annotations = { readOnlyHint: true };
+addScriptTool("canvas_plugin_call", "Call a deployment-installed server function as the authenticated user. May perform writes or outbound requests; consult plugins_list for operation schemas and read-only hints. Canvas or library selectors do not confer authority.", {
+  plugin: { type: "string", minLength: 1 }, operation: { type: "string", minLength: 1 }, input: {},
+}, ["plugin", "operation", "input"]);
+CLOUD_MCP_TOOLS[CLOUD_MCP_TOOLS.length - 1]!.annotations = { readOnlyHint: false, destructiveHint: true, openWorldHint: true };

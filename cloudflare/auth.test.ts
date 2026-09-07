@@ -48,7 +48,7 @@ function asResponse(result: Identity | Response): Response {
 
 test("accepts a valid RS256 Cloudflare Access assertion from the configured JWKS", async () => {
   const result = await authenticate(request(await token()), env);
-  expect(result).toEqual({ subject: "account-member-123" });
+  expect(result).toEqual({ subject: "account-member-123", authority: issuer });
   expect(jwksRequests).toEqual([`${issuer}/cdn-cgi/access/certs`]);
 });
 
@@ -91,7 +91,7 @@ test("requires the assertion and fails closed when Access configuration is absen
 
 test("local bypass requires the explicit local environment and an exact loopback hostname", async () => {
   for (const url of ["http://localhost:4785/mcp", "http://127.0.0.1:4785/mcp", "http://[::1]:4785/mcp"]) {
-    expect(await authenticate(request(undefined, url), { ENVIRONMENT: "local" })).toEqual({ subject: "local" });
+    expect(await authenticate(request(undefined, url), { ENVIRONMENT: "local" })).toEqual({ subject: "local", authority: "local" });
   }
   for (const url of ["https://canvas.example.com/mcp", "http://localhost.example.com/mcp", "http://127.0.0.2/mcp"]) {
     const response = asResponse(await authenticate(request(undefined, url), { ENVIRONMENT: "local" }));

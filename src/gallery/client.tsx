@@ -277,8 +277,10 @@ function App() {
     const request = async (event: MessageEvent) => {
       const frame = previewFrame.current;
       if (!frame || event.source !== frame.contentWindow || !selectedArtifact
-        || event.data?.type !== "canvas/http-request" || typeof event.data.id !== "string"
-        || event.data.id.length > 64 || typeof event.data.versionId !== "string" || pending.has(event.data.id)) return;
+        || !["canvas/http-request", "canvas/plugin-request"].includes(event.data?.type) || typeof event.data.id !== "string"
+        || event.data.id.length > 64 || (event.data.type === "canvas/http-request" && typeof event.data.versionId !== "string") || pending.has(event.data.id)) return;
+      const plugin = event.data.type === "canvas/plugin-request";
+      const responseType = plugin ? "canvas/plugin-response" : "canvas/http-response";
       const target = frame.contentWindow!;
       const id = event.data.id;
       try {
@@ -287,18 +289,18 @@ function App() {
         const params = new URLSearchParams({ workspace: selectedArtifact.workspace });
         const library = new URLSearchParams(window.location.search).get("library");
         if (library) params.set("library", library);
-        const response = await fetch(`/api/canvas/request?${params}`, {
+        const response = await fetch(`${plugin ? "/api/plugins/call" : "/api/canvas/request"}?${params}`, {
           method: "POST", headers: { "content-type": "application/json" },
           // The frame selects its pinned code version, but cannot redirect a
           // request to another canvas or private/team library.
-          body: JSON.stringify({ name: selectedArtifact.name, version_id: event.data.versionId, request: event.data.request }),
+          body: JSON.stringify(plugin ? event.data.request : { name: selectedArtifact.name, version_id: event.data.versionId, request: event.data.request }),
         });
         if (redirectExpiredSession(response)) return;
-        const result = await response.json() as { response?: unknown; error?: string };
+        const result = await response.json() as { response?: unknown; result?: unknown; error?: string };
         if (!response.ok) throw new Error(result.error ?? `Canvas request failed (${response.status})`);
-        target.postMessage({ type: "canvas/http-response", id, response: result.response }, "*");
+        target.postMessage({ type: responseType, id, response: result.response, result: result.result }, "*");
       } catch (error) {
-        target.postMessage({ type: "canvas/http-response", id, error: error instanceof Error ? error.message : String(error) }, "*");
+        target.postMessage({ type: responseType, id, error: error instanceof Error ? error.message : String(error) }, "*");
       } finally { pending.delete(id); }
     };
     window.addEventListener("message", request);

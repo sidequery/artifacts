@@ -1,10 +1,18 @@
 import { createRoot } from "react-dom/client";
+import * as react from "react";
+import * as reactDom from "react-dom";
+import * as reactDomClient from "react-dom/client";
+import * as jsxDev from "react/jsx-dev-runtime";
 import type { ComponentType } from "react";
 import * as jsx from "react/jsx-runtime";
 import * as sdk from "../sdk";
 
 const runtime = {
   sdk,
+  react,
+  reactDom,
+  reactDomClient,
+  jsxDev,
   jsx,
   mount(Component: ComponentType) {
     const element = document.getElementById("root");

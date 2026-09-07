@@ -148,6 +148,20 @@ test("published tarball runs the CLI, gallery, and stdio MCP outside a checkout"
       },
     }, null, 2));
     await run([process.execPath, "install", "--ignore-scripts"], consumer, isolatedEnv);
+    await run([process.execPath, "-e", `
+      import { definePlugins } from "@sidequery/canvas/plugins";
+      import { pluginCall } from "@sidequery/canvas";
+      import { runtimeIdentity } from "./node_modules/@sidequery/canvas/src/history.ts";
+      if (definePlugins([]).length !== 0 || typeof pluginCall !== "function") throw new Error("Plugin exports are missing");
+      const registry = "./node_modules/@sidequery/canvas/dist/cloudflare/plugin-browser.json";
+      const original = await Bun.file(registry).text();
+      const before = runtimeIdentity();
+      await Bun.write(registry, JSON.stringify({modules:{fixture:"export const value=1;"},files:{},paths:{}}));
+      const after = runtimeIdentity();
+      await Bun.write(registry, original);
+      if (before === after) throw new Error("Plugin upgrades must invalidate cached local builds");
+    `], consumer, isolatedEnv);
+
 
     const source = join(consumer, "package-smoke.canvas.tsx");
     await Bun.write(source, `import { Card, H1, Text } from "sidequery/canvas";\nexport default function PackageSmoke() { return <Card><H1>Package smoke</H1><Text>Installed tarball</Text></Card>; }\n`);

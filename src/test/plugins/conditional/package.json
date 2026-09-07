@@ -1,0 +1,11 @@
+{
+  "name": "conditional-browser-fixture",
+  "type": "module",
+  "exports": {
+    ".": {
+      "browser": "./browser.js",
+      "node": "./node.js",
+      "default": "./node.js"
+    }
+  }
+}

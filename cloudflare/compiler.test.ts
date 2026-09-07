@@ -281,3 +281,41 @@ test("a prebundled third-party Hono handler compiles and serves through the scri
     await execution.dispose();
   }
 }, 60000);
+
+// Build the fixture deployment, then run this gated integration test:
+// CANVAS_PLUGINS_CONFIG=src/test/plugins/config.ts bun run build:cloudflare-compiler
+// CANVAS_PLUGIN_TEST=1 bun test cloudflare/compiler.test.ts --test-name-pattern 'deployment browser plugin' --timeout 60000
+// Restore the default deployment afterward with: bun run build:cloudflare-compiler
+test.skipIf(process.env.CANVAS_PLUGIN_TEST !== "1")("deployment browser plugin compiles, checks types, and shares React hooks in workerd", async () => {
+  const source = `import { PluginCounter, type Label } from "@test/counter";
+const label: Label = { prefix: "Plugin" };
+export default function Canvas() { return <PluginCounter {...label} />; }`;
+  expect((await call(source, "typecheck")).diagnostics).toEqual([]);
+  const invalidSdkType = source.replace("type Label", "type Label, type Tone").replace("const label", 'const tone: Tone = "invalid-tone"; const label');
+  expect((await call(invalidSdkType, "typecheck")).diagnostics.some(item => item.message.includes("invalid-tone"))).toBe(true);
+  const invalid = await call(source.replace('prefix: "Plugin"', "prefix: 123"), "typecheck");
+  expect(invalid.diagnostics.some(item => item.message.includes("number"))).toBe(true);
+  for (const specifier of ["@test/counter/deep", "jose", "uninstalled"]) {
+    const denied = await call(source.replace("@test/counter", specifier));
+    expect(denied.ok).toBe(false);
+    expect(denied.diagnostics.some(item => item.message.includes("not allowed"))).toBe(true);
+  }
+  const result = await call(source);
+  expect(result.diagnostics).toEqual([]);
+  expect(result.ok).toBe(true);
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    const errors: string[] = [];
+    page.on("pageerror", error => errors.push(error.message));
+    await page.setContent('<iframe sandbox="allow-scripts"></iframe>');
+    await page.locator("iframe").evaluate((element, js) => {
+      (element as HTMLIFrameElement).srcdoc = `<div id="root"></div><script type="module">${js.replace(/<\/script/gi, "<\\/script")}</script>`;
+    }, result.js!);
+    const frame = page.frameLocator("iframe");
+    await frame.getByRole("button", { name: "UGx1Z2luIDA", exact: true }).click();
+    await frame.getByRole("button", { name: "UGx1Z2luIDE", exact: true }).waitFor();
+    expect(errors).toEqual([]);
+  } finally { await browser.close(); }
+  expect(outbound).toEqual([]);
+}, 60000);

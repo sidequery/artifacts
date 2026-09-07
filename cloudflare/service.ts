@@ -16,6 +16,9 @@ import type { GalleryArtifact, GalleryData } from "../src/gallery/types";
 import { runtime } from "../dist/cloudflare/identity.json";
 import { canvasGuideResult } from "../src/mcp/guide";
 
+import { dispatchPlugin, pluginCatalog, PLUGIN_GUIDE, type PluginInvocationContext } from "./plugins";
+import type { PluginRequest } from "../src/plugins/types";
+
 type Snapshot = {
   workspace: string; name: string; path: string; source: string;
   server_source: string | null;
@@ -29,7 +32,7 @@ export class CloudCanvasService {
   private readonly scripts: CloudScriptService;
 
   constructor(readonly library: DurableObjectStub<CanvasLibrary>, readonly workspace: string,
-    readonly backends: DurableObjectNamespace<CanvasBackend>, readonly libraryKey: string, readonly hosted?: HostedArtifacts) {
+    readonly backends: DurableObjectNamespace<CanvasBackend>, readonly libraryKey: string, readonly hosted?: HostedArtifacts, readonly plugins?: PluginInvocationContext) {
     this.artifacts = new ArtifactService(workspace, libraryKey, hosted);
     this.scripts = new CloudScriptService(this.artifacts);
   }
@@ -38,6 +41,12 @@ export class CloudCanvasService {
     if (name.startsWith("script_")) return this.scripts.callTool(name, args);
     if (name === "artifact_link") return this.artifactLink(args);
     switch (name) {
+      case "plugins_list": return { ...text({ plugins: pluginCatalog }), structuredContent: { plugins: pluginCatalog } };
+      case "plugin_guide": return text(PLUGIN_GUIDE);
+      case "canvas_plugin_call": {
+        const result = await this.pluginCall(args as PluginRequest);
+        return { ...text({ result }), structuredContent: { result } };
+      }
       case "canvas_guide": {
         const guide = canvasGuideResult();
         if (this.hosted) guide.content.push({ type: "text", text: HOSTED_SCRIPT_GUIDE });
@@ -95,6 +104,8 @@ export class CloudCanvasService {
     }
   }
 
+  pluginCall(request: PluginRequest) { return dispatchPlugin(request, this.plugins); }
+
   snapshot(selection: { name?: string; version_id?: string; event_id?: string }): Promise<Snapshot> {
     return this.library.preview({ workspace: this.workspace, ...selection });
   }
@@ -110,7 +121,7 @@ export class CloudCanvasService {
       ...(snapshot.version_id ? { version_id: snapshot.version_id } : {}),
     });
     const canvas = { name: version.name, versionId: version.id, eventId: event.id, sourceHash: version.source_hash };
-    return { ...base, ok: true, canvas, _meta: { canvas: { ...canvas, js: compiled.js, state: snapshot.state, server: snapshot.server_source !== null } satisfies CanvasAppPayload } };
+    return { ...base, ok: true, canvas, _meta: { canvas: { ...canvas, js: compiled.js, state: snapshot.state, server: snapshot.server_source !== null, ...(this.plugins ? { plugins: true } : {}) } satisfies CanvasAppPayload } };
   }
 
   private async mutationResult(mutation: Mutation, generation?: number | null, settings: LinkUpdate = {}): Promise<CallToolResult> {

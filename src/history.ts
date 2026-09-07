@@ -24,7 +24,8 @@ export function runtimeIdentity(): string {
   // Registry tarballs intentionally omit package-manager lockfiles. Include the
   // checkout lock when available without making installed-package previews depend on it.
   if (existsSync(join(PLUGIN_ROOT, "bun.lock"))) files.push("bun.lock");
-  for (const dir of ["src/sdk", "src/runtime"]) {
+  if (existsSync(join(PLUGIN_ROOT, "dist/cloudflare/plugin-browser.json"))) files.push("dist/cloudflare/plugin-browser.json");
+  for (const dir of ["src/sdk", "src/runtime", "src/plugins"]) {
     for (const name of readdirSync(join(PLUGIN_ROOT, dir)).sort()) {
       if (!name.includes(".test.")) files.push(`${dir}/${name}`);
     }
