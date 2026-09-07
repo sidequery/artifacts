@@ -16,7 +16,8 @@
     "watch_dir": [
       "src/sdk",
       "src/runtime",
-      "src/gallery"
+      "src/gallery",
+      "src/auth"
     ]
   },
   "assets": {
@@ -53,6 +54,7 @@
   ],
   "vars": {
     "ENVIRONMENT": "production",
+    "AUTH_MODE": "access",
     "ACCESS_TEAM_DOMAIN": "",
     "ACCESS_AUD": ""
   },

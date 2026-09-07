@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { authClient, signInUrl } from "../auth/client-api";
 import type { GalleryArtifact, GalleryData } from "./types";
 
 type Scope = "current" | "all";
@@ -11,6 +12,8 @@ type SourceState =
   | { status: "error"; text: ""; error: string };
 
 const WORKING_VERSION = "working";
+
+type SessionUser = { id: string; name: string; email: string };
 
 const styles = `
   :root { color-scheme: dark; --page: #141414; --line: #303030; --muted: #a0a0a0; }
@@ -33,6 +36,8 @@ const styles = `
   .view-control { display: flex; gap: 2px; }
   .view-control button[aria-pressed="true"] { background: #303030; }
   .download-link { display: inline-flex; align-items: center; min-height: 32px; padding: 5px 9px; text-decoration: none; }
+  .account { display: flex; align-items: center; gap: 5px; min-width: 0; }
+  .account-name { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
   .gallery-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); flex: 1; min-height: 0; }
   .library-panel { overflow: auto; border-right: 1px solid var(--line); padding: 6px; }
   .artifact-row { display: block; width: 100%; text-align: left; padding: 8px; }
@@ -71,6 +76,21 @@ function isGalleryResponse(value: unknown): value is GalleryData {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<GalleryData>;
   return typeof candidate.workspace === "string" && Array.isArray(candidate.artifacts);
+}
+
+function sessionUser(value: unknown): SessionUser | null {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as { authMode?: unknown; user?: Partial<SessionUser> };
+  if (candidate.authMode !== "better-auth" || !candidate.user
+    || typeof candidate.user.id !== "string" || typeof candidate.user.name !== "string"
+    || typeof candidate.user.email !== "string") return null;
+  return candidate.user as SessionUser;
+}
+
+function redirectExpiredSession(response: Response): boolean {
+  if (response.status !== 401 || response.headers.get("X-Canvas-Auth") !== "better-auth") return false;
+  window.location.assign(signInUrl());
+  return true;
 }
 
 function galleryUrl(scope: Scope, offset = 0): string {
@@ -120,6 +140,9 @@ function App() {
   const [source, setSource] = useState<SourceState>({ status: "idle", text: "", error: "" });
   const [previewLoading, setPreviewLoading] = useState(true);
   const [refreshEpoch, setRefreshEpoch] = useState(0);
+  const [user, setUser] = useState<SessionUser | null>(null);
+  const [signingOut, setSigningOut] = useState(false);
+  const [accountError, setAccountError] = useState("");
   const galleryController = useRef<AbortController | null>(null);
   const galleryRequest = useRef(0);
   const sourceRequest = useRef(0);
@@ -142,6 +165,7 @@ function App() {
           signal: controller.signal,
           headers: { Accept: "application/json" },
         });
+        if (redirectExpiredSession(response)) return;
         if (!response.ok) throw new Error(`Gallery request failed (${response.status})`);
         const page: unknown = await response.json();
         if (!isGalleryResponse(page)) throw new Error("The gallery returned an unexpected response.");
@@ -175,6 +199,21 @@ function App() {
     void loadGallery();
     return () => galleryController.current?.abort();
   }, [loadGallery]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const response = await fetch("/api/session", { signal: controller.signal, headers: { Accept: "application/json" } });
+        if (redirectExpiredSession(response) || !response.ok) return;
+        const resolved = sessionUser(await response.json());
+        if (!controller.signal.aborted) setUser(resolved);
+      } catch {
+        // Local Canvas servers do not expose an auth session endpoint.
+      }
+    })();
+    return () => controller.abort();
+  }, []);
 
   const filteredArtifacts = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
@@ -234,6 +273,7 @@ function App() {
           // request to another canvas or private/team library.
           body: JSON.stringify({ name: selectedArtifact.name, version_id: event.data.versionId, request: event.data.request }),
         });
+        if (redirectExpiredSession(response)) return;
         const result = await response.json() as { response?: unknown; error?: string };
         if (!response.ok) throw new Error(result.error ?? `Canvas request failed (${response.status})`);
         target.postMessage({ type: "canvas/http-response", id, response: result.response }, "*");
@@ -261,6 +301,7 @@ function App() {
           signal: controller.signal,
           headers: { Accept: "text/plain" },
         });
+        if (redirectExpiredSession(response)) return;
         if (!response.ok) throw new Error(`Source request failed (${response.status})`);
         const text = await response.text();
         if (!controller.signal.aborted && request === sourceRequest.current) {
@@ -286,6 +327,37 @@ function App() {
   const selectArtifact = (artifact: GalleryArtifact) => {
     setSelectedKey(artifact.key);
     setSelectedVersion(artifact.working ? WORKING_VERSION : [...artifact.versions].sort((a, b) => b.revision - a.revision)[0]?.id ?? null);
+  };
+
+  const signOut = async () => {
+    setSigningOut(true);
+    setAccountError("");
+    try {
+      const result = await authClient.signOut();
+      if (result.error) throw result.error;
+      window.location.assign(signInUrl());
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : "Could not sign out.");
+      setSigningOut(false);
+    }
+  };
+
+  const downloadSource = async (event: React.MouseEvent<HTMLAnchorElement>) => {
+    if (!user) return;
+    event.preventDefault();
+    try {
+      const response = await fetch(downloadUrl, { headers: { Accept: "text/plain" } });
+      if (redirectExpiredSession(response)) return;
+      if (!response.ok) throw new Error(`Source download failed (${response.status})`);
+      const url = URL.createObjectURL(await response.blob());
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `${selectedArtifact?.name ?? "canvas"}.canvas.tsx`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : "Could not download this source file.");
+    }
   };
 
   return (
@@ -332,13 +404,20 @@ function App() {
                 <button type="button" aria-pressed={tab === "preview"} aria-controls="canvas-panel" onClick={() => setTab("preview")}>Preview</button>
                 <button type="button" aria-pressed={tab === "source"} aria-controls="canvas-panel" onClick={() => setTab("source")}>Source</button>
               </div>
-              <a className="download-link" href={downloadUrl} download>Download source</a>
+              <a className="download-link" href={downloadUrl} download onClick={downloadSource}>Download source</a>
             </>
           ) : null}
           <button type="button" onClick={() => void loadGallery()} disabled={loading} aria-label={loading ? "Refreshing canvases" : "Refresh"}>Refresh</button>
+          {user ? (
+            <div className="account">
+              <span className="account-name" title={user.email}>{user.name}</span>
+              <button type="button" disabled={signingOut} onClick={() => void signOut()}>{signingOut ? "Signing out…" : "Sign out"}</button>
+            </div>
+          ) : null}
         </div>
 
         {galleryError && gallery ? <p role="alert" className="refresh-error error-message">Refresh failed: {galleryError}. Showing the last loaded files.</p> : null}
+        {accountError ? <p role="alert" className="refresh-error error-message">{accountError}</p> : null}
 
         <div className="gallery-layout">
           <aside className="library-panel" aria-label="Canvases">
