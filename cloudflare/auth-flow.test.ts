@@ -231,7 +231,12 @@ test("real OIDC and MCP OAuth share per-user gallery, source and database bounda
     // counter button, so wait for the team document before interacting with it.
     await bobPage.waitForURL(url => url.searchParams.get("library") === "team");
     await bobPage.getByRole("button", { name: "counter", exact: true }).click();
-    await bobPage.frameLocator("iframe").getByText("Count: 2", { exact: true }).waitFor();
+    try {
+      await bobPage.frameLocator("iframe").getByText("Count: 2", { exact: true }).waitFor();
+    } catch (error) {
+      const frame = bobPage.frameLocator("iframe");
+      throw new Error(`${String(error)}\nGallery: ${bobPage.url()}\nPreview: ${await bobPage.locator("iframe").getAttribute("src")}\n${await frame.locator("body").innerText()}`);
+    }
     expect((await aliceContext.request.post(`${origin}/api/canvas/request`, { headers: { Origin: "https://evil.example" }, data: {} })).status()).toBe(403);
     const token = aliceProvider.savedTokens!.access_token;
     expect((await fetch(`${origin}/mcp`, { headers: { Authorization: `Bearer ${token.slice(0, -10)}tampered00` } })).status).toBe(401);
