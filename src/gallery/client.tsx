@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { authClient, signInUrl } from "../auth/client-api";
 import type { GalleryArtifact, GalleryData } from "./types";
+import { LinkSettings, ScriptPanel } from "./hosted";
 
 type Scope = "current" | "all";
 type DetailTab = "preview" | "source";
@@ -44,6 +45,19 @@ const styles = `
   .artifact-row[aria-current="true"] { background: #303030; }
   .artifact-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .workspace-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11px; margin-top: 3px; }
+  .artifact-detail { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .artifact-detail .canvas-stage { flex: 1; }
+  .link-settings, .script-fields { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .link-settings { padding: 8px; border-bottom: 1px solid var(--line); }
+  .link-settings label { display: flex; align-items: center; gap: 4px; }
+  .script-panel { width: 100%; padding: 16px; overflow: auto; }
+  .script-panel label { display: block; }
+  .script-panel textarea { display: block; width: 100%; min-height: 70px; margin: 6px 0 12px; color: inherit; background: #191919; border: 1px solid var(--line); padding: 10px; font: 12px/1.6 "SFMono-Regular", Consolas, monospace; resize: vertical; }
+  .script-panel .source-editor { min-height: 280px; }
+  .script-panel details { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 12px; }
+  .script-panel summary { cursor: pointer; }
+  .script-panel pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .muted { color: var(--muted); }
   .canvas-stage { position: relative; display: flex; min-width: 0; min-height: 0; overflow: hidden; }
   .preview-frame { display: block; width: 100%; height: 100%; border: 0; }
   .preview-loading { position: absolute; inset: 0; display: grid; place-items: center; background: var(--page); color: var(--muted); pointer-events: none; }
@@ -110,6 +124,7 @@ function artifactUrl(path: "/api/source" | "/gallery/preview", artifact: Gallery
   const library = new URLSearchParams(window.location.search).get("library");
   if (library) params.set("library", library);
   params.set("workspace", artifact.workspace);
+  if (artifact.kind === "script") params.set("kind", "script");
   if (version === WORKING_VERSION) params.set("name", artifact.name);
   else params.set("version", version);
   if (download) params.set("download", "1");
@@ -129,6 +144,7 @@ function formatDate(value: string): string {
 }
 
 function App() {
+  const [creatingScript, setCreatingScript] = useState(false);
   const [scope, setScope] = useState<Scope>("current");
   const [query, setQuery] = useState("");
   const [gallery, setGallery] = useState<GalleryData | null>(null);
@@ -143,6 +159,7 @@ function App() {
   const [user, setUser] = useState<SessionUser | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const [accountError, setAccountError] = useState("");
+  const createdScriptName = useRef<string | null>(null);
   const galleryController = useRef<AbortController | null>(null);
   const galleryRequest = useRef(0);
   const sourceRequest = useRef(0);
@@ -183,7 +200,10 @@ function App() {
 
       setGallery(payload);
       setRefreshEpoch((epoch) => epoch + 1);
+      const created = createdScriptName.current;
+      createdScriptName.current = null;
       setSelectedKey((current) => {
+        if (created) return payload.artifacts.find(artifact => artifact.kind === "script" && artifact.name === created)?.key ?? current;
         if (current && payload.artifacts.some((artifact) => artifact.key === current)) return current;
         return payload.artifacts[0]?.key ?? null;
       });
@@ -245,7 +265,7 @@ function App() {
     setSelectedVersion(resolvedVersion);
   }, [resolvedVersion]);
 
-  const previewUrl = selectedArtifact && resolvedVersion
+  const previewUrl = selectedArtifact && selectedArtifact.kind !== "script" && resolvedVersion
     ? `${artifactUrl("/gallery/preview", selectedArtifact, resolvedVersion)}&refresh=${refreshEpoch}`
     : "";
   const downloadUrl = selectedArtifact && resolvedVersion
@@ -286,7 +306,7 @@ function App() {
   }, [selectedArtifact]);
 
   useEffect(() => {
-    if (tab !== "source" || !selectedArtifact || !resolvedVersion) {
+    if (tab !== "source" || !selectedArtifact || selectedArtifact.kind === "script" || !resolvedVersion) {
       setSource({ status: "idle", text: "", error: "" });
       return;
     }
@@ -325,6 +345,7 @@ function App() {
   }, [previewUrl, tab]);
 
   const selectArtifact = (artifact: GalleryArtifact) => {
+    setCreatingScript(false);
     setSelectedKey(artifact.key);
     setSelectedVersion(artifact.working ? WORKING_VERSION : [...artifact.versions].sort((a, b) => b.revision - a.revision)[0]?.id ?? null);
   };
@@ -352,7 +373,7 @@ function App() {
       const url = URL.createObjectURL(await response.blob());
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = `${selectedArtifact?.name ?? "canvas"}.canvas.tsx`;
+      anchor.download = `${selectedArtifact?.name ?? "canvas"}${selectedArtifact?.kind === "script" ? ".ts" : ".canvas.tsx"}`;
       anchor.click();
       URL.revokeObjectURL(url);
     } catch (error) {
@@ -378,7 +399,7 @@ function App() {
           <input
             className="search-input"
             type="search"
-            aria-label="Search canvases"
+            aria-label={gallery?.capabilities?.scripts ? "Search canvases and scripts" : "Search canvases"}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search"
@@ -391,8 +412,9 @@ function App() {
             <option value="current">Current project</option>
             <option value="all">All projects</option>
           </select>
+          {gallery?.capabilities?.scripts ? <button onClick={() => setCreatingScript(true)}>New script</button> : null}
           <div className="toolbar-spacer" />
-          {selectedArtifact && resolvedVersion ? (
+          {!creatingScript && selectedArtifact && resolvedVersion ? (
             <>
               <select className="version-select" aria-label="Version" value={resolvedVersion} onChange={(event) => setSelectedVersion(event.target.value)}>
                 {selectedArtifact.working ? <option value={WORKING_VERSION}>Working copy</option> : null}
@@ -400,10 +422,10 @@ function App() {
                   <option key={version.id} value={version.id}>Revision {version.revision} · {formatDate(version.createdAt)}</option>
                 ))}
               </select>
-              <div className="view-control" role="group" aria-label="Canvas view">
+              {selectedArtifact.kind !== "script" ? <div className="view-control" role="group" aria-label="Canvas view">
                 <button type="button" aria-pressed={tab === "preview"} aria-controls="canvas-panel" onClick={() => setTab("preview")}>Preview</button>
                 <button type="button" aria-pressed={tab === "source"} aria-controls="canvas-panel" onClick={() => setTab("source")}>Source</button>
-              </div>
+              </div> : null}
               <a className="download-link" href={downloadUrl} download onClick={downloadSource}>Download source</a>
             </>
           ) : null}
@@ -420,7 +442,7 @@ function App() {
         {accountError ? <p role="alert" className="refresh-error error-message">{accountError}</p> : null}
 
         <div className="gallery-layout">
-          <aside className="library-panel" aria-label="Canvases">
+          <aside className="library-panel" aria-label={gallery?.capabilities?.scripts ? "Canvases and scripts" : "Canvases"}>
             {loading && !gallery ? (
               <p className="state-message" role="status">Loading…</p>
             ) : galleryError && !gallery ? (
@@ -429,7 +451,7 @@ function App() {
                 <button type="button" onClick={() => void loadGallery()}>Try again</button>
               </div>
             ) : filteredArtifacts.length === 0 ? (
-              <p className="state-message">{query ? "No matches" : "No canvases"}</p>
+              <p className="state-message">{query ? "No matches" : gallery?.capabilities?.scripts ? "No canvases or scripts" : "No canvases"}</p>
             ) : filteredArtifacts.map((artifact) => (
               <button
                 className="artifact-row"
@@ -441,12 +463,19 @@ function App() {
                 onFocus={(event) => event.currentTarget.scrollIntoView({ block: "nearest" })}
               >
                 <span className="artifact-name">{artifact.name}</span>
+                {artifact.kind === "script" ? <span className="workspace-name">Script{artifact.slug ? ` · /${artifact.slug}` : ""}</span> : null}
                 {scope === "all" ? <span className="workspace-name">{artifact.workspace}</span> : null}
               </button>
             ))}
           </aside>
+          <div className="artifact-detail">
+          {!creatingScript && selectedArtifact && gallery?.capabilities?.links ? <LinkSettings key={selectedArtifact.key} artifact={selectedArtifact} onSaved={loadGallery} /> : null}
           <section id="canvas-panel" className="canvas-stage" aria-label={tab === "preview" ? "Canvas preview" : "Canvas source"}>
-            {!selectedArtifact ? (
+            {creatingScript ? (
+              <ScriptPanel key="new-script" workspace={gallery?.workspace ?? "default"} onCancel={() => setCreatingScript(false)} onSaved={async name => { createdScriptName.current = name; await loadGallery(); setCreatingScript(false); setSelectedVersion("working"); setQuery(""); }} />
+            ) : selectedArtifact?.kind === "script" ? (
+              <ScriptPanel key={`${selectedArtifact.key}:${resolvedVersion}`} artifact={selectedArtifact} workspace={selectedArtifact.workspace} version={resolvedVersion ?? undefined} sourceUrl={resolvedVersion ? artifactUrl("/api/source", selectedArtifact, resolvedVersion) : undefined} onSaved={async () => { setSelectedVersion("working"); await loadGallery(); }} />
+            ) : !selectedArtifact ? (
               <p className="state-message">Select a canvas</p>
             ) : !resolvedVersion ? (
               <p className="state-message">No readable version</p>
@@ -471,6 +500,7 @@ function App() {
               <p className="state-message" role="status">Loading source…</p>
             )}
           </section>
+          </div>
         </div>
       </main>
     </>

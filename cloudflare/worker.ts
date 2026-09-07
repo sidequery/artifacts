@@ -13,10 +13,18 @@ import { canvas_request as validateRequest } from "../dist/cloudflare/tool-valid
 import type { CanvasHttpRequest } from "../src/httpTypes";
 import galleryBridge from "../dist/cloudflare/gallery-request.json";
 
-export { CanvasLibrary, CanvasBackend };
+import { ArtifactLinks } from "./links";
+import { ScriptLibrary } from "./scripts";
+import { ScriptBackend } from "./script-backend";
+import { artifactRoute } from "./artifact-routes";
+import * as toolValidators from "../dist/cloudflare/tool-validators.js";
+export { CanvasLibrary, CanvasBackend, ArtifactLinks, ScriptLibrary, ScriptBackend };
 export type Env = AuthEnvironment & BetterAuthEnvironment & {
   LIBRARIES: DurableObjectNamespace<CanvasLibrary>;
   BACKENDS: DurableObjectNamespace<CanvasBackend>;
+  LINKS: DurableObjectNamespace<ArtifactLinks>;
+  SCRIPTS: DurableObjectNamespace<ScriptLibrary>;
+  SCRIPT_BACKENDS: DurableObjectNamespace<ScriptBackend>;
   ASSETS: Fetcher;
   DEFAULT_WORKSPACE?: string;
 };
@@ -47,6 +55,10 @@ app.all("/api/auth/*", async c => c.env.AUTH_MODE === "better-auth"
 app.all("/.well-known/*", async c => c.env.AUTH_MODE === "better-auth"
   ? (await getCanvasAuth(c.env)).handler(c.req.raw) : c.notFound());
 app.use("*", async (c, next) => {
+  const artifactOperation = artifactRoute(c.req.raw, c.env);
+  c.executionCtx.waitUntil(artifactOperation);
+  const artifact = await artifactOperation;
+  if (artifact) return artifact;
   c.header("Cache-Control", "private, no-store");
   c.header("X-Content-Type-Options", "nosniff");
   const url = new URL(c.req.url);
@@ -68,7 +80,7 @@ app.use("*", async (c, next) => {
     ? JSON.stringify(["private", "better-auth", user.id])
     : JSON.stringify(["private", c.env.ACCESS_TEAM_DOMAIN ?? "local", identity.subject]);
   c.set("libraryScope", libraryScope);
-  c.set("service", new CloudCanvasService(c.env.LIBRARIES.getByName(libraryKey), workspace, c.env.BACKENDS, libraryKey));
+  c.set("service", new CloudCanvasService(c.env.LIBRARIES.getByName(libraryKey), workspace, c.env.BACKENDS, libraryKey, { links: c.env.LINKS.getByName("deployment"), scripts: c.env.SCRIPTS.getByName(libraryKey), scriptBackends: c.env.SCRIPT_BACKENDS, origin: url.origin }));
   // Compilation uses shared isolate resources. Let an admitted operation finish
   // after a client disconnects rather than abandoning its native compiler I/O.
   const operation = next();
@@ -101,7 +113,22 @@ app.post("/api/canvas/request", async c => {
   const args = input as { name?: string; version_id?: string; request: CanvasHttpRequest };
   return c.json({ response: await c.get("service").request({ name: args.name, version_id: args.version_id }, args.request) });
 });
+app.post("/api/tools", async c => {
+  let input: { name?: string; arguments?: Record<string, unknown> };
+  try { input = JSON.parse(await readRequestText(c.req.raw, 1024 * 1024)); }
+  catch (error) { return c.json({ error: error instanceof RangeError ? "Request exceeds 1 MiB" : "Invalid JSON" }, error instanceof RangeError ? 413 : 400); }
+  if (!input || typeof input.name !== "string" || !Object.hasOwn(toolValidators, input.name)) return c.json({ error: "Unknown tool" }, 400);
+  const validate = toolValidators[input.name as keyof typeof toolValidators];
+  if (!validate(input.arguments ?? {})) return c.json({ error: "Invalid tool arguments" }, 400);
+  return c.json(await c.get("service").callTool(input.name, input.arguments ?? {}));
+});
 app.get("/api/source", async c => {
+  if (c.req.query("kind") === "script") {
+    const source = await c.get("service").scriptReadSource({ name: c.req.query("name"), version_id: c.req.query("version") });
+    c.header("Content-Type", "text/plain; charset=utf-8");
+    if (c.req.query("download") === "1") c.header("Content-Disposition", 'attachment; filename="script.ts"');
+    return c.body(source.source);
+  }
   const snapshot = await c.get("service").snapshot({ name: c.req.query("name"), version_id: c.req.query("version") });
   c.header("Content-Type", "text/plain; charset=utf-8");
   if (c.req.query("download") === "1") c.header("Content-Disposition", `attachment; filename="canvas.canvas.tsx"; filename*=UTF-8''${encodeURIComponent(snapshot.name + ".canvas.tsx")}`);

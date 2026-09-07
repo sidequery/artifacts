@@ -55,9 +55,12 @@ beforeAll(async () => {
       AUTH_DB: { type: "d1", id: "canvas-auth-test", name: "canvas-auth" },
       LIBRARIES: { type: "durable-object", worker: "canvas-auth-test", exportName: "CanvasLibrary" },
       BACKENDS: { type: "durable-object", worker: "canvas-auth-test", exportName: "CanvasBackend" },
+      LINKS: { type: "durable-object", worker: "canvas-auth-test", exportName: "ArtifactLinks" },
+      SCRIPTS: { type: "durable-object", worker: "canvas-auth-test", exportName: "ScriptLibrary" },
+      SCRIPT_BACKENDS: { type: "durable-object", worker: "canvas-auth-test", exportName: "ScriptBackend" },
       LOADER: { type: "worker-loader" }, ASSETS: { type: "assets" },
     },
-    exports: { CanvasLibrary: { type: "durable-object", storage: "sqlite" }, CanvasBackend: { type: "durable-object", storage: "sqlite" } },
+    exports: { ArtifactLinks: { type: "durable-object", storage: "sqlite" }, ScriptLibrary: { type: "durable-object", storage: "sqlite" }, ScriptBackend: { type: "durable-object", storage: "sqlite" }, CanvasLibrary: { type: "durable-object", storage: "sqlite" }, CanvasBackend: { type: "durable-object", storage: "sqlite" } },
     assets: { directory: join(import.meta.dir, "../dist/cloudflare/assets"), hasUserWorker: true, runWorkerFirst: true, htmlHandling: "none" },
   }, dev: {} }] });
   await runtime.ready;

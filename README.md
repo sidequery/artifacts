@@ -232,6 +232,14 @@ remote MCP OAuth flow resolve to the same user identity. See
 [Cloudflare setup](docs/cloudflare.md) for provider examples, D1 migrations and
 admission rules.
 
+## Scripts and direct URLs
+
+Hosted canvases and standalone TypeScript scripts can have user-chosen root URLs
+such as `/sales-dashboard` and `/my-handler`. Canvas links open the interactive
+UI with its backend; script links invoke a standard Workers HTTP handler.
+Manage scripts, secrets, history, logs and link access through the gallery or MCP.
+See [Scripts and direct canvas links](docs/scripts.md).
+
 ## Targeted reads and edits
 
 Use `read` / `canvas_read` to retrieve only the needed working-source lines, and

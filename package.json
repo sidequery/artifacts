@@ -74,7 +74,9 @@
     "src/serve.ts",
     "src/service.ts",
     "src/typecheck.ts",
-    "src/viewer.ts"
+    "src/viewer.ts",
+    "src/gallery/hosted.tsx",
+    "docs/scripts.md"
   ],
   "publishConfig": {
     "access": "public"
@@ -84,7 +86,7 @@
     "mcp": "bun run src/cli.ts mcp",
     "test": "bun test src --timeout 30000",
     "test:e2e": "bun test e2e/herdr.e2e.test.ts",
-    "test:mcp-ui": "bun test e2e/mcp-app.test.ts --timeout 30000",
+    "test:mcp-ui": "bun test e2e/mcp-app.test.ts e2e/gallery-scripts.test.ts --timeout 30000",
     "typecheck": "tsc --noEmit",
     "dev:cloudflare": "wrangler dev --local --var ENVIRONMENT:local",
     "prepare:celld": "bun run scripts/prepare-celld.ts",
