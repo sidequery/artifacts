@@ -20,6 +20,32 @@ Only Herdr pane opening requires Herdr 0.8.2+ and
 [Terminal Browser](https://github.com/zenbu-labs/terminal-browser).
 The gallery, source operations, history, typechecking and compilation work without them.
 
+## Install
+
+After the first registry release, install the CLI with Bun; a source checkout is
+not required. The package is currently being prepared and is not published yet.
+
+```bash
+bun add --global @sidequery/canvas
+canvas write overview --file overview.canvas.tsx
+canvas web --port 4784
+```
+
+Open `http://127.0.0.1:4784`. The package includes the local CLI, stdio MCP
+server, gallery, and the prebuilt Worker and assets used by the optional native
+canvas server. It does not build from source during installation.
+
+For a stdio MCP client, configure the installed command directly:
+
+```json
+{
+  "command": "canvas",
+  "args": ["mcp", "--dir", "/absolute/path/to/workspace/canvases"]
+}
+```
+
+Agents without MCP can use the CLI for the same artifact operations.
+
 ## Run from source
 
 From the checkout:
@@ -32,17 +58,7 @@ bun run canvas web --port 4784
 
 Open `http://127.0.0.1:4784`. Your working canvases and UI state are ignored by
 this repository; reusable checked-in samples belong in `examples/`.
-The package is private and is not published to a registry. The CLI has a `canvas`
-bin entry for future packaging; `bun run canvas` works directly from this checkout.
-
-For a stdio MCP client, configure the command `bun` with arguments:
-
-```json
-["run", "/absolute/path/to/canvas/src/cli.ts", "mcp", "--dir", "/absolute/path/to/workspace/canvases"]
-```
-
-Use your actual checkout path, including `herdr-canvas` if that is its folder name.
-Agents without MCP can use the CLI for the same artifact operations.
+`bun run canvas` uses the same CLI directly from this checkout.
 
 ## Optional Herdr integration
 
@@ -68,11 +84,11 @@ Canvases live at `<workspace>/canvases/<name>.canvas.tsx` and may import only
 from `sidequery/canvas` (`herdr/canvas` and `cursor/canvas` remain compatibility aliases). Use the CLI or MCP:
 
 ```bash
-bun run src/cli.ts list
-bun run src/cli.ts write overview --file examples/overview.canvas.tsx
-bun run src/cli.ts typecheck overview
-bun run src/cli.ts open overview
-bun run src/cli.ts mcp
+canvas list
+canvas write overview --file examples/overview.canvas.tsx
+canvas typecheck overview
+canvas open overview
+canvas mcp
 ```
 
 `open` typechecks and bundles with Bun, then opens the `herdr.canvas` `canvas`
@@ -131,6 +147,20 @@ write `open` flag is accepted, but inline display is automatic regardless of it.
 CLI `open` continues to open a Herdr pane.
 
 ## Native canvas servers and SQLite
+
+The optional local native runtime starts in the foreground with `canvas server`.
+It downloads a pinned, checksummed `celld` binary on first use and stores its
+runtime and SQLite state under the operating system's application-data directory.
+Use `canvas server start`, `canvas server stop`, `canvas server status`, and
+`canvas server logs` for the opt-in background service. See
+[`docs/daemon.md`](docs/daemon.md) for lifecycle and login-service details.
+
+The native server exposes its gallery at `http://127.0.0.1:4786` and its HTTP MCP
+endpoint at `http://127.0.0.1:4786/mcp`. Configure an HTTP MCP client against that
+endpoint to create canvases with server source and call `canvas_request`. The
+`canvas web` gallery and `canvas mcp` stdio server continue to use workspace files
+and the local history database; they do not migrate or synchronize canvases with
+the native server.
 
 Hosted Cloudflare canvases can pair the browser `.canvas.tsx` with a native
 `CanvasServer`. The server is a generated Durable Object class and uses its own
@@ -328,6 +358,7 @@ or delete action; restoring working source remains an explicit CLI/MCP operation
 bun run test
 bun run test:e2e
 bun run test:mcp-ui
+bun run test:package
 bun run typecheck
 ```
 
@@ -340,7 +371,8 @@ GitHub Actions runs the typecheck and unit/service suite with Bun 1.4.0.
 The root Dockerfile is an integration-test environment, not a production image.
 `bun run test:mcp-ui` exercises the real canvas in Chromium with an MCP Apps host.
 Install its browser first with `bun x playwright install chromium`. CI runs this
-browser suite as well as the unit/service suite.
+browser suite, the unit/service suite, and a clean tarball install that exercises
+the installed CLI, gallery, compilation, and stdio MCP server.
 
 ## Trust boundary
 

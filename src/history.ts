@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
+import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { PLUGIN_ROOT } from "./paths";
@@ -19,13 +20,28 @@ export function hash(value: string): string {
 
 // Include implementation identity because this plugin may be an unversioned local link.
 export function runtimeIdentity(): string {
-  const files = ["package.json", "bun.lock", "src/compile.ts", "src/html.ts"];
+  const files = ["package.json", "src/compile.ts", "src/html.ts"];
+  // Registry tarballs intentionally omit package-manager lockfiles. Include the
+  // checkout lock when available without making installed-package previews depend on it.
+  if (existsSync(join(PLUGIN_ROOT, "bun.lock"))) files.push("bun.lock");
   for (const dir of ["src/sdk", "src/runtime"]) {
     for (const name of readdirSync(join(PLUGIN_ROOT, dir)).sort()) {
       if (!name.includes(".test.")) files.push(`${dir}/${name}`);
     }
   }
-  return JSON.stringify({ bun: Bun.version, plugin: "0.1.0", sdkHash: hash(files.map(file => `${file}\0${readFileSync(join(PLUGIN_ROOT, file), "utf8")}`).join("\0")) });
+  const manifestPath = join(PLUGIN_ROOT, "package.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as { version: string };
+  const requireFromPlugin = createRequire(manifestPath);
+  const dependencies = Object.fromEntries(["react", "react-dom", "typescript"].map(name => {
+    const dependency = JSON.parse(readFileSync(requireFromPlugin.resolve(`${name}/package.json`), "utf8")) as { version: string };
+    return [name, dependency.version];
+  }));
+  return JSON.stringify({
+    bun: Bun.version,
+    plugin: manifest.version,
+    dependencies,
+    sdkHash: hash(files.map(file => `${file}\0${readFileSync(join(PLUGIN_ROOT, file), "utf8")}`).join("\0")),
+  });
 }
 
 export type { Version, ServeEvent, HistoryEntry } from "./historyTypes";

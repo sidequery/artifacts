@@ -1,15 +1,102 @@
 #!/usr/bin/env bun
 
-import { resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 
-import { flagBoolean, flagString, parseArgs } from "./args";
+import { flagBoolean, flagString, parseArgs, type ParsedArgs } from "./args";
 import { canvasesDirFrom } from "./canvasFile";
+import { clearServerReady, ServerDaemonManager, writeServerReady } from "./celldDaemon";
+import { runCelldServer } from "./celldServer";
 import { writeDaemonState, daemonStatePath } from "./daemon";
 import { createHerdrClient, type PanePlacement } from "./herdr";
 import { runMcpServer } from "./mcpServer";
 import { createCanvasServer } from "./serve";
 import { CanvasService } from "./service";
 import { historyPath } from "./history";
+import { PLUGIN_ROOT } from "./paths";
+
+type ServerManager = Pick<ServerDaemonManager, "start" | "stop" | "status" | "logs" | "uninstall">;
+
+export async function runServerCommand(args: ParsedArgs, dependencies: {
+  manager?: ServerManager;
+  runForeground?: typeof runCelldServer;
+  signal?: AbortSignal;
+  stdout?: (value: string) => void;
+} = {}): Promise<boolean> {
+  if (args.command !== "server") return false;
+  const action = args.positionals[0];
+  if (args.positionals.length > 1) throw new Error("server accepts at most one subcommand");
+  const stdout = dependencies.stdout ?? (value => process.stdout.write(value));
+  const numberFlag = (key: string, fallback?: number) => {
+    const raw = args.flags[key];
+    return raw === undefined ? fallback : Number(raw === true ? NaN : raw);
+  };
+
+  if (action) {
+    if (flagString(args.flags, "state-dir") || flagString(args.flags, "managed-ready")) {
+      throw new Error("--state-dir is available only for foreground `canvas server`");
+    }
+    const manager = dependencies.manager ?? new ServerDaemonManager();
+    if (action === "start") {
+      stdout(`${JSON.stringify(await manager.start({ atLogin: flagBoolean(args.flags, "at-login"), port: numberFlag("port") }), null, 2)}\n`);
+    } else if (action === "stop") {
+      stdout(`${JSON.stringify(await manager.stop(), null, 2)}\n`);
+    } else if (action === "status") {
+      stdout(`${JSON.stringify(await manager.status(), null, 2)}\n`);
+    } else if (action === "logs") {
+      stdout((await manager.logs(numberFlag("lines", 100))).contents);
+    } else if (action === "uninstall") {
+      stdout(`${JSON.stringify(await manager.uninstall(), null, 2)}\n`);
+    } else {
+      throw new Error(`unknown server subcommand: ${action}`);
+    }
+    return true;
+  }
+
+  if (flagBoolean(args.flags, "at-login")) throw new Error("use `canvas server start --at-login` to enable start at login");
+  const port = numberFlag("port");
+  const stateDir = flagString(args.flags, "state-dir");
+  const readyPath = flagString(args.flags, "managed-ready");
+  if (readyPath && !stateDir) throw new Error("internal --managed-ready requires --state-dir");
+  const controller = dependencies.signal ? undefined : new AbortController();
+  const signal = dependencies.signal ?? controller!.signal;
+  let readyWrite: Promise<void> | undefined;
+  const stop = () => controller?.abort();
+  if (controller) {
+    process.once("SIGINT", stop);
+    process.once("SIGTERM", stop);
+  }
+  try {
+    await (dependencies.runForeground ?? runCelldServer)({
+      port,
+      stateDir,
+      signal,
+      onReady: async url => {
+        stdout(`${JSON.stringify({ ok: true, url, port: Number(new URL(url).port), stateDir: stateDir ? resolve(stateDir) : undefined }, null, 2)}\n`);
+        if (readyPath) {
+          readyWrite = writeServerReady(resolve(readyPath), {
+            pid: process.pid,
+            port: Number(new URL(url).port),
+            url,
+            stateDir: resolve(stateDir!),
+          });
+          await readyWrite;
+        }
+      },
+    });
+  } catch (error) {
+    const abortError = error === signal.reason || (error instanceof Error && error.name === "AbortError");
+    if (!signal.aborted || !abortError) throw error;
+  } finally {
+    if (controller) {
+      process.off("SIGINT", stop);
+      process.off("SIGTERM", stop);
+    }
+    if (readyWrite) await readyWrite;
+    if (readyPath) await clearServerReady(resolve(readyPath));
+  }
+  return true;
+}
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
@@ -17,6 +104,14 @@ async function main(): Promise<void> {
     printHelp();
     return;
   }
+
+  if (args.command === "version" || args.command === "--version" || args.command === "-v") {
+    const manifest = JSON.parse(readFileSync(join(PLUGIN_ROOT, "package.json"), "utf8")) as { name: string; version: string };
+    console.log(`${manifest.name} ${manifest.version}`);
+    return;
+  }
+
+  if (await runServerCommand(args)) return;
 
   const cwd = process.cwd();
   const canvasesDir = resolve(flagString(args.flags, "dir") ?? canvasesDirFrom(cwd));
@@ -176,6 +271,7 @@ function printHelp(): void {
   console.log(`canvas
 
 Usage:
+  canvas --version
   canvas list [--dir PATH]
   canvas write NAME [--file PATH | --stdin]
   canvas read NAME [--start-line N] [--end-line N]
@@ -190,6 +286,9 @@ Usage:
   canvas show VERSION_ID [--source]
   canvas open --version VERSION_ID [--event EVENT_ID] [--placement split|tab|zoomed|overlay]
   canvas restore VERSION_ID
+  canvas server [--port 4786] [--state-dir PATH]
+  canvas server start [--port 4786] [--at-login]
+  canvas server stop | status | logs [--lines 100] | uninstall
 
 All commands accept --dir PATH and --history-db PATH.
 read returns up to 200 lines by default, with a source_hash and next_line.
@@ -206,7 +305,9 @@ powered internally by Terminal Browser in app mode.
 `);
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exit(1);
-});
+if (import.meta.main) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  });
+}

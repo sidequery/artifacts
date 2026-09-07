@@ -8,6 +8,60 @@ import { CanvasHistory } from "./history";
 import { createCanvasServer } from "./serve";
 import { handleMcpRequest } from "./mcp";
 import { CanvasService } from "./service";
+import { parseArgs } from "./args";
+import { runServerCommand } from "./cli";
+
+test("CLI reports the installed package version", async () => {
+  const manifest = await Bun.file(join(PLUGIN_ROOT, "package.json")).json() as { name: string; version: string };
+  const result = await runCli(["--version"]);
+  expect(result).toEqual({ exitCode: 0, stdout: `${manifest.name} ${manifest.version}\n`, stderr: "" });
+});
+
+test("server CLI dispatches lifecycle commands and foreground readiness", async () => {
+  const calls: string[] = [];
+  const status = { manager: "launchd" as const, installedAtLogin: false, loaded: true, running: true, ready: true, pid: 7, url: "http://127.0.0.1:4799", logPath: "/tmp/server.log", detail: "ready" };
+  const manager = {
+    start: async (options: { atLogin?: boolean; port?: number }) => { calls.push(`start:${options.atLogin}:${options.port}`); return status; },
+    stop: async () => status,
+    status: async () => status,
+    logs: async (lines?: number) => { calls.push(`logs:${lines}`); return { path: status.logPath, contents: "last line\n" }; },
+    uninstall: async () => status,
+  };
+  let output = "";
+  expect(await runServerCommand(parseArgs(["server", "start", "--port", "4799", "--at-login"]), { manager, stdout: value => { output += value; } })).toBe(true);
+  expect(calls).toContain("start:true:4799");
+  expect(JSON.parse(output)).toMatchObject({ ready: true, url: status.url });
+  output = "";
+  await runServerCommand(parseArgs(["server", "logs", "--lines", "1"]), { manager, stdout: value => { output += value; } });
+  expect(calls).toContain("logs:1");
+  expect(output).toBe("last line\n");
+
+  const stateDir = tempDir();
+  let observedReady = false;
+  output = "";
+  await runServerCommand(parseArgs(["server", "--port", "4799", "--state-dir", stateDir]), {
+    signal: new AbortController().signal,
+    stdout: value => { output += value; },
+    runForeground: async options => {
+      await options.onReady?.("http://127.0.0.1:4799");
+      observedReady = true;
+    },
+  });
+  expect(observedReady).toBe(true);
+  expect(JSON.parse(output)).toMatchObject({ ok: true, port: 4799, stateDir });
+  await expect(runServerCommand(parseArgs(["server", "start", "--state-dir", stateDir]), { manager })).rejects.toThrow("foreground");
+
+  const stopped = new AbortController();
+  stopped.abort();
+  await expect(runServerCommand(parseArgs(["server"]), {
+    signal: stopped.signal,
+    runForeground: async () => { throw stopped.signal.reason; },
+  })).resolves.toBe(true);
+  await expect(runServerCommand(parseArgs(["server"]), {
+    signal: stopped.signal,
+    runForeground: async () => { throw new Error("shutdown cleanup failed"); },
+  })).rejects.toThrow("shutdown cleanup failed");
+});
 
 test("CLI list and typecheck work against a temp canvases dir", async () => {
   const dir = tempDir();
