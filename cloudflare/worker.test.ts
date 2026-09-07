@@ -50,6 +50,13 @@ function payload(result: Awaited<ReturnType<Client["callTool"]>>) {
 test("official HTTP MCP client lists contracts, writes, edits, restores and retrieves raw history", async () => {
   const tools = (await client.listTools()).tools;
   expect(tools.some(tool => tool.name === "canvas_write")).toBe(true);
+  expect(tools.some(tool => tool.name === "canvas_guide")).toBe(true);
+  const guide = await client.callTool({ name: "canvas_guide", arguments: {} });
+  expect(guide.isError).not.toBe(true);
+  const guideText = (guide.content as { text: string }[])[0]!.text;
+  const example = guideText.match(/```tsx\n([\s\S]*?)```/)?.[1];
+  expect(example).toBeDefined();
+  expect(payload(await client.callTool({ name: "canvas_write", arguments: { name: "guide-counter", contents: example } })).ok).toBe(true);
   expect((tools.find(tool => tool.name === "canvas_open")!.inputSchema.properties!.target as { enum: string[] }).enum).toEqual(["inline"]);
   const result = await client.callTool({ name: "canvas_write", arguments: { name: "overview", contents: source } });
   expect(result.isError).not.toBe(true);
