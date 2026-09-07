@@ -41,5 +41,5 @@ export async function galleryBundle(): Promise<string> {
 }
 
 export function galleryHtml(): string {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Canvas library</title><style>html,body{margin:0;background:#101719;color:#e9eeee;font-family:system-ui,sans-serif}*{box-sizing:border-box}</style></head><body><div id="root"></div><script type="module" src="/gallery.js"></script></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sidequery Canvas library</title><style>html,body{margin:0;background:#101719;color:#e9eeee;font-family:system-ui,sans-serif}*{box-sizing:border-box}</style></head><body><div id="root"></div><script type="module" src="/gallery.js"></script></body></html>`;
 }

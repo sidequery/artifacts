@@ -32,3 +32,15 @@ test("compileCanvas bundles a relative canvas path", async () => {
   expect(result.js).toContain("herdr-canvas");
   expect(result.js).toContain("createRoot");
 });
+
+test("canonical and legacy SDK imports typecheck and compile ordinary React hooks", async () => {
+  const { HOOKS_CANVAS } = await import("./test/fixtures");
+  const { typecheckCanvas } = await import("./typecheck");
+  for (const specifier of ["sidequery/canvas", "herdr/canvas", "cursor/canvas"]) {
+    const path = writeCanvas(tempDir(), "hooks", HOOKS_CANVAS.replaceAll("sidequery/canvas", specifier));
+    expect(typecheckCanvas(path)).toEqual([]);
+    const result = await compileCanvas(path);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.ok).toBe(true);
+  }
+}, 30000);

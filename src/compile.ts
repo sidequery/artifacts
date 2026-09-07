@@ -23,7 +23,7 @@ export function canvasAliasPlugin(canvasPath: string, source?: string): BunPlugi
       if (source !== undefined) {
         build.onLoad({ filter: /\.canvas\.tsx$/ }, (args) => args.path === absCanvas ? { contents: source, loader: "tsx" } : undefined);
       }
-      build.onResolve({ filter: /^(herdr\/canvas|cursor\/canvas)$/ }, () => ({
+      build.onResolve({ filter: /^(sidequery\/canvas|herdr\/canvas|cursor\/canvas)$/ }, () => ({
         path: SDK_ENTRY,
       }));
       build.onResolve({ filter: /^herdr-canvas-entry$/ }, () => ({

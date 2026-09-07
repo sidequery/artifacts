@@ -4,7 +4,7 @@ export type SandboxViolation = {
   line?: number;
 };
 
-const ALLOWED_MODULES = new Set(["herdr/canvas", "cursor/canvas"]);
+const ALLOWED_MODULES = new Set(["sidequery/canvas", "herdr/canvas", "cursor/canvas"]);
 
 const IMPORT_FROM_RE = /(?:^|\n)\s*(?:import|export)\s+(?:type\s+)?[\s\S]*?\sfrom\s+["']([^"']+)["']/g;
 const SIDE_EFFECT_IMPORT_RE = /(?:^|\n)\s*import\s+["']([^"']+)["']/g;
@@ -38,7 +38,7 @@ export function scanCanvasSource(source: string): SandboxViolation[] {
     if (!ALLOWED_MODULES.has(specifier)) {
       violations.push({
         kind: "import",
-        message: `import from "${specifier}" is not allowed; import only from "herdr/canvas"`,
+        message: `import from "${specifier}" is not allowed; import only from "sidequery/canvas"`,
         line: lineNumberAt(stripped, match.index ?? 0),
       });
     }

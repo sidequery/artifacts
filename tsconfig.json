@@ -9,6 +9,7 @@
     "skipLibCheck": true,
     "types": ["bun"],
     "paths": {
+      "sidequery/canvas": ["./src/sdk/index.ts"],
       "herdr/canvas": ["./src/sdk/index.ts"],
       "cursor/canvas": ["./src/sdk/index.ts"]
     }

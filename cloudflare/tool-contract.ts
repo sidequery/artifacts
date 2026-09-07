@@ -21,7 +21,7 @@ for (const tool of CLOUD_MCP_TOOLS) {
   }
   if (tool.name === "canvas_write") {
     tool.inputSchema.properties = { ...tool.inputSchema.properties,
-      server: { type: ["string", "null"], description: "Optional native server TypeScript exporting class CanvasServer extends DurableObject from cloudflare:workers. Use ctx.storage.sql/kv directly. Omit to preserve; null removes server code without deleting its database." },
+      server: { type: ["string", "null"], description: "Optional native server TypeScript exporting class CanvasServer extends DurableObject from cloudflare:workers. Use this.ctx.storage.sql for native SQLite and this.ctx.storage.kv for key/value storage. Omit to preserve; null removes server code without deleting its database." },
     };
   }
   if (tool.name === "canvas_read" || tool.name === "canvas_edit") {

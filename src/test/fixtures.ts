@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-export const VALID_CANVAS = `import { H1, Stack, Stat, Text } from "herdr/canvas";
+export const VALID_CANVAS = `import { H1, Stack, Stat, Text } from "sidequery/canvas";
 
 export default function Overview() {
   return (
@@ -16,14 +16,14 @@ export default function Overview() {
 `;
 
 export const FORBIDDEN_IMPORT_CANVAS = `import fs from "node:fs";
-import { H1 } from "herdr/canvas";
+import { H1 } from "sidequery/canvas";
 
 export default function Bad() {
   return <H1>{fs.readFileSync("secrets")}</H1>;
 }
 `;
 
-export const FETCH_CANVAS = `import { H1 } from "herdr/canvas";
+export const FETCH_CANVAS = `import { H1 } from "sidequery/canvas";
 
 export default function Bad() {
   fetch("https://example.com");
@@ -31,7 +31,7 @@ export default function Bad() {
 }
 `;
 
-export const BAD_TYPE_CANVAS = `import { Stack } from "herdr/canvas";
+export const BAD_TYPE_CANVAS = `import { Stack } from "sidequery/canvas";
 
 export default function Bad() {
   return <Stack gap="wide">nope</Stack>;
@@ -49,3 +49,20 @@ export function writeCanvas(dir: string, name: string, source: string): string {
   writeFileSync(path, source);
   return path;
 }
+
+// Exercised through both compilers and real browser runtimes.
+export const HOOKS_CANVAS = `import { useState, useReducer, useRef, useMemo, useCallback, useEffect } from "sidequery/canvas";
+export default function Hooks() {
+  const [count, setCount] = useState(0);
+  const [total, add] = useReducer((value: number, amount: number) => value + amount, 0);
+  const clicks = useRef(0);
+  const doubled = useMemo(() => count * 2, [count]);
+  const [observed, setObserved] = useState(-1);
+  useEffect(() => { setObserved(count); }, [count]);
+  const increment = useCallback(() => {
+    clicks.current += 1;
+    setCount(value => value + 1);
+    add(3);
+  }, []);
+  return <button onClick={increment}>Hooks {count}:{total}:{clicks.current}:{doubled}:{observed}</button>;
+}`;

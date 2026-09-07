@@ -3,7 +3,7 @@ import { CANVAS_APP_META } from "./mcpAppContract";
 export const MCP_TOOLS = [
   {
     name: "canvas_guide",
-    description: "Read the Canvas authoring guide: supported SDK exports, hooks, common component props, restrictions, validation behavior, and a working interactive example. Call before creating a canvas if you have not read it in this conversation.",
+    description: "Read the Sidequery Canvas SDK contract: exports, host APIs, component conventions, restrictions, and validation behavior. Call before creating a canvas if you have not read it in this conversation.",
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
@@ -51,7 +51,7 @@ export const MCP_TOOLS = [
     name: "canvas_write",
     _meta: CANVAS_APP_META,
     description:
-      "Create or replace a canvas and display it inline in chat after typechecking. Before creating a canvas, call canvas_guide if you have not read it in this conversation. Import only from herdr/canvas; use useCanvasState(key, defaultValue), not useState. Pass kebab-case name without slashes. Returns Canvas TypeScript check diagnostics.",
+      "Create or replace a canvas and display it inline in chat after typechecking. Before creating a canvas, call canvas_guide if you have not read it in this conversation. Import from sidequery/canvas. Pass kebab-case name without slashes. Returns Canvas TypeScript check diagnostics.",
     inputSchema: {
       type: "object",
       properties: {
