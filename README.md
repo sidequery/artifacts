@@ -184,13 +184,23 @@ together. The database is live state keyed by library, workspace and canvas name
 editing or restoring source reloads the code while preserving that state, and
 opening an archived version does not restore an old database snapshot.
 
-Private canvases receive databases isolated to the verified Access user. A team
-canvas shares one database with members authorized for that deployment's team
-library. Private and team canvases with the same workspace and name remain
+Private canvases receive databases isolated to the verified signed-in user. A
+team canvas shares one database with members authorized for that deployment's
+team library. Private and team canvases with the same workspace and name remain
 separate. Generated servers receive Durable Object storage; ordinary D1, R2 and
 custom Worker bindings are not provided. The local Bun CLI, stdio MCP server and
 gallery do not execute canvas servers, so `canvasFetch` reports that server
-requests are unavailable there. See [Cloudflare setup](docs/cloudflare.md).
+requests are unavailable there.
+
+Hosted deployments choose `AUTH_MODE=access` for the existing Cloudflare Access
+setup or `AUTH_MODE=better-auth` for provider-configurable sign-in. Better Auth
+runs inside the Canvas Worker with a deployment-owned D1 database; it does not
+require a central Canvas authentication service or offer password registration.
+Deployers can pass any supported Better Auth social-provider configuration,
+configure generic OIDC, or extend the TypeScript provider seam. The gallery and
+remote MCP OAuth flow resolve to the same user identity. See
+[Cloudflare setup](docs/cloudflare.md) for provider examples, D1 migrations and
+admission rules.
 
 ## Targeted reads and edits
 

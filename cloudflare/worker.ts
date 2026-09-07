@@ -3,6 +3,9 @@ import type { DurableObjectNamespace, Fetcher } from "@cloudflare/workers-types"
 import { CanvasLibrary } from "./library";
 import { authenticate, type AuthEnvironment } from "./auth";
 import { CloudCanvasService } from "./service";
+// esbuild 0.28.1 must initialize Better Auth's shared Zod module before
+// the MCP SDK constructs its top-level schemas (Zod 4.5.4).
+import { authenticateBetterAuth, getCanvasAuth, CanvasAuthConfigurationError, type BetterAuthEnvironment, type CanvasUser } from "./better-auth";
 import { handleCloudMcp } from "./mcp";
 import { readRequestText } from "./http";
 import { CanvasBackend } from "./backend";
@@ -11,33 +14,66 @@ import type { CanvasHttpRequest } from "../src/httpTypes";
 import galleryBridge from "../dist/cloudflare/gallery-request.json";
 
 export { CanvasLibrary, CanvasBackend };
-export type Env = AuthEnvironment & {
+export type Env = AuthEnvironment & BetterAuthEnvironment & {
   LIBRARIES: DurableObjectNamespace<CanvasLibrary>;
   BACKENDS: DurableObjectNamespace<CanvasBackend>;
   ASSETS: Fetcher;
   DEFAULT_WORKSPACE?: string;
 };
 
-const app = new Hono<{ Bindings: Env; Variables: { service: CloudCanvasService; libraryScope: "private" | "team" } }>();
+const app = new Hono<{ Bindings: Env; Variables: { service: CloudCanvasService; libraryScope: "private" | "team"; user: CanvasUser | null } }>();
 app.get("/health", c => c.json({ ok: true, runtime: navigator.userAgent }));
+app.get("/sign-in", c => {
+  if (c.env.AUTH_MODE !== "better-auth") return c.redirect("/");
+  c.header("Cache-Control", "no-store");
+  c.header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
+  return c.env.ASSETS.fetch(new Request(new URL("/auth.html", c.req.url)));
+});
+app.get("/consent", c => {
+  if (c.env.AUTH_MODE !== "better-auth") return c.notFound();
+  c.header("Cache-Control", "no-store");
+  c.header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
+  return c.env.ASSETS.fetch(new Request(new URL("/auth.html", c.req.url)));
+});
+app.get("/auth.js", c => c.env.ASSETS.fetch(c.req.raw));
+app.get("/api/auth/providers", async c => {
+  if (c.env.AUTH_MODE !== "better-auth") return c.json({ providers: [] });
+  const context = await (await getCanvasAuth(c.env)).$context;
+  // Publish display metadata only, never provider configuration or credentials.
+  return c.json({ providers: context.socialProviders.map(({ id, name }) => ({ id, name })) });
+});
+app.all("/api/auth/*", async c => c.env.AUTH_MODE === "better-auth"
+  ? (await getCanvasAuth(c.env)).handler(c.req.raw) : c.notFound());
+app.all("/.well-known/*", async c => c.env.AUTH_MODE === "better-auth"
+  ? (await getCanvasAuth(c.env)).handler(c.req.raw) : c.notFound());
 app.use("*", async (c, next) => {
   c.header("Cache-Control", "private, no-store");
   c.header("X-Content-Type-Options", "nosniff");
   const url = new URL(c.req.url);
   const origin = c.req.header("Origin");
   if (origin && origin !== url.origin) return c.json({ error: "Origin is not allowed" }, 403);
-  const identity = await authenticate(c.req.raw, c.env);
+  if (c.env.AUTH_MODE && !["access", "better-auth"].includes(c.env.AUTH_MODE)) return c.json({ error: "AUTH_MODE must be access or better-auth" }, 503);
+  const user = c.env.AUTH_MODE === "better-auth" ? await authenticateBetterAuth(c.req.raw, c.env) : null;
+  if (user instanceof Response) return user;
+  const identity = user ? { subject: user.id } : await authenticate(c.req.raw, c.env);
   if (identity instanceof Response) return identity;
+  c.set("user", user);
   const workspace = (url.searchParams.get("workspace") ?? c.env.DEFAULT_WORKSPACE ?? "default").trim();
   if (!workspace || workspace.includes("\0") || new TextEncoder().encode(workspace).byteLength > 4096) return c.json({ error: "Invalid workspace" }, 400);
   const libraryScope = url.searchParams.get("library") ?? "private";
   if (libraryScope !== "private" && libraryScope !== "team") return c.json({ error: "Library must be private or team" }, 400);
-  // Access controls membership of this deployment's team. Private storage is
+  // The configured auth mode controls membership of this deployment's team. Private storage is
   // selected only from the verified subject, never a caller-supplied user ID.
-  const libraryKey = libraryScope === "team" ? "team" : JSON.stringify(["private", c.env.ACCESS_TEAM_DOMAIN ?? "local", identity.subject]);
+  const libraryKey = libraryScope === "team" ? "team" : user
+    ? JSON.stringify(["private", "better-auth", user.id])
+    : JSON.stringify(["private", c.env.ACCESS_TEAM_DOMAIN ?? "local", identity.subject]);
   c.set("libraryScope", libraryScope);
   c.set("service", new CloudCanvasService(c.env.LIBRARIES.getByName(libraryKey), workspace, c.env.BACKENDS, libraryKey));
   await next();
+});
+app.get("/api/session", c => {
+  const user = c.get("user");
+  return c.json({ authMode: user ? "better-auth" : "access", user: user ? { id: user.id, name: user.name, email: user.email } : null });
 });
 
 app.all("/mcp", async c => {
@@ -81,6 +117,6 @@ app.get("/gallery/preview", async c => {
 app.get("/", c => c.env.ASSETS.fetch(new Request(new URL("/index.html", c.req.url))));
 app.get("/gallery", c => c.env.ASSETS.fetch(new Request(new URL("/index.html", c.req.url))));
 app.get("/gallery.js", c => c.env.ASSETS.fetch(c.req.raw));
-app.onError((error, c) => c.json({ error: error.message }, /not found/.test(error.message) ? 404 : 400));
+app.onError((error, c) => c.json({ error: error.message }, error instanceof CanvasAuthConfigurationError ? 503 : /not found/.test(error.message) ? 404 : 400));
 
 export default app;

@@ -21,9 +21,11 @@ bun run dev:cloudflare
 ```
 
 Wrangler runs workerd, local SQLite Durable Objects, and the real gallery assets
-on `http://127.0.0.1:4785`. State persists under `.wrangler/state`. The explicit
-local flag bypasses Access only for loopback hosts; production configuration
-never enables that bypass.
+on `http://127.0.0.1:4785`. State persists under `.wrangler/state`. The checked-in
+`AUTH_MODE=access` keeps the existing development behavior: the explicit local
+flag bypasses Access only for loopback hosts, while production never enables that
+bypass. Better Auth mode always requires a real provider sign-in and a migrated
+local D1 database; see [Better Auth mode](#better-auth-mode).
 
 In another terminal:
 
@@ -64,8 +66,20 @@ The account ID selects infrastructure ownership; it is not a user credential.
 Set a distinct `name` in `wrangler.jsonc` if the account needs multiple instances.
 
 Deployment authorization and application sign-in are separate. The native deploy
-flow provisions the Worker, assets and SQLite Durable Object migration. Configure
-Access separately before using the gallery or MCP server:
+flow provisions the Worker, assets and configured SQLite Durable Object
+migrations. Better Auth additionally requires a D1 database and its SQL migration.
+Choose one application authentication mode in `wrangler.jsonc`:
+
+- `AUTH_MODE = "access"` keeps the existing Cloudflare Access integration and is
+  the checked-in default.
+- `AUTH_MODE = "better-auth"` runs Better Auth in this Worker with the identity
+  providers and D1 database owned by this deployment.
+
+There is no central Canvas account or authentication service in either mode.
+
+### Cloudflare Access mode
+
+Configure Access before using the gallery or MCP server:
 
 1. Enable Cloudflare Access for this Worker and every hostname that reaches it,
    including its `workers.dev` URL and any custom domains or preview URLs.
@@ -79,23 +93,178 @@ Access separately before using the gallery or MCP server:
    `ACCESS_AUD` to this Access application's audience, then redeploy. These are
    identifiers, not secrets. Keep `ENVIRONMENT` set to `production`.
 
-Without these variables the application returns 503. With them, every protected
+Without these variables, Access mode returns 503. With them, every protected
 request must have an RS256 Access assertion with the matching issuer and audience.
 Managed OAuth validates the MCP client's token at the edge and forwards the
 signed assertion. Raw identity headers and unsigned JWT payloads are not trusted.
 `/health` is a public runtime check and exposes no library data.
+
+### Better Auth mode
+
+Better Auth is hosted at the Canvas deployment's own `/api/auth` routes and uses
+the `AUTH_DB` D1 binding for users, sessions, OAuth grants, signing keys and rate
+limits. It accepts provider sign-in only; email/password registration is disabled.
+
+Set `BETTER_AUTH_URL` to the stable, public origin users and MCP clients actually
+open, for example `https://canvas.example.com`. It must be an HTTPS origin with no
+path, query or fragment. HTTP is accepted only for loopback development hosts.
+For example, production `vars` can select the mode, canonical URL and an admission
+rule:
+
+```json
+{
+  "ENVIRONMENT": "production",
+  "AUTH_MODE": "better-auth",
+  "BETTER_AUTH_URL": "https://canvas.example.com",
+  "BETTER_AUTH_ALLOWED_DOMAINS": "example.com",
+  "BETTER_AUTH_TRUSTED_IP_HEADER": "cf-connecting-ip"
+}
+```
+
+Register provider callbacks against the same origin:
+
+```text
+https://canvas.example.com/api/auth/callback/google
+https://canvas.example.com/api/auth/callback/github
+https://canvas.example.com/api/auth/callback/company
+```
+
+Generate a deployment-specific secret of at least 32 characters and store it with
+the provider credentials as a Worker secret. Do not commit these values:
+
+```sh
+openssl rand -base64 32
+bun x wrangler secret put BETTER_AUTH_SECRET
+bun x wrangler secret put BETTER_AUTH_SOCIAL_PROVIDERS
+```
+
+`BETTER_AUTH_SOCIAL_PROVIDERS` is JSON passed through to Better Auth's native
+`socialProviders` option. These are complete Google and GitHub shapes; replace
+the placeholders with one or both provider applications:
+
+```json
+{"google":{"clientId":"<google-client-id>","clientSecret":"<google-client-secret>"}}
+```
+
+```json
+{"github":{"clientId":"<github-client-id>","clientSecret":"<github-client-secret>"}}
+```
+
+You may combine them in one object or use any other social provider supported by
+the installed Better Auth version. For a discovery-based OpenID Connect provider,
+set `BETTER_AUTH_OIDC_PROVIDERS` to a JSON array and store it as a Worker secret:
+
+```json
+[{"providerId":"company","name":"Company SSO","discoveryUrl":"https://id.example.com/.well-known/openid-configuration","clientId":"<oidc-client-id>","clientSecret":"<oidc-client-secret>","scopes":["openid","profile","email"],"requireIdTokenVerification":true}]
+```
+
+```sh
+bun x wrangler secret put BETTER_AUTH_OIDC_PROVIDERS
+```
+
+Both JSON settings are deployment configuration, so the Canvas server and sign-in
+page do not contain a fixed provider list. If a provider needs callbacks, custom
+profile mapping or another Better Auth plugin, extend `teamProviderOptions` in
+[`cloudflare/team-auth.ts`](../cloudflare/team-auth.ts) with ordinary TypeScript.
+
+Provider authentication and admission are separate. Configure at least one of:
+
+- `BETTER_AUTH_ALLOWED_EMAILS`: comma- or whitespace-separated exact addresses.
+- `BETTER_AUTH_ALLOWED_DOMAINS`: comma- or whitespace-separated email domains.
+- `BETTER_AUTH_ALLOW_ALL_USERS=true`: admit every identity authenticated by the
+  configured providers. Use this only when those providers already enforce the
+  intended tenant or membership boundary.
+
+The email and domain rules require the provider to return a verified email. With
+no admission setting, no user is admitted. Provider hints such as Google's hosted
+domain can narrow provider sign-in, but do not replace Canvas admission policy.
+
+Auth endpoints use persistent database rate limits. On Cloudflare, the example
+trusts the edge-owned `cf-connecting-ip` header. On celld, set
+`BETTER_AUTH_TRUSTED_IP_HEADER` only to a header that a trusted proxy replaces;
+otherwise omit it and requests share a per-path rate-limit bucket. Provider
+access and refresh tokens are encrypted with Better Auth's native storage option.
+
+Create the remote D1 database once. Access-mode deployments do not need this
+resource. Add the returned ID and the checked-in migration directory to
+`wrangler.jsonc` only when enabling Better Auth:
+
+```sh
+bun x wrangler d1 create canvas-auth --binding AUTH_DB
+```
+
+```json
+{
+  "d1_databases": [
+    {
+      "binding": "AUTH_DB",
+      "database_name": "canvas-auth",
+      "database_id": "<database-id-returned-by-wrangler>",
+      "migrations_dir": "cloudflare/migrations"
+    }
+  ]
+}
+```
+
+Apply the checked-in migrations before the first Better Auth deployment:
+
+```sh
+bun x wrangler d1 migrations apply AUTH_DB --remote
+bun run deploy:cloudflare
+```
+
+Apply migrations to workerd's local D1 before starting Better Auth locally:
+
+```sh
+bun x wrangler d1 migrations apply AUTH_DB --local
+bun run dev:cloudflare
+```
+
+Put local values in the ignored `.dev.vars` file, including
+`AUTH_MODE="better-auth"`, `BETTER_AUTH_URL="http://127.0.0.1:4785"`, a strong
+`BETTER_AUTH_SECRET`, provider JSON and an admission rule. Future schema changes
+use the same local/remote migration commands; do not regenerate or reapply the
+initial migration as a replacement for migration history.
+Runtime schema introspection is disabled because celld v0.4.1 rejects the
+table-valued PRAGMA queries it uses. Apply migrations before serving traffic;
+startup does not automatically detect or repair a missing or outdated schema.
+Better Auth issues RS256 tokens on both runtimes because celld v0.4.1 cannot
+verify its default Ed25519 signatures. Signing keys remain managed by Better
+Auth in `AUTH_DB`. Auth instances are request-local to avoid celld's concurrent
+handler hang when sharing an instance.
+Generate future schema deltas with
+`bun run scripts/generate-auth-migration.ts cloudflare/migrations/0002_description.sql`.
+
+An OAuth-capable MCP client pointed at
+`https://canvas.example.com/mcp?workspace=<workspace>` discovers this deployment's
+authorization metadata, opens the same provider sign-in used by the gallery, and
+asks the user to approve Canvas access. Browser sessions and MCP access tokens map
+to the same Better Auth user ID. Signing out invalidates the session used to
+authorize both surfaces.
+Public MCP clients can register dynamically with PKCE. Desktop clients that omit
+OIDC's optional `application_type` are recognized from their loopback or private
+scheme callback; Better Auth still validates every callback URI. HTTPS web-client
+registrations and explicit application types keep Better Auth's native behavior.
 
 Open the deployed hostname for the gallery. Configure the centralized MCP server
 URL as `https://<instance-hostname>/mcp?workspace=<workspace>` for a private library,
 or `https://<instance-hostname>/mcp?library=team&workspace=<workspace>` for the team
 library. You can register both endpoints in a client. The gallery has a **My
 library / Team library** selector. Private is the default and is isolated by the
-verified Access user identity; passing a different user ID cannot select another
-person's data. All users authorized by this instance's Access policy can read and
+verified identity from the selected auth mode; passing a different user ID cannot
+select another person's data. Every user admitted to the deployment can read and
 edit the team library. Workspace names organize content inside a library and do
-not grant access. Each deployment represents one team; deploy separate instances
-with separate Access policies for unrelated teams. Infrastructure account
-administrators can still administer the underlying storage.
+not grant access. Each deployment represents one team; use separate instances and
+admission policies for unrelated teams. Infrastructure account administrators can
+still administer the underlying storage.
+
+Switching auth modes does not migrate private identities. Existing Access private
+libraries remain keyed by the Access issuer and subject; Better Auth private
+libraries use its user ID. The old data is not deleted, but Canvas does not infer
+that an Access subject and a Better Auth account represent the same person. Plan
+an explicit data migration before changing modes if users must retain the same
+private library. The shared team-library key is unchanged, so authorized users in
+the new mode continue to address the existing team library.
 
 Hosted MCP supports inline Canvas views, raw-source reads/writes/guarded edits,
 semantic diagnostics, history, archived views and restore. It rejects the local
@@ -214,6 +383,9 @@ CANVAS_MCP_URL=http://127.0.0.1:4786/mcp bun run seed:cloudflare default counter
 `test:celld` copies the built bundle and assets into a temporary directory with
 temporary celld state. It exercises the native counter, code updates, gallery
 and browser counter, then restarts celld and verifies SQL/KV data survived.
+It also runs the same signed OIDC fixture and MCP OAuth browser flow as workerd:
+discovery, registration, consent, two-user personal isolation, shared team
+state, provider admission, refresh and sign-out revocation.
 Install Chromium with `bun x playwright install chromium` before running it.
 The worker-bundler patch in this checkout
 statically imports esbuild's WASM module and initializes its browser global
@@ -221,6 +393,15 @@ before bundler startup; both are required by celld v0.4.1.
 Passing the compatibility test does not add D1, R2 or other outer-Worker
 bindings to generated canvas servers: their supported state remains the raw
 Durable Object SQL/KV facets described above.
+
+When `AUTH_DB` is present in `wrangler.jsonc`, the generated celld configuration
+carries that D1 binding. celld v0.4.1 can run the checked-in Better Auth schema in
+local D1 and preserve it across a restart. Its `celld d1 migrations apply` command
+targets deployed bucket storage rather than the local development database, so
+the Canvas celld integration uses a temporary bootstrap Worker for local schema
+setup. This fixture qualifies the complete OAuth/session flow on celld v0.4.1;
+ordinary `dev:celld` does not apply auth migrations automatically. Use
+Wrangler/workerd's local migration command for routine Better Auth development.
 
 ## Platform references
 

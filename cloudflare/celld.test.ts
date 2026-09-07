@@ -160,8 +160,7 @@ celldTest("runs native canvas SQLite and KV across code update and celld restart
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   await page.goto(baseUrl);
-  await expect(page.title()).resolves.toBe("Canvas library");
-  await expect(page.locator("body").innerText()).resolves.toContain("native-counter");
+  await page.getByRole("button", { name: "native-counter", exact: true }).waitFor();
   const frame = page.frameLocator("iframe.preview-frame");
   await frame.getByText("Count: 2", { exact: true }).waitFor({ timeout: 30_000 });
   await frame.getByRole("button", { name: "Increment" }).click();
