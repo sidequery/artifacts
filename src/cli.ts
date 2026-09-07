@@ -201,7 +201,7 @@ History keeps raw TSX only. Opening a saved version builds with the installed SD
 isolated UI state. Restore archives the working copy and adds a new revision.
 
 Canvases live in <workspace>/canvases/*.canvas.tsx and may import only from
-"herdr/canvas". open compiles the artifact and creates a managed Canvas pane
+"sidequery/canvas". open compiles the artifact and creates a managed Canvas pane
 powered internally by Terminal Browser in app mode.
 `);
 }

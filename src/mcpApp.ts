@@ -22,7 +22,7 @@ async function buildShell(): Promise<string> {
   });
   if (!build.success) throw new Error(build.logs.join("\n"));
   const js = await build.outputs[0]!.text();
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Canvas</title>
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sidequery Canvas</title>
 <style>
 html,body{margin:0;font-family:system-ui,sans-serif;overflow:hidden}
 html,body{background:transparent}

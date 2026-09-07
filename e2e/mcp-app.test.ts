@@ -7,7 +7,7 @@ import { canvasAppHtml, canvasAppResult, type CanvasAppPayload } from "../src/mc
 import { CanvasService } from "../src/service";
 import { tempDir, writeCanvas } from "../src/test/fixtures";
 
-const INTERACTIVE_CANVAS = `import { Button, H1, Stack, Text, useCanvasAction, useCanvasState, useHostTheme } from "herdr/canvas";
+const INTERACTIVE_CANVAS = `import { Button, H1, Stack, Text, useCanvasAction, useCanvasState, useHostTheme } from "sidequery/canvas";
 
 export default function Interactive() {
   const [count, setCount] = useCanvasState<number>("count", 0);
@@ -26,7 +26,7 @@ export default function Interactive() {
 }
 `;
 
-const RESIZABLE_CANVAS = `import { Button, H1, Stack, Text, useCanvasState } from "herdr/canvas";
+const RESIZABLE_CANVAS = `import { Button, H1, Stack, Text, useCanvasState } from "sidequery/canvas";
 
 export default function Resizable() {
   const [expanded, setExpanded] = useCanvasState<boolean>("expanded", false);
@@ -43,7 +43,7 @@ export default function Resizable() {
 }
 `;
 
-const SERVER_CANVAS = `import { Button, H1, Stack, Text, canvasFetch, useCanvasState } from "herdr/canvas";
+const SERVER_CANVAS = `import { Button, H1, Stack, Text, canvasFetch, useCanvasState } from "sidequery/canvas";
 
 export default function ServerCanvas() {
   const [result, setResult] = useCanvasState<string>("result", "idle");
@@ -461,3 +461,17 @@ test("routes canvasFetch through canvas_request only for server-enabled MCP canv
   expect(errors).toEqual([]);
   await page.close();
 }, 30_000);
+
+test("ordinary React hooks update component state through the canonical and legacy SDK imports", async () => {
+  const { HOOKS_CANVAS } = await import("../src/test/fixtures");
+  for (const specifier of ["sidequery/canvas", "herdr/canvas", "cursor/canvas"]) {
+    const meta = await resultFor(HOOKS_CANVAS.replaceAll("sidequery/canvas", specifier), "hooks");
+    const { page, app, errors } = await openHost();
+    await page.evaluate(meta => window.mcpHost!.sendResult({ content: [], _meta: meta }), meta);
+    await app.getByRole("button", { name: "Hooks 0:0:0:0:0", exact: true }).click();
+    await app.getByRole("button", { name: "Hooks 1:3:1:2:1", exact: true }).click();
+    await app.getByRole("button", { name: "Hooks 2:6:2:4:2", exact: true }).waitFor();
+    expect(errors).toEqual([]);
+    await page.close();
+  }
+}, 30000);

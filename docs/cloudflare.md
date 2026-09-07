@@ -110,16 +110,37 @@ Sources are limited to 256 KiB, serialized state to 64 KiB, and MCP requests to
 A hosted canvas may contain two source snapshots: browser React source and an
 optional native server. Server source must export `CanvasServer`, a Durable
 Object class from `cloudflare:workers`, with a normal `fetch(request)` method.
-Its durable context exposes raw `ctx.storage.sql` and `ctx.storage.kv`; use those
-APIs directly for relational data, transactions and key/value state. Canvas does
+Each canvas with a server gets one native SQLite database. Different canvas names
+get separate databases; multiple tabs and server restarts use the same database. Use `this.ctx.storage.sql.exec(sql, ...bindings)`
+with `?` placeholders for values, and `.toArray()` or `.one()` to read the cursor.
+Use `this.ctx.storage.kv.get/put/delete` for key/value data and
+`this.ctx.storage.transactionSync(() => { ... })` for synchronous SQL/KV transactions. Canvas does
 not add a database abstraction or query-hook layer.
+
+### Application schema migrations
+
+Canvas does not provide a migration command or automatic application-schema runner.
+The sample initializes tables with `create table if not exists`; that does not
+upgrade an existing table. For schema changes, keep a schema version in the canvas
+database, check it during server initialization, and apply pending changes together
+with the new version in one `this.ctx.storage.transactionSync`. Complete that work
+before serving requests. Saving server source only stores and validates code;
+initialization and migrations run when the updated server is next requested.
+
+Prefer additive changes that remain compatible with earlier source revisions.
+Restoring source does not roll back schema or data, and archived previews can run
+older code against the current database. Test changes on a separate canvas/database
+before applying them to populated data. The deployment-level Durable Object migration
+provisions the storage classes; it does not manage user tables inside a canvas.
+
+### Server capabilities
 
 Generated servers do not receive the outer Worker's ordinary bindings. In
 particular, do not assume D1, R2 or custom environment bindings are available.
 Global outbound access is disabled. The supported persistent boundary is the
 canvas Durable Object's own SQL/KV storage.
 
-Browser code imports `canvasFetch` from `herdr/canvas`:
+Browser code imports `canvasFetch` from `sidequery/canvas`:
 
 ```ts
 const response = await canvasFetch("/counter", {

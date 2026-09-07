@@ -1,4 +1,4 @@
-import { H1, Stack, Stat, Table, Text } from "herdr/canvas";
+import { H1, Stack, Stat, Table, Text } from "sidequery/canvas";
 
 export default function Overview() {
   return (

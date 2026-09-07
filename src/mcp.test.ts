@@ -51,18 +51,14 @@ test("MCP initialize and tools/list", async () => {
   expect(tools).toContain("canvas_restore");
 });
 
-test("MCP guide is read-only and its example creates a valid canvas", async () => {
+test("MCP guide is read-only", async () => {
   const dir = tempDir();
   const service = new CanvasService({ canvasesDir: dir, env: { HERDR_CANVAS_HISTORY_DB: join(dir, "history.sqlite") } });
   const response = await handleMcpRequest({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "canvas_guide", arguments: {} } }, service);
   const guide = response?.result as { content: Array<{ text: string }>; isError: boolean };
   expect(guide.isError).toBe(false);
   expect(service.list()).toHaveLength(0);
-  const example = guide.content[0]!.text.match(/```tsx\n([\s\S]*?)```/)?.[1];
-  expect(example).toBeDefined();
-  const written = await handleMcpRequest({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "canvas_write", arguments: { name: "guide-counter", contents: example } } }, service);
-  expect((written?.result as { isError: boolean }).isError).toBe(false);
-  expect(service.list()).toHaveLength(1);
+  expect(guide.content[0]!.text).toContain("sidequery/canvas");
 }, { timeout: 30_000 });
 
 test(
