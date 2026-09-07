@@ -197,3 +197,22 @@ test("ordinary hooks render and update through canonical and legacy hosted SDK i
   } finally { await browser.close(); }
   expect(outbound).toEqual([]);
 }, 60000);
+
+test("scripts compile arbitrary Workers handlers and reject missing handlers, invalid TypeScript, and unresolved imports", async () => {
+  for (const source of [
+    'export default { async fetch(request, env, ctx) { return new Response(await request.text(), {status: 202}); } };',
+    'export default { async fetch(request: Request, env: ScriptEnv, ctx: ExecutionContext) { env.sql.exec("select 1"); return Response.json({secretPresent: Boolean(env.secrets.TOKEN)}); } } satisfies ExportedHandler<ScriptEnv>;',
+    'import { createHash } from "node:crypto"; export default {fetch() {return new Response(createHash("sha256").update("hello").digest("hex"));}};',
+  ]) {
+    const result=await call(source,"compile-script");
+    expect(result.diagnostics).toEqual([]);
+    expect(result.ok).toBe(true);
+  }
+  for (const source of [
+    'export default { nope() {return new Response("no");} };',
+    'export default { fetch() {return "not a Response";} };',
+    'const count: number = "wrong"; export default {fetch() {return new Response(String(count));}};',
+    'import missing from "missing-package"; export default {fetch() {return new Response(missing);}};',
+  ]) expect((await call(source,"compile-script")).ok).toBe(false);
+  expect((await call('import { H1 } from "sidequery/canvas"; export default function Canvas() { return <H1>After script</H1>; }')).ok).toBe(true);
+},60000);

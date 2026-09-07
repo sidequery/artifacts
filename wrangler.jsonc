@@ -35,6 +35,18 @@
       {
         "name": "BACKENDS",
         "class_name": "CanvasBackend"
+      },
+      {
+        "name": "LINKS",
+        "class_name": "ArtifactLinks"
+      },
+      {
+        "name": "SCRIPTS",
+        "class_name": "ScriptLibrary"
+      },
+      {
+        "name": "SCRIPT_BACKENDS",
+        "class_name": "ScriptBackend"
       }
     ]
   },
@@ -49,6 +61,14 @@
       "tag": "v2",
       "new_sqlite_classes": [
         "CanvasBackend"
+      ]
+    },
+    {
+      "tag": "v3",
+      "new_sqlite_classes": [
+        "ArtifactLinks",
+        "ScriptLibrary",
+        "ScriptBackend"
       ]
     }
   ],

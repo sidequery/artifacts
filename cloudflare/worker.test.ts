@@ -29,10 +29,13 @@ beforeAll(async () => {
       ENVIRONMENT: { type: "text", value: "local" },
       LIBRARIES: { type: "durable-object", worker: "canvas-app-test", exportName: "CanvasLibrary" },
       BACKENDS: { type: "durable-object", worker: "canvas-app-test", exportName: "CanvasBackend" },
+      LINKS: { type: "durable-object", worker: "canvas-app-test", exportName: "ArtifactLinks" },
+      SCRIPTS: { type: "durable-object", worker: "canvas-app-test", exportName: "ScriptLibrary" },
+      SCRIPT_BACKENDS: { type: "durable-object", worker: "canvas-app-test", exportName: "ScriptBackend" },
       LOADER: { type: "worker-loader" },
       ASSETS: { type: "assets" },
     },
-    exports: { CanvasLibrary: { type: "durable-object", storage: "sqlite" }, CanvasBackend: { type: "durable-object", storage: "sqlite" } },
+    exports: { ArtifactLinks: { type: "durable-object", storage: "sqlite" }, ScriptLibrary: { type: "durable-object", storage: "sqlite" }, ScriptBackend: { type: "durable-object", storage: "sqlite" }, CanvasLibrary: { type: "durable-object", storage: "sqlite" }, CanvasBackend: { type: "durable-object", storage: "sqlite" } },
     assets: { directory: join(import.meta.dir, "../dist/cloudflare/assets"), hasUserWorker: true, runWorkerFirst: true, htmlHandling: "none" },
   }, dev: {} }] };
   runtime = new Miniflare(runtimeOptions);
@@ -270,6 +273,37 @@ test("verified users have isolated private libraries and can collaborate in the 
     expect((await database(alice)).value).toBe(1);
     expect((await database(bob)).value).toBe(0);
     expect((await bob.callTool({ name: "canvas_request", arguments: { version_id: privateVersion, request: { path: "/counter" } } })).isError).toBe(true);
+    const script = 'export default {fetch(request: Request) { return Response.json({message:"owner script",authorization:request.headers.get("authorization")}); }}';
+    expect((await alice.callTool({name:"script_write",arguments:{name:"private-handler",slug:"private-handler",contents:script}})).isError).not.toBe(true);
+    expect((await fetch(address+"/private-handler")).status).toBe(401);
+    expect((await fetch(address+"/private-handler",{headers:{"Cf-Access-Jwt-Assertion":bobToken}})).status).toBe(404);
+    expect((await fetch(address+"/private-handler",{headers:{"Cf-Access-Jwt-Assertion":aliceToken}})).status).toBe(200);
+    const invalidPublic = await alice.callTool({name:"script_write",arguments:{name:"private-handler",slug:"private-handler",access:"public",contents:"export default {fetch(}"}});
+    expect(invalidPublic.isError).toBe(true);
+    expect((await fetch(address+"/private-handler")).status).toBe(401);
+    expect((await fetch(address+"/private-handler",{headers:{"Cf-Access-Jwt-Assertion":aliceToken}})).status).toBe(200);
+    expect((await bob.callTool({name:"script_read",arguments:{name:"private-handler"}})).isError).toBe(true);
+    expect((await bob.callTool({name:"script_write",arguments:{name:"private-handler",slug:"private-handler",contents:script}})).isError).toBe(true);
+    expect((await alice.callTool({name:"artifact_link",arguments:{kind:"script",name:"private-handler",slug:"private-handler",access:"public"}})).isError).not.toBe(true);
+    const external=await fetch(address+"/private-handler",{method:"POST",headers:{Origin:"https://sender.example",Authorization:"Bearer webhook-token"}});
+    expect(external.status).toBe(200);
+    expect(await external.json()).toMatchObject({authorization:"Bearer webhook-token"});
+    expect((await fetch(address+"/api/gallery")).status).toBe(401);
+    expect((await alice.callTool({name:"artifact_link",arguments:{kind:"canvas",name:"secret",slug:"private-canvas"}})).isError).not.toBe(true);
+    expect((await fetch(address+"/private-canvas")).status).toBe(401);
+    expect((await fetch(address+"/private-canvas",{headers:{"Cf-Access-Jwt-Assertion":bobToken}})).status).toBe(404);
+    expect((await fetch(address+"/private-canvas",{headers:{"Cf-Access-Jwt-Assertion":aliceToken}})).status).toBe(200);
+    expect((await alice.callTool({name:"canvas_write",arguments:{name:"secret",slug:"private-canvas",access:"public",contents:"export default function {"}})).isError).toBe(true);
+    expect((await fetch(address+"/private-canvas")).status).toBe(401);
+    expect((await alice.callTool({name:"artifact_link",arguments:{kind:"canvas",name:"secret",slug:"private-canvas",access:"public"}})).isError).not.toBe(true);
+    expect((await fetch(address+"/private-canvas")).status).toBe(200);
+    expect((await alice.callTool({name:"artifact_link",arguments:{kind:"canvas",name:"secret",slug:"private-canvas",access:"private"}})).isError).not.toBe(true);
+    expect((await fetch(address+"/private-canvas")).status).toBe(401);
+    // Restore a valid draft for the existing gallery assertion below.
+    expect((await alice.callTool({name:"canvas_write",arguments:{name:"secret",contents:source}})).isError).not.toBe(true);
+    expect((await teamAlice.callTool({name:"script_write",arguments:{name:"shared-handler",slug:"shared-handler",contents:script}})).isError).not.toBe(true);
+    expect((await fetch(address+"/shared-handler",{headers:{"Cf-Access-Jwt-Assertion":bobToken}})).status).toBe(200);
+    expect((await alice.callTool({name:"script_write",arguments:{name:"untrusted-page",slug:"untrusted-page",access:"public",contents:"export default {fetch(){return new Response(\"<!doctype html><div id=\\\"result\\\">pending</div><script>\\n(async()=>{let cookieBlocked=false;try{document.cookie}catch{cookieBlocked=true}let storageBlocked=false;try{localStorage.getItem('session')}catch{storageBlocked=true}let requestBlocked=false;try{const r=await fetch('/api/gallery',{credentials:'include'});requestBlocked=r.status===403}catch{requestBlocked=true}document.querySelector('#result').textContent=JSON.stringify({cookieBlocked,storageBlocked,requestBlocked});})();\\n</script>\",{headers:{\"content-type\":\"text/html\"}})}}"}})).isError).not.toBe(true);
     const browser = await chromium.launch({ headless: true });
     try {
       const page = await browser.newPage({ extraHTTPHeaders: { "Cf-Access-Jwt-Assertion": aliceToken } });
@@ -281,9 +315,118 @@ test("verified users have isolated private libraries and can collaborate in the 
       await page.frameLocator("iframe").getByRole("heading", { name: "Team canvas" }).waitFor();
       expect(await page.getByRole("button", { name: "secret", exact: true }).count()).toBe(0);
       expect(new URL(page.url()).searchParams.get("library")).toBe("team");
+      const isolated = await browser.newPage({extraHTTPHeaders:{"Cf-Access-Jwt-Assertion":aliceToken}});
+      await isolated.goto(address+"/untrusted-page");
+      await isolated.waitForFunction(()=>document.querySelector('#result')?.textContent!=="pending");
+      expect(JSON.parse(await isolated.locator('#result').innerText())).toEqual({cookieBlocked:true,storageBlocked:true,requestBlocked:true});
     } finally { await browser.close(); }
   } finally {
     await Promise.all(clients.map(remote => remote.close()));
     await production.dispose();
   }
 }, 60000);
+
+test("standalone scripts serve arbitrary HTTP responses at chosen root slugs and retain last valid code", async () => {
+  const code = `export default { async fetch(request: Request, env: ScriptEnv) {
+    env.sql.exec("create table if not exists hits(value integer)");
+    env.sql.exec("insert into hits values (1)");
+    console.log("handled", env.secrets.TOKEN ?? "unset");
+    if (new URL(request.url).pathname.endsWith("/html")) return new Response("<h1>Script page</h1>", {headers:{"content-type":"text/html", "set-cookie":"danger=yes"}});
+    return Response.json({url:request.url,method:request.method,header:request.headers.get("x-example"),body:await request.text(),count:env.sql.exec("select count(*) as n from hits").one().n,secret:env.secrets.TOKEN??null,cookie:request.headers.get("cookie"),assertion:request.headers.get("cf-access-jwt-assertion"),serviceSecret:request.headers.get("cf-access-client-secret"),serviceId:request.headers.get("cf-access-client-id")}, {status:201,headers:{"x-result":"script"}});
+  }};`;
+  const saved = await client.callTool({ name: "script_write", arguments: { name: "http-script", slug: "my-handler", access: "public", contents: code } });
+  expect(saved.isError).not.toBe(true);
+  expect(payload(saved)).toMatchObject({ url: `${origin}/my-handler`, slug: "my-handler", ok: true });
+  await client.callTool({ name: "script_secrets", arguments: { name: "http-script", secrets: { TOKEN: "fixture-sensitive-value" } } });
+  const response = await fetch(`${origin}/my-handler/extra?param=value`, { method: "POST", headers: { "x-example": "kept", Origin: "https://external.example", Cookie: "session=management", "Cf-Access-Jwt-Assertion": "private-assertion", "Cf-Access-Client-Secret": "management-service-secret", "Cf-Access-Client-Id": "management-service-id" }, body: ' { "hello": "世界" }\n' });
+  expect(response.status).toBe(201);
+  expect(response.headers.get("x-result")).toBe("script");
+  expect(await response.json()).toMatchObject({ url: `${origin}/my-handler/extra?param=value`, method: "POST", header: "kept", body: ' { "hello": "世界" }\n', count: 1, secret: "fixture-sensitive-value", cookie: null, assertion: null, serviceSecret: null, serviceId: null });
+  const logs = await client.callTool({ name: "script_logs", arguments: { name: "http-script" } });
+  expect(JSON.stringify(logs)).not.toContain("fixture-sensitive-value");
+  expect(JSON.stringify(logs)).toContain("REDACTED");
+  const sourceRead = await client.callTool({ name: "script_read", arguments: { name: "http-script" } });
+  expect(payload(sourceRead).source).toBe(code);
+  const history = payload(await client.callTool({ name: "script_history", arguments: { name: "http-script" } }));
+  expect(JSON.stringify(history)).not.toContain("fixture-sensitive-value");
+  const updated = await client.callTool({ name: "script_edit", arguments: { name: "http-script", edits: [{ old_text: '"x-result":"script"', new_text: '"x-result":"updated"' }] } });
+  expect(updated.isError).not.toBe(true);
+  const updatedResponse = await fetch(`${origin}/my-handler`);
+  expect(updatedResponse.headers.get("x-result")).toBe("updated");
+  expect((await updatedResponse.json() as { count: number }).count).toBe(2);
+  const invalid = await client.callTool({ name: "script_write", arguments: { name: "http-script", contents: "export default { fetch( }" } });
+  expect(invalid.isError).toBe(true);
+  expect(payload(invalid)).toMatchObject({ applied: true, ok: false, slug: "my-handler" });
+  expect((await fetch(`${origin}/my-handler`)).headers.get("x-result")).toBe("updated");
+  const badModule = await client.callTool({name:"script_write",arguments:{name:"http-script",contents:'throw new Error("module failed"); export default {fetch() {return new Response("bad");}};'}});
+  expect(badModule.isError).toBe(true);
+  expect(payload(badModule)).toMatchObject({applied:true,ok:false});
+  expect((await fetch(`${origin}/my-handler`)).headers.get("x-result")).toBe("updated");
+  const restored = await client.callTool({ name: "script_restore", arguments: { name: "http-script", version_id: history.versions[0].id } });
+  expect(restored.isError).not.toBe(true);
+  expect((await fetch(`${origin}/my-handler`)).headers.get("x-result")).toBe("script");
+  const duplicate = await client.callTool({ name: "script_write", arguments: { name: "different", slug: "my-handler", contents: code } });
+  expect(duplicate.isError).toBe(true);
+  expect((await client.callTool({ name: "script_read", arguments: { name: "different" } })).isError).toBe(true);
+  expect((await client.callTool({ name: "script_write", arguments: { name: "reserved", slug: "api", contents: code } })).isError).toBe(true);
+  const page = await fetch(`${origin}/my-handler/html`);
+  expect(await page.text()).toBe("<h1>Script page</h1>");
+  expect(page.headers.get("set-cookie")).toBeNull();
+  expect(page.headers.get("content-security-policy")).toBe("sandbox allow-scripts allow-forms");
+  const run = await client.callTool({ name: "script_run", arguments: { name: "http-script", request: { path: "/manual", method: "PATCH", body: btoa("manual body") } } });
+  expect(run.isError).not.toBe(true);
+  const runBody = JSON.parse(atob((run.structuredContent as {response:{body:string}}).response.body));
+  expect(runBody).toMatchObject({method:"PATCH",body:"manual body"});
+  const gallery = await (await fetch(`${origin}/api/gallery?workspace=test`)).json() as {artifacts:{name:string;kind?:string;url?:string}[]};
+  expect(gallery.artifacts.find(item=>item.name==="http-script")).toMatchObject({kind:"script",url:`${origin}/my-handler`});
+  const source = await fetch(`${origin}/api/source?workspace=test&kind=script&name=http-script`);
+  expect(await source.text()).toBe(code);
+}, 60000);
+
+test("root canvas URLs render interactive backends and keep valid revisions through broken drafts", async () => {
+  const saved = await client.callTool({ name: "canvas_write", arguments: { name: "linked-counter", slug: "my-counter", access: "public", contents: counterClient, server: counterServer } });
+  expect(saved.isError).not.toBe(true);
+  expect(payload(saved).url).toBe(`${origin}/my-counter`);
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.goto(`${origin}/my-counter`);
+    await page.frameLocator("iframe").getByText("Count: 0", {exact:true}).waitFor();
+    await page.frameLocator("iframe").getByRole("button", {name:"Increment"}).click();
+    await page.frameLocator("iframe").getByText("Count: 1", {exact:true}).waitFor();
+    const invalid = await client.callTool({ name: "canvas_write", arguments: { name: "linked-counter", contents: "export default function {" } });
+    expect(invalid.isError).toBe(true);
+    await page.reload();
+    await page.frameLocator("iframe").getByText("Count: 1", {exact:true}).waitFor();
+    const fixed = await client.callTool({ name: "canvas_write", arguments: { name: "linked-counter", contents: counterClient.replace("Count:", "Total:") } });
+    expect(fixed.isError).not.toBe(true);
+    await page.reload();
+    await page.frameLocator("iframe").getByText("Total: 1", {exact:true}).waitFor();
+    const stolen = await client.callTool({ name: "artifact_link", arguments: { kind:"canvas",name:"linked-counter",slug:"my-handler" } });
+    expect(stolen.isError).toBe(true);
+  } finally { await browser.close(); }
+  const version = (saved._meta as {canvas:{versionId:string}}).canvas.versionId;
+  const mismatch=await fetch(`${origin}/my-counter/_canvas/request`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({version_id:version,request:{path:"/counter"}})});
+  expect(mismatch.status).toBe(409);
+  expect((await fetch(`${origin}/my-counter/_canvas/request`,{method:"POST",headers:{Origin:"https://evil.example"},body:"{}"})).status).toBe(403);
+},60000);
+
+test("correcting initial invalid drafts retains the user-chosen slug and access", async () => {
+  const invalid = 'export default { fetch( }';
+  const saved = await client.callTool({name:"script_write",arguments:{name:"Human name",slug:"chosen-human",access:"public",contents:invalid}});
+  expect(saved.isError).toBe(true);
+  expect(payload(saved)).toMatchObject({slug:"chosen-human",access:"public",applied:true,ok:false});
+  expect(payload(saved).url).toBeUndefined();
+  const fixed = await client.callTool({name:"script_edit",arguments:{name:"Human name",edits:[{old_text:invalid,new_text:'export default {fetch(){return new Response("corrected");}}'}]}});
+  expect(fixed.isError).not.toBe(true);
+  expect(payload(fixed).url).toBe(`${origin}/chosen-human`);
+  expect(await (await fetch(`${origin}/chosen-human`)).text()).toBe("corrected");
+  const badCanvas='export default function {';
+  const canvas = await client.callTool({name:"canvas_write",arguments:{name:"Human canvas",slug:"chosen-canvas",access:"public",contents:badCanvas}});
+  expect(canvas.isError).toBe(true);
+  expect(payload(canvas)).toMatchObject({slug:"chosen-canvas",access:"public"});
+  const corrected=await client.callTool({name:"canvas_edit",arguments:{name:"Human canvas",edits:[{old_text:badCanvas,new_text:source}]}});
+  expect(corrected.isError).not.toBe(true);
+  expect(payload(corrected).url).toBe(`${origin}/chosen-canvas`);
+  expect((await fetch(`${origin}/chosen-canvas`)).status).toBe(200);
+});

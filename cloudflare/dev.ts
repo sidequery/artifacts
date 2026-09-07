@@ -1,4 +1,4 @@
-import { compileCanvasSource, compileCanvasServerSource, typecheckCanvasSource, typecheckCanvasServerSource } from "./compiler";
+import { compileCanvasSource, compileCanvasServerSource, compileScriptSource, typecheckCanvasSource, typecheckCanvasServerSource } from "./compiler";
 import { readRequestText } from "./http";
 
 // Local compiler qualification entrypoint. The hosted API supplies its own
@@ -7,14 +7,15 @@ export default {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     if (request.method === "GET" && url.pathname === "/health") return Response.json({ ok: true, runtime: navigator.userAgent });
-    if (request.method !== "POST" || !["/compile", "/compile-server", "/typecheck", "/typecheck-server"].includes(url.pathname)) return new Response("Not found", { status: 404 });
+    if (request.method !== "POST" || !["/compile", "/compile-server", "/compile-script", "/typecheck", "/typecheck-server"].includes(url.pathname)) return new Response("Not found", { status: 404 });
     let source: string;
     try { source = await readRequestText(request, 256 * 1024); }
     catch (error) {
       if (error instanceof RangeError) return new Response("Canvas source exceeds 256 KiB", { status: 413 });
       throw error;
     }
-    return Response.json(url.pathname === "/compile-server" ? await compileCanvasServerSource(source)
+    return Response.json(url.pathname === "/compile-script" ? await compileScriptSource(source)
+      : url.pathname === "/compile-server" ? await compileCanvasServerSource(source)
       : url.pathname === "/compile" ? await compileCanvasSource(source)
       : { diagnostics: url.pathname === "/typecheck-server" ? typecheckCanvasServerSource(source) : typecheckCanvasSource(source) });
   },

@@ -20,6 +20,7 @@ const options: ts.CompilerOptions = {
 const normalize = (path: string) => path.replace(/^\//, "");
 let currentSource = "";
 let serverMode = false;
+let scriptMode = false;
 let sourceVersion = 0;
 const serverOptions: ts.CompilerOptions = { ...options, paths: {}, lib: ["lib.es2022.d.ts"] };
 const read = (path: string) => normalize(path) === (serverMode ? serverPath : sourcePath) ? currentSource : compilerFiles[normalize(path)];
@@ -27,7 +28,7 @@ const read = (path: string) => normalize(path) === (serverMode ? serverPath : so
 // Typechecking is synchronous, so overlapping requests cannot observe another
 // source while checking. No per-user project/program cache accumulates here.
 const host: ts.LanguageServiceHost = {
-    getCompilationSettings: () => serverMode ? serverOptions : options,
+    getCompilationSettings: () => scriptMode ? { ...serverOptions, noImplicitAny: false, types: ["node"] } : serverMode ? serverOptions : options,
     getScriptFileNames: () => serverMode ? [`/${serverPath}`, "/node_modules/@cloudflare/workers-types/index.d.ts"] : [`/${sourcePath}`],
     getScriptVersion: path => [sourcePath, serverPath].includes(normalize(path)) ? String(sourceVersion) : "0",
     getProjectVersion: () => String(sourceVersion),
@@ -55,7 +56,8 @@ export function typecheckCanvasServerSource(source: string): Diagnostic[] {
   return typecheckSource(source, true);
 }
 
-function typecheckSource(source: string, server: boolean): Diagnostic[] {
+function typecheckSource(source: string, server: boolean, script = false): Diagnostic[] {
+  scriptMode = script;
   serverMode = server;
   currentSource = source;
   sourceVersion++;
@@ -74,7 +76,7 @@ function typecheckSource(source: string, server: boolean): Diagnostic[] {
         ...(position ? { line: position.line + 1, column: position.character + 1 } : {}),
       };
     });
-  if (server) diagnostics.push(...validateCanvasServerClass(program));
+  if (server && !script) diagnostics.push(...validateCanvasServerClass(program));
   return diagnostics;
 }
 
@@ -141,12 +143,12 @@ export async function compileCanvasServerSource(source: string) {
   }
 }
 
-async function queueCompile(source: string, server: boolean) {
+async function queueCompile(source: string, server: boolean, script = false) {
   // esbuild WASM and semantic checking share the isolate's 128 MiB budget.
   // Serialize builds and bound retained request sources under load.
   if (pendingCompilations >= 8) return { ok: false, diagnostics: [{ severity: "error" as const, message: "Compiler is busy; retry shortly", file: server ? serverPath : sourcePath }] };
   pendingCompilations++;
-  const result = compilationTail.then(() => server ? compileServer(source) : compileSource(source));
+  const result = compilationTail.then(() => script ? compileScript(source) : server ? compileServer(source) : compileSource(source));
   compilationTail = result.catch(() => undefined);
   try { return await result; } finally { pendingCompilations--; }
 }
@@ -208,4 +210,43 @@ async function compileSource(source: string) {
   } catch (error) {
     return { ok: false, diagnostics: [{ severity: "error" as const, message: error instanceof Error ? error.message : String(error), file: sourcePath }] };
   }
+}
+
+/** Scripts use Workers globals and can import supported builtins, without the canvas UI restrictions. */
+export function compileScriptSource(source: string) { return queueCompile(source, true, true); }
+
+async function compileScript(source: string) {
+  const declarations = '\ninterface ScriptEnv { secrets: Record<string, string>; sql: SqlStorage }\ntype __CanvasScriptResult = Response | Promise<Response>;\n';
+  const diagnostics = typecheckSource(source + declarations, true, true);
+  const program = languageService!.getProgram()!;
+  const file = program.getSourceFiles().find(item => normalize(item.fileName) === serverPath)!;
+  const checker = program.getTypeChecker();
+  const module = checker.getSymbolAtLocation(file);
+  const exported = module && checker.getExportsOfModule(module).find(item => item.name === "default");
+  const handler = exported && checker.getTypeOfSymbolAtLocation(exported, file);
+  const fetch = handler && checker.getPropertyOfType(handler, "fetch");
+  const signatures = fetch ? checker.getTypeOfSymbolAtLocation(fetch, file).getCallSignatures() : [];
+  if (!signatures.length) diagnostics.push({severity: "error", file: "script.ts", message: "Script must default-export an object with a fetch(request, env, ctx) handler"});
+  const resultType = file.statements.find((node): node is ts.TypeAliasDeclaration => ts.isTypeAliasDeclaration(node) && node.name.text === "__CanvasScriptResult");
+  if (resultType && signatures.some(signature => !checker.isTypeAssignableTo(checker.getReturnTypeOfSignature(signature), checker.getTypeFromTypeNode(resultType.type)))) {
+    diagnostics.push({severity: "error", file: "script.ts", message: "Script fetch handler must return a Response or Promise<Response>"});
+  }
+  if (diagnostics.length) return {ok: false, diagnostics: diagnostics.map(item => ({...item, file: item.file === serverPath ? "script.ts" : item.file}))};
+  try {
+    const result = await createWorker({ files: { "script.ts": source }, entryPoint: "script.ts", target: "es2022", sourcemap: false });
+    if (result.warnings?.length) throw new Error(result.warnings.join("\n"));
+    const js = result.modules[result.mainModule];
+    if (typeof js !== "string") throw new Error("Script compiler did not return JavaScript");
+    const tree = ts.createSourceFile("script.js", js, ts.ScriptTarget.ES2022, false, ts.ScriptKind.JS);
+    const checkImports = (node: ts.Node) => {
+      const specifier = ts.isImportDeclaration(node) || ts.isExportDeclaration(node) ? node.moduleSpecifier
+        : ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword ? node.arguments[0] : undefined;
+      if (specifier && (!ts.isStringLiteral(specifier) || !/^(node:|cloudflare:)/.test(specifier.text))) {
+        throw new Error("Script has an unresolved external import; use Workers runtime builtins or self-contained source");
+      }
+      ts.forEachChild(node, checkImports);
+    };
+    checkImports(tree);
+    return {ok: true, js, diagnostics: [] as Diagnostic[]};
+  } catch (error) { return {ok: false, diagnostics: [{severity: "error" as const, file: "script.ts", message: error instanceof Error ? error.message : String(error)}]}; }
 }

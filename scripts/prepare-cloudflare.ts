@@ -22,7 +22,7 @@ async function collect(directory: string, accept: (path: string) => boolean) {
 }
 await collect("src/sdk", path => /\.(ts|tsx)$/.test(path) && !path.endsWith(".test.ts"));
 files["src/httpTypes.ts"] = await readFile(join(root, "src/httpTypes.ts"), "utf8");
-for (const name of ["react", "react-dom", "scheduler", "@types/react", "@types/react-dom", "csstype"]) {
+for (const name of ["react", "react-dom", "scheduler", "@types/react", "@types/react-dom", "csstype", "@types/node", "undici-types"]) {
   await collect(`node_modules/${name}`, path => path.endsWith(".d.ts") || path.endsWith("/package.json"));
 }
 await collect("node_modules/typescript/lib", path => /\/lib\.[^/]+\.d\.ts$/.test(path));
