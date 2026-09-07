@@ -33,8 +33,26 @@ async function buildShell(): Promise<string> {
   if (!build.success) throw new Error(build.logs.join("\n"));
   const js = await build.outputs[0]!.text();
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Canvas</title>
-<style>html,body{margin:0;min-height:100%;font-family:system-ui,sans-serif}body{background:var(--canvas-background,#181818);color:var(--canvas-foreground,#f0f0f0)}#root{padding:24px;box-sizing:border-box}#status{padding:12px;white-space:pre-wrap}#status:empty{display:none}</style></head>
-<body><div id="status" role="status">Waiting for canvas…</div><div id="root"></div><script type="module">${js.replace(/<\/script/gi, "<\\/script")}</script></body></html>`;
+<style>
+html,body{margin:0;font-family:system-ui,sans-serif;overflow:hidden}
+body{background:var(--canvas-background,#181818);color:var(--canvas-foreground,#f0f0f0)}
+#canvas-shell{display:flex;flex-direction:column;max-height:min(var(--canvas-inline-limit,600px),100vh);max-height:min(var(--canvas-inline-limit,600px),100dvh);height:var(--canvas-fixed-height,auto);min-width:0}
+#canvas-toolbar{display:flex;justify-content:flex-end;flex:none;padding:4px 12px}
+#canvas-toolbar[hidden]{display:none}
+#display-mode{min-height:44px;min-width:44px;padding:0 12px;border:1px solid currentColor;border-radius:6px;background:transparent;color:inherit;font:inherit;font-size:13px;cursor:pointer}
+#display-mode:focus-visible{outline:2px solid currentColor;outline-offset:2px}
+#display-mode:disabled{opacity:.6;cursor:wait}
+#canvas-viewport{min-height:0;min-width:0;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;flex:1 1 auto}
+#canvas-viewport:focus-visible{outline:2px solid currentColor;outline-offset:-2px}
+#root{padding:24px;box-sizing:border-box;display:flow-root;min-width:0;overflow-wrap:anywhere}
+#root:empty{display:none}
+#status{padding:12px;white-space:pre-wrap;overflow-wrap:anywhere}
+#status:empty{display:none}
+html[data-display-mode="fullscreen"] #canvas-shell,html[data-display-mode="pip"] #canvas-shell{height:100vh;height:100dvh;max-height:none}
+html[data-display-mode="fullscreen"] #root,html[data-display-mode="pip"] #root{min-height:100%}
+@media(max-width:480px){#root{padding:12px}#canvas-toolbar{padding:4px 8px}}
+</style></head>
+<body><div id="canvas-shell"><div id="canvas-toolbar" hidden><button id="display-mode" type="button" aria-label="Expand canvas">Expand</button></div><div id="canvas-viewport" tabindex="0" role="region" aria-label="Canvas"><div id="status" role="status">Waiting for canvas…</div><div id="root"></div></div></div><script type="module">${js.replace(/<\/script/gi, "<\\/script")}</script></body></html>`;
 }
 
 /** Compile a source snapshot without a loopback server or a Herdr process. */

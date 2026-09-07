@@ -86,6 +86,18 @@ existing canvas, call `canvas_open({name: "overview"})`. Successful `canvas_edit
 and `canvas_restore` also return an updated inline preview. These are canvas
 views, without the gallery or tool-management controls.
 
+Inline views fit their content, grow and shrink as it changes, and scroll within
+a 600px maximum height (or a smaller maximum supplied by the host). A host with
+a fixed container height takes precedence. The chat controls the width; narrow
+views wrap text and keep oversized content scrollable.
+
+When the host advertises fullscreen support, **Expand** opens the canvas in the
+host's fullscreen view. **Exit fullscreen** returns it to the conversation.
+Fullscreen uses the available viewport with an independently scrolling canvas.
+Switching modes preserves controls and their current state. Hosts can also change
+the mode themselves; unavailable controls are hidden, and rejected requests leave
+the current view usable. This uses MCP Apps display modes, not browser fullscreen.
+
 The viewer is a self-contained `ui://canvas/viewer.html` MCP App resource. Tool
 results carry the compiled snapshot in UI-only `_meta`; normal text results stay
 compact. No web server, external asset hosting or Herdr installation is needed.
