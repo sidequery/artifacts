@@ -1,9 +1,9 @@
 ---
 name: herdr-canvas
-description: Create, typecheck, and open live React canvases beside a Herdr agent using herdr-canvas and Terminal Browser.
+description: Create, typecheck, and open Sidequery Canvas artifacts through MCP or CLI, with optional Herdr integration.
 ---
 
-# Herdr Canvas
+# Sidequery Canvas
 
 Use this skill when the user would benefit from a standalone visual artifact
 beside the agent: metrics, tables, reviews, charts, or a small interactive
@@ -43,13 +43,13 @@ shapes and CLI examples, read the "Targeted reads and edits" section in
 ## File rules
 
 - Default-export a React component.
-- Import **only** from `herdr/canvas` (or the `cursor/canvas` alias).
+- Import from `sidequery/canvas`; `herdr/canvas` and `cursor/canvas` remain compatibility aliases. Read `canvas_guide` for SDK and host contracts.
 - No relative imports, npm packages, Node builtins, `fetch()`, or `require()`.
-- Embed all data inline.
+- Embed data inline or use `canvasFetch` when a hosted native server is available.
 - Never render empty placeholder sections.
 
 ```tsx
-import { H1, Stack, Stat, Table, Text } from "herdr/canvas";
+import { H1, Stack, Stat, Table, Text } from "sidequery/canvas";
 
 export default function BillingReview() {
   return (

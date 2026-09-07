@@ -14,7 +14,7 @@ const options: ts.CompilerOptions = {
     moduleResolution: ts.ModuleResolutionKind.Bundler, jsx: ts.JsxEmit.ReactJSX,
     strict: true, noEmit: true, skipLibCheck: true, esModuleInterop: true,
     allowSyntheticDefaultImports: true, baseUrl: "/",
-    paths: { "herdr/canvas": [sdkPath], "cursor/canvas": [sdkPath] },
+    paths: { "sidequery/canvas": [sdkPath], "herdr/canvas": [sdkPath], "cursor/canvas": [sdkPath] },
     types: [],
 };
 const normalize = (path: string) => path.replace(/^\//, "");
@@ -184,6 +184,7 @@ async function compileSource(source: string) {
       jsx: "automatic", minify: false, sourcemap: false,
       define: { "process.env.NODE_ENV": '"production"' },
       virtualModules: {
+        "sidequery/canvas": browserRuntime.sdkModule,
         "herdr/canvas": browserRuntime.sdkModule,
         "cursor/canvas": browserRuntime.sdkModule,
         "react/jsx-runtime": "export const { jsx, jsxs, Fragment } = globalThis.__herdrCanvasRuntime.jsx;",

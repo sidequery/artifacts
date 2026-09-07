@@ -1,6 +1,6 @@
 {
   "name": "canvas",
-  "description": "Local React artifacts with a web gallery, version history, CLI, MCP, and Herdr integration.",
+  "description": "Sidequery Canvas: React artifacts with a web gallery, version history, CLI, MCP, and optional Herdr integration.",
   "version": "0.1.0",
   "private": true,
   "license": "MIT",

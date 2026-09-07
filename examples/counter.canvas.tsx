@@ -1,8 +1,8 @@
-import { Button, H1, Row, Stack, Text, canvasFetch, useCanvasState, useEffect } from "herdr/canvas";
+import { Button, H1, Row, Stack, Text, canvasFetch, useState, useEffect } from "sidequery/canvas";
 
 export default function Canvas() {
-  const [count, setCount] = useCanvasState<number | null>("count", null);
-  const [error, setError] = useCanvasState("error", "");
+  const [count, setCount] = useState<number | null>(null);
+  const [error, setError] = useState("");
   async function load(method = "GET") {
     try {
       const response = await canvasFetch("/counter", { method });

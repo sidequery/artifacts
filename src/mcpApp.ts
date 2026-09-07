@@ -22,16 +22,25 @@ async function buildShell(): Promise<string> {
   });
   if (!build.success) throw new Error(build.logs.join("\n"));
   const js = await build.outputs[0]!.text();
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Canvas</title>
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sidequery Canvas</title>
 <style>
 html,body{margin:0;font-family:system-ui,sans-serif;overflow:hidden}
-body{background:var(--canvas-background,#181818);color:var(--canvas-foreground,#f0f0f0)}
-#canvas-shell{display:flex;flex-direction:column;max-height:min(var(--canvas-inline-limit,600px),100vh);max-height:min(var(--canvas-inline-limit,600px),100dvh);height:var(--canvas-fixed-height,auto);min-width:0}
-#canvas-toolbar{display:flex;justify-content:flex-end;flex:none;padding:4px 12px}
+html,body{background:transparent}
+body{color:var(--canvas-foreground,#f0f0f0)}
+#canvas-shell{position:relative;isolation:isolate;display:flex;flex-direction:column;max-height:min(var(--canvas-inline-limit,600px),100vh);max-height:min(var(--canvas-inline-limit,600px),100dvh);height:var(--canvas-fixed-height,auto);min-width:0}
+#canvas-toolbar{position:absolute;top:8px;right:8px;z-index:1}
 #canvas-toolbar[hidden]{display:none}
-#display-mode{min-height:44px;min-width:44px;padding:0 12px;border:1px solid currentColor;border-radius:6px;background:transparent;color:inherit;font:inherit;font-size:13px;cursor:pointer}
+#display-mode{display:grid;place-items:center;width:44px;height:44px;padding:0;border:0;border-radius:12px;background:color-mix(in srgb,var(--canvas-background,#181818) 72%,transparent);color:inherit;box-shadow:0 1px 4px #0002,inset 0 0 0 1px color-mix(in srgb,currentColor 12%,transparent);backdrop-filter:blur(12px);cursor:pointer}
+@media(hover:hover){#display-mode:hover{background:color-mix(in srgb,var(--canvas-background,#181818) 92%,transparent)}}
+#display-mode:active{box-shadow:inset 0 0 0 1px currentColor}
 #display-mode:focus-visible{outline:2px solid currentColor;outline-offset:2px}
 #display-mode:disabled{opacity:.6;cursor:wait}
+#display-mode-icon{position:relative;width:16px;height:16px;pointer-events:none}
+#display-mode-icon::before,#display-mode-icon::after{content:"";position:absolute;width:6px;height:6px;border:solid currentColor}
+#display-mode-icon::before{top:0;right:0;border-width:1.5px 1.5px 0 0}
+#display-mode-icon::after{bottom:0;left:0;border-width:0 0 1.5px 1.5px}
+html[data-display-mode="fullscreen"] #display-mode-icon::before{border-width:0 0 1.5px 1.5px}
+html[data-display-mode="fullscreen"] #display-mode-icon::after{border-width:1.5px 1.5px 0 0}
 #canvas-viewport{min-height:0;min-width:0;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;flex:1 1 auto}
 #canvas-viewport:focus-visible{outline:2px solid currentColor;outline-offset:-2px}
 #root{padding:24px;box-sizing:border-box;display:flow-root;min-width:0;overflow-wrap:anywhere}
@@ -40,9 +49,9 @@ body{background:var(--canvas-background,#181818);color:var(--canvas-foreground,#
 #status:empty{display:none}
 html[data-display-mode="fullscreen"] #canvas-shell,html[data-display-mode="pip"] #canvas-shell{height:100vh;height:100dvh;max-height:none}
 html[data-display-mode="fullscreen"] #root,html[data-display-mode="pip"] #root{min-height:100%}
-@media(max-width:480px){#root{padding:12px}#canvas-toolbar{padding:4px 8px}}
+@media(max-width:480px){#root{padding:12px}}
 </style></head>
-<body><div id="canvas-shell"><div id="canvas-toolbar" hidden><button id="display-mode" type="button" aria-label="Expand canvas">Expand</button></div><div id="canvas-viewport" tabindex="0" role="region" aria-label="Canvas"><div id="status" role="status">Waiting for canvas…</div><div id="root"></div></div></div><script type="module">${js.replace(/<\/script/gi, "<\\/script")}</script></body></html>`;
+<body><div id="canvas-shell"><div id="canvas-toolbar" hidden><button id="display-mode" type="button" aria-label="Expand canvas" title="Expand canvas"><span id="display-mode-icon" aria-hidden="true"></span></button></div><div id="canvas-viewport" tabindex="0" role="region" aria-label="Canvas"><div id="status" role="status">Waiting for canvas…</div><div id="root"></div></div></div><script type="module">${js.replace(/<\/script/gi, "<\\/script")}</script></body></html>`;
 }
 
 /** Compile a source snapshot without a loopback server or a Herdr process. */

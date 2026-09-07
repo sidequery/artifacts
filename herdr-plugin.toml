@@ -1,5 +1,5 @@
 id = "herdr.canvas"
-name = "Canvas"
+name = "Sidequery Canvas"
 version = "0.1.0"
 min_herdr_version = "0.8.2"
 description = "Create and manage live React canvas panes powered by Terminal Browser."
@@ -7,7 +7,7 @@ platforms = ["linux", "macos"]
 
 [[panes]]
 id = "canvas"
-title = "Canvas"
+title = "Sidequery Canvas"
 placement = "split"
 command = ["bun", "run", "src/viewer.ts"]
 

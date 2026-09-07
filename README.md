@@ -1,4 +1,4 @@
-# Canvas
+# Sidequery Canvas
 
 <img width="1417" height="945" alt="Screenshot 2026-09-06 at 10 36 49 PM" src="https://github.com/user-attachments/assets/87b51b80-660d-449a-8e80-acbeb5db15e9" />
 
@@ -58,8 +58,14 @@ compatibility; the project rename does not migrate or reset stored artifacts.
 
 ## Agent workflow
 
+Call `canvas_guide` before creating a canvas if you have not read it in the current
+conversation. It covers the SDK contract, host APIs, restrictions, and validation.
+Import standard React hooks from `sidequery/canvas` for component state and effects.
+Use `useCanvasState(key, defaultValue)` when you want host-backed state; persistence
+depends on the view.
+
 Canvases live at `<workspace>/canvases/<name>.canvas.tsx` and may import only
-from `herdr/canvas`. Use the CLI or MCP:
+from `sidequery/canvas` (`herdr/canvas` and `cursor/canvas` remain compatibility aliases). Use the CLI or MCP:
 
 ```bash
 bun run src/cli.ts list
@@ -124,19 +130,19 @@ use `canvas_open({name: "overview", target: "herdr"})`. Similarly,
 write `open` flag is accepted, but inline display is automatic regardless of it.
 CLI `open` continues to open a Herdr pane.
 
-## Native canvas servers
+## Native canvas servers and SQLite
 
 Hosted Cloudflare canvases can pair the browser `.canvas.tsx` with a native
 `CanvasServer`. The server is a generated Durable Object class and uses its own
-`ctx.storage.sql` and `ctx.storage.kv` directly. The browser calls it with
+SQLite through `ctx.storage.sql` and key/value storage through `ctx.storage.kv` directly. The browser calls it with
 `canvasFetch`, which accepts a path and standard `RequestInit` and returns a
 standard `Response`:
 
 ```tsx
-import { Button, Text, canvasFetch, useCanvasState, useEffect } from "herdr/canvas";
+import { Button, Text, canvasFetch, useState, useEffect } from "sidequery/canvas";
 
 export default function Counter() {
-  const [value, setValue] = useCanvasState<number | null>("value", null);
+  const [value, setValue] = useState<number | null>(null);
   async function load(method = "GET") {
     const response = await canvasFetch("/counter", { method });
     if (!response.ok) throw new Error(`Counter failed (${response.status})`);

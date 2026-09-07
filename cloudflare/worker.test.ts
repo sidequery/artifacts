@@ -10,7 +10,7 @@ let runtime: Miniflare;
 let runtimeOptions: ConstructorParameters<typeof Miniflare>[0];
 let client: Client;
 let origin: string;
-const source = 'import { Button, H1, Stack, useCanvasState } from "herdr/canvas";\nexport default function Canvas() { const [n, setN] = useCanvasState("n", 0); return <Stack><H1>Hosted canvas</H1><Button onClick={() => setN(n+1)}>Count {n}</Button></Stack>; }\n';
+const source = 'import { Button, H1, Stack, useCanvasState } from "sidequery/canvas";\nexport default function Canvas() { const [n, setN] = useCanvasState("n", 0); return <Stack><H1>Hosted canvas</H1><Button onClick={() => setN(n+1)}>Count {n}</Button></Stack>; }\n';
 const counterClient = await readFile(new URL("../examples/counter.canvas.tsx", import.meta.url), "utf8");
 const counterServer = await readFile(new URL("../examples/counter.canvas.server.ts", import.meta.url), "utf8");
 let version: string;
@@ -50,6 +50,11 @@ function payload(result: Awaited<ReturnType<Client["callTool"]>>) {
 test("official HTTP MCP client lists contracts, writes, edits, restores and retrieves raw history", async () => {
   const tools = (await client.listTools()).tools;
   expect(tools.some(tool => tool.name === "canvas_write")).toBe(true);
+  expect(tools.some(tool => tool.name === "canvas_guide")).toBe(true);
+  const guide = await client.callTool({ name: "canvas_guide", arguments: {} });
+  expect(guide.isError).not.toBe(true);
+  const guideText = (guide.content as { text: string }[])[0]!.text;
+  expect(guideText).toContain("sidequery/canvas");
   expect((tools.find(tool => tool.name === "canvas_open")!.inputSchema.properties!.target as { enum: string[] }).enum).toEqual(["inline"]);
   const result = await client.callTool({ name: "canvas_write", arguments: { name: "overview", contents: source } });
   expect(result.isError).not.toBe(true);

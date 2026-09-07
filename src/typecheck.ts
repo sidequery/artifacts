@@ -25,6 +25,7 @@ export function typecheckCanvas(canvasPath: string): Diagnostic[] {
     allowSyntheticDefaultImports: true,
     baseUrl: PLUGIN_ROOT,
     paths: {
+      "sidequery/canvas": [relative(PLUGIN_ROOT, SDK_ENTRY)],
       "herdr/canvas": [relative(PLUGIN_ROOT, SDK_ENTRY)],
       "cursor/canvas": [relative(PLUGIN_ROOT, SDK_ENTRY)],
     },
@@ -53,7 +54,7 @@ function resolveSpecifier(
   options: ts.CompilerOptions,
   host: ts.CompilerHost,
 ): ts.ResolvedModuleFull | undefined {
-  if (specifier === "herdr/canvas" || specifier === "cursor/canvas") {
+  if (specifier === "sidequery/canvas" || specifier === "herdr/canvas" || specifier === "cursor/canvas") {
     return {
       resolvedFileName: SDK_ENTRY,
       extension: ts.Extension.Ts,

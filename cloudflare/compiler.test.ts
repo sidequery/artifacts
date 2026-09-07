@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { Miniflare, Response as MiniflareResponse } from "miniflare";
 import { chromium } from "playwright";
 import { typecheckCanvas } from "../src/typecheck";
+import { HOOKS_CANVAS } from "../src/test/fixtures";
 import type { Diagnostic } from "../src/diagnostics";
 
 let runtime: Miniflare;
@@ -49,7 +50,7 @@ async function call(source: string, operation = "compile"): Promise<Result> {
 test("compiles the real SDK in workerd without network and renders an interactive canvas", async () => {
   const health = await (await runtime.dispatchFetch("http://localhost/health")).json() as { runtime: string };
   expect(health.runtime).toBe("Cloudflare-Workers");
-  const source = `import { Button, H1, Stack, useCanvasState } from "herdr/canvas";
+  const source = `import { Button, H1, Stack, useCanvasState } from "sidequery/canvas";
 export default function Canvas() {
   const [count, setCount] = useCanvasState("count", 0);
   return <Stack><H1>Worker canvas</H1><Button onClick={() => setCount(count + 1)}>Count {count}</Button></Stack>;
@@ -77,13 +78,14 @@ export default function Canvas() {
   expect(outbound).toEqual([]);
 }, 30000);
 
-test("checks examples, both SDK aliases, semantic errors and forbidden imports like the local compiler", async () => {
+test("checks examples, canonical and legacy SDK imports, semantic errors and forbidden imports like the local compiler", async () => {
   const cases = [
     example,
-    example.replaceAll("herdr/canvas", "cursor/canvas"),
-    'import { H1 } from "herdr/canvas";\nconst value: number = "wrong";\nexport default function Canvas() { return <H1>{value}</H1>; }',
-    'import { Button } from "herdr/canvas";\nexport default function Canvas() { return <Button tone="not-a-tone">Bad</Button>; }',
-    'import { Missing } from "herdr/canvas";\nexport default function Canvas() { return <Missing />; }',
+    example.replaceAll("sidequery/canvas", "herdr/canvas"),
+    example.replaceAll("sidequery/canvas", "cursor/canvas"),
+    'import { H1 } from "sidequery/canvas";\nconst value: number = "wrong";\nexport default function Canvas() { return <H1>{value}</H1>; }',
+    'import { Button } from "sidequery/canvas";\nexport default function Canvas() { return <Button tone="not-a-tone">Bad</Button>; }',
+    'import { Missing } from "sidequery/canvas";\nexport default function Canvas() { return <Missing />; }',
     'import thing from "missing-package";\nexport default function Canvas() { return <div>{thing}</div>; }',
   ];
   for (const [index, source] of cases.entries()) {
@@ -94,7 +96,7 @@ test("checks examples, both SDK aliases, semantic errors and forbidden imports l
     const comparable = (diagnostics: Diagnostic[]) => diagnostics.map(({ message, line, column }) => ({ message, line, column }));
     expect(comparable(remote.diagnostics)).toEqual(comparable(local));
   }
-  const result = await call(cases[5]!);
+  const result = await call(cases.at(-1)!);
   expect(result.ok).toBe(false);
   expect(result.js).toBeUndefined();
   expect(outbound).toEqual([]);
@@ -102,7 +104,7 @@ test("checks examples, both SDK aliases, semantic errors and forbidden imports l
 
 test("repeated and concurrent compilations keep source separate", async () => {
   const started = performance.now();
-  const outputs = await Promise.all(["alpha", "beta", "gamma"].map(label => call(`import { H1 } from "herdr/canvas";\nexport default function Canvas() { return <H1>${label}-unique</H1>; }`)));
+  const outputs = await Promise.all(["alpha", "beta", "gamma"].map(label => call(`import { H1 } from "sidequery/canvas";\nexport default function Canvas() { return <H1>${label}-unique</H1>; }`)));
   for (const [index, result] of outputs.entries()) {
     expect(result.diagnostics).toEqual([]);
     expect(result.ok).toBe(true);
@@ -154,7 +156,7 @@ export class CanvasServer extends DurableObject {
   expect(invalid.diagnostics[0]?.message).toContain("missingMethod");
   const client = await call('import { DurableObject } from "cloudflare:workers"; export default function Canvas() { return <div />; }');
   expect(client.ok).toBe(false);
-  const next = await call('import { H1 } from "herdr/canvas"; export default function Canvas() { return <H1>Still works</H1>; }');
+  const next = await call('import { H1 } from "sidequery/canvas"; export default function Canvas() { return <H1>Still works</H1>; }');
   expect(next.ok).toBe(true);
   expect(outbound).toEqual([]);
 }, 60000);
@@ -169,4 +171,29 @@ export class CanvasServer extends DurableObject { fetch() { return new Response(
   const retried = await call(sources.at(-1)!, "compile-server");
   expect(retried.ok).toBe(true);
   expect(retried.diagnostics).toEqual([]);
+}, 60000);
+
+test("ordinary hooks render and update through canonical and legacy hosted SDK imports", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    for (const specifier of ["sidequery/canvas", "herdr/canvas", "cursor/canvas"]) {
+      const result = await call(HOOKS_CANVAS.replaceAll("sidequery/canvas", specifier));
+      expect(result.diagnostics).toEqual([]);
+      expect(result.ok).toBe(true);
+      const page = await browser.newPage();
+      const errors: string[] = [];
+      page.on("pageerror", error => errors.push(error.message));
+      await page.setContent('<iframe sandbox="allow-scripts"></iframe>');
+      await page.locator("iframe").evaluate((element, js) => {
+        (element as HTMLIFrameElement).srcdoc = `<div id="root"></div><script type="module">${js.replace(/<\/script/gi, "<\\/script")}</script>`;
+      }, result.js!);
+      const app = page.frameLocator("iframe");
+      await app.getByRole("button", { name: "Hooks 0:0:0:0:0", exact: true }).click();
+      await app.getByRole("button", { name: "Hooks 1:3:1:2:1", exact: true }).click();
+      await app.getByRole("button", { name: "Hooks 2:6:2:4:2", exact: true }).waitFor();
+      expect(errors).toEqual([]);
+      await page.close();
+    }
+  } finally { await browser.close(); }
+  expect(outbound).toEqual([]);
 }, 60000);
