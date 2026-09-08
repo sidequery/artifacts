@@ -47,8 +47,11 @@ function grant(scope: string, size: number, name = "data.bin", type = "applicati
   return call<Grant>(scope, { operation: "upload", name, size, type });
 }
 function transfer(path: string, method = "GET", body?: Uint8Array) {
+  // Invalid sizes and replayed grants reject before consuming the PUT body.
+  // Keep those closing sockets out of the pool used by later control requests.
   return runtime.dispatchFetch(`http://localhost${path}`, {
-    method, ...(body ? { body, headers: { "content-length": String(body.byteLength) } } : {}),
+    method, headers: { Connection: "close", ...(body ? { "content-length": String(body.byteLength) } : {}) },
+    ...(body ? { body } : {}),
   });
 }
 async function list(scope: string) { return call<CanvasFileList>(scope, { operation: "list" }); }
