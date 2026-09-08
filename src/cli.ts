@@ -3,7 +3,6 @@
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-import { runHostCommand } from "./local/host";
 import { flagBoolean, flagString, parseArgs, type ParsedArgs } from "./args";
 import { artifactsDirFrom } from "./artifactFile";
 import { clearServerReady, ServerDaemonManager, writeServerReady } from "./local/server-daemon";
@@ -24,7 +23,12 @@ export async function runServerCommand(args: ParsedArgs, dependencies: {
   signal?: AbortSignal;
   stdout?: (value: string) => void;
 } = {}): Promise<boolean> {
-  if (args.command !== "server") return false;
+  if (args.command !== "server" && args.command !== "host") return false;
+  if (args.command === "host") {
+    const allowed = new Set(["port", "at-login", "state-dir", "dir", "history-db"]);
+    if (args.positionals[0] === "logs") allowed.add("lines");
+    for (const name of Object.keys(args.flags)) if (!allowed.has(name)) throw new Error(`Unknown host option: --${name}`);
+  }
   const action = args.positionals[0];
   if (args.positionals.length > 1) throw new Error("server accepts at most one subcommand");
   const stdout = dependencies.stdout ?? (value => process.stdout.write(value));
@@ -38,8 +42,8 @@ export async function runServerCommand(args: ParsedArgs, dependencies: {
       throw new Error("--state-dir is available only for foreground `artifacts server`");
     }
     const manager = dependencies.manager ?? new ServerDaemonManager();
-    if (action === "start") {
-      stdout(`${JSON.stringify(await manager.start({ atLogin: flagBoolean(args.flags, "at-login"), port: numberFlag("port") }), null, 2)}\n`);
+    if (action === "start" || (args.command === "host" && action === "install")) {
+      stdout(`${JSON.stringify(await manager.start({ atLogin: action === "install" || flagBoolean(args.flags, "at-login"), port: numberFlag("port") }), null, 2)}\n`);
     } else if (action === "stop") {
       stdout(`${JSON.stringify(await manager.stop(), null, 2)}\n`);
     } else if (action === "status") {
@@ -112,7 +116,6 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (await runHostCommand(args)) return;
   if (await runServerCommand(args)) return;
 
   const cwd = process.cwd();
@@ -301,14 +304,13 @@ Usage:
   artifacts restore VERSION_ID
   artifacts remix SOURCE NEW_NAME
   artifacts remix NEW_NAME --version VERSION_ID
+  artifacts host [--port 4786] [--state-dir PATH]
+  artifacts host install [--port 4786]
+  artifacts host start [--port 4786] [--at-login]
+  artifacts host stop | status | logs [--lines 100] | uninstall
   artifacts server [--port 4786] [--state-dir PATH]
   artifacts server start [--port 4786] [--at-login]
   artifacts server stop | status | logs [--lines 100] | uninstall
-  artifacts host install --origin https://HOST.ts.net --tailscale-login LOGIN [--serve]
-    [--runner-org ORG --runner-repos ORG/REPO,...] [--gh-path PATH] [--replace-serve] [--keep-warm]
-    [--warm-gallery] [--warm-canvases NAME,...]
-  artifacts host start | stop | status | logs [--lines 100] | backup | uninstall
-    [--data-dir PATH]
 
 All commands accept --dir PATH and --history-db PATH.
 read returns up to 200 lines by default, with a source_hash and next_line.

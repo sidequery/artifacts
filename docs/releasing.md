@@ -87,13 +87,12 @@ The ordinary Bun CLI, stdio MCP, and local file gallery do not download celld.
 executable and SHA-256 file on the current supported machine. It embeds the Bun
 runtime, the prepared package, locked production dependencies, celld, and native
 esbuild. Users need no separate Bun, Node, dependency install, or source checkout.
-The executable extracts a versioned runtime tree under the Canvas data directory;
-saved canvases and host state are separate from that tree.
+The executable extracts a versioned runtime tree under the Artifacts data directory;
+saved artifacts and server state are separate from that tree.
 
-CI builds and tests native macOS arm64 and Linux glibc arm64/x64 artifacts. The
-`artifacts host` launchd installer currently supports macOS; other CLI commands and
-the existing local server remain available on supported Linux targets. A binary
-build does not publish a release. CI artifacts contain the executable and checksum.
+CI builds and tests native macOS arm64 and Linux glibc arm64/x64 artifacts.
+The executable uses the existing platform-neutral CLI and local server commands;
+it contains no Tailscale gateway or deployment installer. A binary build does not publish a release. CI artifacts contain the executable and checksum.
 Run `bun test scripts/executable.integration.test.ts --timeout 180000` against a
 built executable to exercise its CLI, local compiler, and stdio MCP with no Bun on
 PATH. Set `ARTIFACTS_EXECUTABLE` to test a specific artifact.

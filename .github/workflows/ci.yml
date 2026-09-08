@@ -19,6 +19,8 @@ jobs:
           bun-version: 1.4.0
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
+      - run: bun x tsc --project deployments/nicmini/tsconfig.json
+      - run: bun test deployments/nicmini
       - run: bun run test
       - run: bun x playwright install --with-deps chromium
       - run: bun run test:mcp-ui
@@ -37,7 +39,7 @@ jobs:
           gzip -d "$RUNNER_TEMP/celld-x86_64-unknown-linux-gnu.gz"
           chmod +x "$RUNNER_TEMP/celld-x86_64-unknown-linux-gnu"
           echo "CELLD_BIN=$RUNNER_TEMP/celld-x86_64-unknown-linux-gnu" >> "$GITHUB_ENV"
-      - run: CELLD_PACKAGE_INTEGRATION=1 bun run test:package
+      - run: CELLD_PACKAGE_INTEGRATION=1 bun run test:package:prebuilt
       - run: bun run test:celld
 
   executable:
@@ -57,6 +59,6 @@ jobs:
       - run: bun test scripts/executable.integration.test.ts --timeout 180000
       - uses: actions/upload-artifact@v4
         with:
-          name: canvas-${{ matrix.os }}
+          name: artifacts-${{ matrix.os }}
           path: dist/binaries/*
           if-no-files-found: error

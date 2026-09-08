@@ -2,13 +2,13 @@ import { chmod, cp, mkdir, open, rename, rm, stat, writeFile } from "node:fs/pro
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { flagBoolean, flagString, type ParsedArgs } from "../args";
-import { PLUGIN_ROOT } from "../paths";
-import { artifactDataRoot, ensureCelldRuntime } from "./celld-runtime";
+import { flagBoolean, flagString, type ParsedArgs } from "../../src/args";
+import { PLUGIN_ROOT } from "../../src/paths";
+import { artifactDataRoot, ensureCelldRuntime } from "../../src/local/celld-runtime";
 import { createTailnetGatewayHandler } from "./tailnet-gateway";
 import { runHost, validateWarmCanvases, type HostConfig } from "./host-service";
 import { acquireHostBackupLock } from "./host-backup";
-import type { RunCommand } from "./server-daemon";
+import type { RunCommand } from "../../src/local/server-daemon";
 
 const label = "com.sidequery.canvas-host";
 export type HostInstallOptions = {
@@ -80,7 +80,7 @@ export class HostManager {
   private readonly domain: string;
   private readonly run: RunCommand;
   constructor(private readonly deps: HostDependencies = {}) {
-    if ((deps.platform ?? process.platform) !== "darwin") throw new Error("canvas host currently requires macOS launchd");
+    if ((deps.platform ?? process.platform) !== "darwin") throw new Error("bun deployments/nicmini/cli.ts currently requires macOS launchd");
     this.home = deps.home ?? homedir();
     this.data = resolve(deps.dataRoot ?? join(artifactDataRoot(), "host"));
     this.configPath = join(this.data, "host.json");
@@ -95,7 +95,7 @@ export class HostManager {
     return result;
   }
   private async config(): Promise<HostConfig> {
-    if (!await Bun.file(this.configPath).exists()) throw new Error("Canvas host is not configured; run canvas host install");
+    if (!await Bun.file(this.configPath).exists()) throw new Error("Canvas host is not configured; run bun deployments/nicmini/cli.ts install");
     return Bun.file(this.configPath).json();
   }
   async status() {
@@ -128,7 +128,7 @@ export class HostManager {
   async install(options: HostInstallOptions) {
     const runner = options.runnerOrg !== undefined || options.runnerRepos !== undefined;
     hostRuntime({}, options); // Validate all user input before writes or downloads.
-    if (await Bun.file(this.configPath).exists() || await Bun.file(this.plist).exists()) throw new Error("Canvas host already configured; use canvas host start. Existing data is preserved.");
+    if (await Bun.file(this.configPath).exists() || await Bun.file(this.plist).exists()) throw new Error("Canvas host already configured; use bun deployments/nicmini/cli.ts start. Existing data is preserved.");
     let tailscale: string | undefined;
     if (options.serve) {
       tailscale = Bun.which("tailscale") ?? undefined;
@@ -152,7 +152,7 @@ export class HostManager {
     for (const port of [4788, 4789]) if (!portAvailable(port)) throw new Error(`Canvas host port ${port} is already in use`);
     const celld = this.deps.celldPath ?? process.env.ARTIFACTS_BUNDLED_CELLD ?? await (this.deps.ensureRuntime?.() ?? ensureCelldRuntime({ dataRoot: artifactDataRoot(), notify: console.error }));
     const esbuild = this.deps.esbuildPath ?? process.env.ARTIFACTS_BUNDLED_ESBUILD ?? createRequire(createRequire(join(root, "package.json")).resolve("esbuild/package.json")).resolve(`@esbuild/${process.platform}-${process.arch}/bin/esbuild`);
-    for (const path of [celld, esbuild, ...(this.deps.serviceCommand ? [] : [join(root, "dist/host/service.js")])]) {
+    for (const path of [celld, esbuild, ...(this.deps.serviceCommand ? [] : [join(root, "dist/nicmini/service.js")])]) {
       if (!await Bun.file(path).exists()) throw new Error(`Required host executable or service missing: ${path}`);
     }
     const project = join(this.data, "server"), release = join(project, "app/release");
@@ -164,7 +164,7 @@ export class HostManager {
     await cp(celld, join(release, "celld"), { dereference: true }); await chmod(join(release, "celld"), 0o700);
     let serviceCommand = this.deps.serviceCommand;
     if (!serviceCommand) {
-      await cp(join(root, "dist/host/service.js"), join(release, "service.js"));
+      await cp(join(root, "dist/nicmini/service.js"), join(release, "service.js"));
       let interpreter = process.execPath;
       if (process.env.ARTIFACTS_STANDALONE_EXECUTABLE) {
         interpreter = join(release, "canvas");
@@ -264,7 +264,7 @@ export class HostManager {
 export async function runHostCommand(args: ParsedArgs, dependencies: HostDependencies & { stdout?: (text: string) => void } = {}): Promise<boolean> {
   if (args.command !== "host") return false;
   const action = args.positionals[0];
-  if (args.positionals.length !== 1 || !["install", "start", "stop", "status", "logs", "backup", "uninstall", "run"].includes(action!)) throw new Error("Usage: canvas host install | start | stop | status | logs | backup | uninstall");
+  if (args.positionals.length !== 1 || !["install", "start", "stop", "status", "logs", "backup", "uninstall", "run"].includes(action!)) throw new Error("Usage: bun deployments/nicmini/cli.ts install | start | stop | status | logs | backup | uninstall");
   const allowed = new Set(action === "install" ? ["origin", "tailscale-login", "runner-org", "runner-repos", "gh-path", "serve", "replace-serve", "keep-warm", "warm-gallery", "warm-canvases", "data-dir"] : action === "run" ? ["config"] : action === "logs" ? ["lines", "data-dir"] : ["data-dir"]);
   for (const [name, value] of Object.entries(args.flags)) {
     if (!allowed.has(name)) throw new Error(`Unknown host ${action} option: --${name}`);

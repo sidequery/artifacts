@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { HostManager, assertServeAvailable, hostRuntime, runHostCommand } from "./host";
-import { parseArgs } from "../args";
+import { parseArgs } from "../../src/args";
 
 const directories: string[] = [];
 afterEach(async () => { for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true }); });
@@ -12,9 +12,9 @@ const options = { origin: "https://host.tailnet.ts.net", tailscaleLogin: "owner@
 async function fixture(removalPrints = 0, virtualTime = false) {
   let now = 0;
   const root = await mkdtemp(join(tmpdir(), "canvas-host-test-")); directories.push(root);
-  for (const path of ["dist/celld", "dist/worker-app", "dist/cloudflare/assets", "dist/host", "node_modules/.bin"]) await mkdir(join(root, path), { recursive: true });
+  for (const path of ["dist/celld", "dist/worker-app", "dist/cloudflare/assets", "dist/nicmini", "node_modules/.bin"]) await mkdir(join(root, path), { recursive: true });
   await writeFile(join(root, "dist/celld/wrangler.jsonc"), JSON.stringify({ main: "../worker-app/worker.js", assets: { directory: "../cloudflare/assets" }, vars: { ENVIRONMENT: "local" } }));
-  for (const path of ["dist/worker-app/worker.js", "dist/cloudflare/assets/index.html", "dist/host/service.js", "node_modules/.bin/esbuild", "celld"]) await writeFile(join(root, path), "fixture");
+  for (const path of ["dist/worker-app/worker.js", "dist/cloudflare/assets/index.html", "dist/nicmini/service.js", "node_modules/.bin/esbuild", "celld"]) await writeFile(join(root, path), "fixture");
   const commands: string[][] = []; let loaded = false; let failBackup = false; let removing = -1;
   const manager = new HostManager({ packageRoot: root, dataRoot: join(root, "data"), home: root, platform: "darwin", uid: 501, celldPath: join(root, "celld"), esbuildPath: join(root, "node_modules/.bin/esbuild"), healthCheck: async () => true, portAvailable: () => true,
     ...(virtualTime ? { now: () => now, sleep: async (milliseconds: number) => { now += milliseconds; } } : {}),

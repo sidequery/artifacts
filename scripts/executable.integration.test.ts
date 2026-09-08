@@ -19,6 +19,9 @@ test("one executable runs CLI, compiler and MCP without Bun or a source checkout
   let client: Client | undefined;
   try {
     expect(await run(["version"])).toContain("@sidequery/artifacts");
+    const help = await run(["help"]);
+    expect(help).toContain("artifacts host install");
+    expect(help).not.toContain("tailscale");
     const source = join(directory,"hello.canvas.tsx");
     await Bun.write(source, 'import {H1} from "sidequery/artifacts"; export default function Hello(){return <H1>Standalone Canvas</H1>}');
     expect(JSON.parse(await run(["write","hello","--file",source,"--dir",join(directory,"canvases")])).ok).toBe(true);
@@ -29,7 +32,10 @@ test("one executable runs CLI, compiler and MCP without Bun or a source checkout
     expect((await client.callTool({name:"artifact_guide",arguments:{}})).isError).not.toBe(true);
     const packages = await readdir(join(directory,"data/packages"));
     expect(packages).toHaveLength(1);
-    const native = join(directory,"data/packages",packages[0]!,"package/native");
+    const packaged = join(directory,"data/packages",packages[0]!,"package");
+    expect(existsSync(join(packaged,"deployments"))).toBe(false);
+    expect(existsSync(join(packaged,"dist/runner-status"))).toBe(false);
+    const native = join(packaged,"native");
     expect(await Bun.file(join(native,"celld")).exists()).toBe(true);
     expect(await Bun.file(join(native,"esbuild")).exists()).toBe(true);
     // Native executables were embedded; no managed runtime download was needed.
