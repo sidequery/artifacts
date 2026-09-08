@@ -685,3 +685,34 @@ test("hosted remix tools create private independent artifacts and reject overwri
   expect(await run("remix-script")).toEqual({count:2,secret:"original-only"});
   expect((await client.callTool({name:"script_remix",arguments:{name:"remix-script",new_name:"remix-script-copy"}})).isError).toBe(true);
 }, 120000);
+
+test("canvas schedules retain validated revisions, keep host history isolated, and pause on server removal", async () => {
+  const name = "scheduled-counter";
+  const write = await client.callTool({ name: "canvas_write", arguments: { name, contents: counterClient, server: counterServer } });
+  expect(write.isError).not.toBe(true);
+  const version = (write._meta as { canvas: { versionId: string } }).canvas.versionId;
+  const tool = async (nameOfTool: string, args: Record<string, unknown> = {}) => {
+    const result = await client.callTool({ name: nameOfTool, arguments: { name, ...args } });
+    expect(result.isError).not.toBe(true);
+    return result.structuredContent as any;
+  };
+  const saved = await tool("canvas_schedule", { action: "set", interval_seconds: 3600, request: { path: "/counter", method: "POST" } });
+  expect(saved.schedule).toMatchObject({ paused: false, interval_seconds: 3600 });
+  await tool("canvas_schedule", { action: "pause" });
+  const invalid = await client.callTool({ name: "canvas_write", arguments: { name, contents: "export default function {" } });
+  expect(invalid.isError).toBe(true);
+  await tool("canvas_schedule", { action: "run_now" });
+  const response = await tool("canvas_request", { version_id: version, request: { path: "/counter" } });
+  expect(JSON.parse(atob(response.response.body)).value).toBe(1);
+  const runs = (await tool("canvas_runs")).runs;
+  expect(runs).toEqual(expect.arrayContaining([expect.objectContaining({ revision: version, trigger: "manual", status: "succeeded", http_status: 200 })]));
+  // A canvas's own SQL database cannot inspect supervisor execution history.
+  const inspectServer = `import { DurableObject } from "cloudflare:workers";
+export class CanvasServer extends DurableObject { fetch() { return Response.json(this.ctx.storage.sql.exec("select name from sqlite_master where name='execution_runs'").toArray()); } }`;
+  expect((await client.callTool({ name: "canvas_write", arguments: { name, contents: counterClient, server: inspectServer } })).isError).not.toBe(true);
+  const inspected = await tool("canvas_request", { request: { path: "/" } });
+  expect(JSON.parse(atob(inspected.response.body))).toEqual([]);
+  expect((await client.callTool({ name: "canvas_write", arguments: { name, contents: counterClient, server: null } })).isError).not.toBe(true);
+  expect((await tool("canvas_schedule")).schedule).toMatchObject({ paused: true, next_run_at: null });
+  expect((await client.callTool({ name: "canvas_schedule", arguments: { name, action: "resume" } })).isError).toBe(true);
+}, 120000);

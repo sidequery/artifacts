@@ -12,6 +12,8 @@ declare global {
   var compilerProbe: { allowed: boolean; client: number; server: number };
 }
 
+const activeRevisions = new Map<string, unknown>();
+
 export default {
   async fetch(request: Request, env: Env) {
     try {
@@ -24,9 +26,10 @@ export default {
       const workspace = url.searchParams.get("workspace") ?? "default";
       const library = env.LIBRARY.getByName(libraryKey);
       const links = env.LINKS.getByName("deployment");
-      const backends = { getByName: (key: string) => ({ request: async (input: { code: string; hash: string }) => ({ status: 200, headers: [], body: btoa(JSON.stringify({ key, ...input })) }) }) };
+      const backends = { getByName: (key: string) => ({ activate: async (input: unknown) => { activeRevisions.set(key, input); }, request: async (input: { code: string; hash: string }) => ({ status: 200, headers: [], body: btoa(JSON.stringify({ key, ...input })) }) }) };
       const service = new CloudCanvasService(library, workspace, backends as never, libraryKey, { links, origin: url.origin } as HostedArtifacts);
       const input = await request.json() as Record<string, any>;
+      if (url.pathname === "/activated") return Response.json(activeRevisions.get(JSON.stringify([libraryKey, workspace, input.name])) ?? null);
       if (url.pathname === "/tool") return Response.json(await service.callTool(input.name, input.arguments));
       if (url.pathname === "/preview") return Response.json(await service.preview(await service.snapshot(input)));
       if (url.pathname === "/request") return Response.json(await service.request(input, { path: "/", method: "GET", headers: [] }));

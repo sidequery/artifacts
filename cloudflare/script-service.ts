@@ -1,3 +1,4 @@
+import type { ScriptSchedule } from "./script-backend";
 import { resolveProject } from "./project";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { createHash } from "node:crypto";
@@ -52,7 +53,17 @@ export class CloudScriptService {
         return text({ versions, next_offset: versions.length === 100 ? offset + 100 : null });
       }
       case "script_version": return text(await scripts.version({ workspace: this.artifacts.workspace, id: args.version_id as string }));
-      case "script_logs": return text({ logs: await hosted.scriptBackends.getByName(JSON.stringify([this.artifacts.libraryKey, this.artifacts.workspace, this.artifacts.target("script", name).name])).logs({ limit: args.limit as number | undefined }) });
+      case "script_schedule": {
+        const target=this.artifacts.target("script",name);
+        const backend=hosted.scriptBackends.getByName(JSON.stringify([this.artifacts.libraryKey,this.artifacts.workspace,target.name]));
+        if (args.action==="set") {
+          const link=await hosted.links.find(target);
+          if (!link?.script_hash) throw new Error("Script has no validated URL revision");
+        }
+        return text({schedule:await backend.schedule({action:args.action as "get"|"set"|"pause"|"resume"|"run_now"|undefined,interval_seconds:args.interval_seconds as number|undefined,cron:args.cron as string|undefined,timezone:args.timezone as string|undefined,request:args.request as ScriptSchedule["request"]|undefined,...(args.action==="set"?{identity:{libraryKey:this.artifacts.libraryKey,workspace:this.artifacts.workspace,name:target.name,origin:hosted.origin}}:{})})});
+      }
+      case "script_runs": return text({runs:await hosted.scriptBackends.getByName(JSON.stringify([this.artifacts.libraryKey,this.artifacts.workspace,this.artifacts.target("script",name).name])).runs({limit:args.limit as number|undefined})});
+      case "script_logs": return text({ logs: await hosted.scriptBackends.getByName(JSON.stringify([this.artifacts.libraryKey, this.artifacts.workspace, this.artifacts.target("script", name).name])).logs({ limit: args.limit as number | undefined, run_id: args.run_id as string | undefined }) });
       case "script_secrets": {
         if (args.secrets !== undefined) {
           if (!args.secrets || typeof args.secrets !== "object" || Array.isArray(args.secrets)) throw new Error("secrets must be an object");
@@ -66,7 +77,7 @@ export class CloudScriptService {
         const active = await scripts.active({ ...input, hash: link.script_hash });
         const incoming = nativeRequest(args.request as CanvasHttpRequest);
         const request = new Request(new URL(new URL(incoming.url).pathname + new URL(incoming.url).search, hosted.origin), incoming);
-        const response = await hosted.scriptBackends.getByName(JSON.stringify([this.artifacts.libraryKey, this.artifacts.workspace, this.artifacts.target("script", name).name])).request({ ...active, request });
+        const response = await hosted.scriptBackends.getByName(JSON.stringify([this.artifacts.libraryKey, this.artifacts.workspace, this.artifacts.target("script", name).name])).request({ ...active, request, trigger: "manual" });
         const envelope = await scriptResponse(response, incoming.method);
         return { ...text({ status: envelope.status, ...(link ? { url: `${hosted.origin}/${link.slug}` } : {}) }), structuredContent: { response: envelope } };
       }

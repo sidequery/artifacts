@@ -1,3 +1,4 @@
+import {ExecutionControls} from "./execution-controls";
 import { useEffect, useState } from "react";
 import { ProjectEditor, editableProject, emptyEditableProject, type EditableProject } from "./project-editor";
 import type { GalleryArtifact } from "./types";
@@ -110,6 +111,7 @@ export function ScriptPanel({ artifact, workspace, version, sourceUrl, onSaved, 
         <label>Headers (JSON)<textarea aria-label="Request headers" value={headers} onChange={event => setHeaders(event.target.value)} /></label>
         {method !== "GET" && method !== "HEAD" ? <label>Body<textarea aria-label="Request body" value={body} onChange={event => setBody(event.target.value)} /></label> : null}
       </form>{output ? <pre aria-label="Script response">{output}</pre> : null}</details>
+      <ExecutionControls key={`${workspace}/${name}`} workspace={workspace} name={name}/>
       <details><summary>Logs</summary><button disabled={busy} onClick={() => void perform(async () => setLogs(show(await galleryTool(workspace, "script_logs", { name }))))}>Load logs</button><pre aria-label="Script logs">{logs}</pre></details>
       <details><summary>Secrets</summary><form onSubmit={event => { event.preventDefault(); void perform(async () => { await galleryTool(workspace, "script_secrets", { name, secrets: { [secretName]: secretValue } }); setSecretValue(""); setStatus("Secret saved"); }); }}><div className="script-fields"><input aria-label="Secret name" placeholder="Name" required value={secretName} onChange={event => setSecretName(event.target.value)} /><input aria-label="Secret value" placeholder="Value" type="password" autoComplete="new-password" value={secretValue} onChange={event => setSecretValue(event.target.value)} /><button disabled={busy}>Save secret</button><button type="button" disabled={busy || !secretName} onClick={() => void perform(async () => { await galleryTool(workspace, "script_secrets", { name, secrets: { [secretName]: null } }); setSecretValue(""); setStatus("Secret removed"); })}>Remove secret</button></div></form></details>
     </> : null}

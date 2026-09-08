@@ -110,3 +110,15 @@ Agents can call `script_guide` to retrieve the authoring contract through MCP.
 Select a working copy or historical revision in the gallery, then **Remix** and choose a new name. MCP offers `canvas_remix` and `script_remix`, with `new_name` and exactly one of `name` or `version_id`. Hosted calls optionally accept a new `slug`; otherwise it defaults to the destination name. Sources and destinations belong to the authenticated library and selected workspace.
 
 A remix creates a separate artifact and records its immutable source revision as provenance. Canvas browser and server sources stay paired. The new artifact starts with empty runtime data and no copied secret values; its hosted URL starts private. Destination names cannot overwrite existing drafts or archived artifacts, and URL collisions are rejected. Invalid source remains saved as a remix draft, with validation diagnostics; it receives a working URL only after successful validation. Remixing does not execute the request handler.
+
+## Schedules and execution history
+
+Hosted Cloudflare and celld servers can schedule scripts and canvas backends with native Durable Object alarms. Configure **Schedule** in the gallery, or call `script_schedule` / `canvas_schedule` with `name` and `action: "set"`. Supply exactly one of `interval_seconds` (at least 60) or a five-field `cron` expression. Cron accepts an IANA `timezone`, defaulting to `UTC`. Supply a relative HTTP `request` (path, method, headers, optional base64 body); the default is GET `/`.
+
+Use `action: "get"`, `"pause"`, `"resume"`, or `"run_now"` to inspect or control the schedule. Run-now executes the saved request, including while paused. Each artifact has one schedule. Removing a canvas server pauses its schedule. The local filesystem CLI/stdio runtime does not execute backends or run a scheduler; use `canvas server` for local scheduled execution.
+
+Schedules execute the latest validated revision, not an invalid draft or a historical preview. An occurrence is durably claimed before calling user code; missed intervals are skipped rather than accumulated. Failures and uncertain interrupted invocations are not automatically replayed. Application handlers should make repeated writes idempotent when that matters. A local celld server must be running for alarms to execute.
+
+`script_runs` and `canvas_runs` expose the latest 100 of up to 1,000 retained executions: revision, trigger, start/end times, duration, HTTP status and outcome. The gallery's **Run history** shows the same records. These records live in host-owned SQLite, separate from the user handler's database, and survive code updates and source restores. An `interrupted` record means completion is unknown and side effects may already have occurred.
+
+Script logs can be filtered by `run_id` from `script_runs`; the existing 100-entry log retention still applies. Script success describes the HTTP handler returning a response, not completion of `waitUntil` tasks or streamed response bodies. Canvas history includes response serialization; canvas console capture is not provided.

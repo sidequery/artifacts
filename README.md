@@ -403,7 +403,7 @@ canvases execute inside the chat host's MCP Apps sandbox; use trusted local canv
 source, as for the other local views. Artifact
 source and saved state can contain private data; keep the history database private.
 
-## Projects and remix
+## Projects, remix, and scheduled runs
 
 Canvases and scripts support helper source files and pinned package dependencies.
 Use the gallery's source file picker and Dependencies editor, or pass
@@ -416,4 +416,7 @@ Use **Remix** in the gallery, `canvas_remix` / `script_remix` through MCP, or
 `canvas remix SOURCE NEW_NAME` locally. Copies retain source provenance and start
 with fresh state, storage, secrets, and private hosted URLs.
 
-See [project and remix contracts](docs/scripts.md) for details and limits.
+Hosted and celld backends expose **Schedule** and **Run history** controls. Native
+alarms support intervals and cron expressions with timezones, pause/resume, and
+run-now. Run records live in host-owned SQLite. See
+[project, remix, and scheduling contracts](docs/scripts.md) for details and limits.

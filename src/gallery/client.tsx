@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { authClient, signInUrl } from "../auth/client-api";
 import type { GalleryArtifact, GalleryData } from "./types";
+import { ExecutionControls } from "./execution-controls";
 import { CanvasSourcePanel, LinkSettings, ScriptPanel } from "./hosted";
 import { canvasFileTransferUrl } from "../sdk/files";
 import { RemixPanel } from "./remix";
@@ -59,6 +60,9 @@ const styles = `
   .script-panel details { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 12px; }
   .script-panel summary { cursor: pointer; }
   .script-panel pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .canvas-execution { padding: 8px; border-bottom: 1px solid var(--line); max-height: 45vh; overflow: auto; }
+  .canvas-execution summary { cursor: pointer; }
+  .canvas-execution td, .canvas-execution th { padding: 4px 8px; text-align: left; }
   .muted { color: var(--muted); }
   .canvas-stage { position: relative; display: flex; min-width: 0; min-height: 0; overflow: hidden; }
   .preview-frame { display: block; width: 100%; height: 100%; border: 0; }
@@ -495,6 +499,7 @@ function App() {
           </aside>
           <div className="artifact-detail">
           {remixing && !creatingScript && selectedArtifact && resolvedVersion ? <RemixPanel key={selectedArtifact.key + resolvedVersion} artifact={selectedArtifact} version={resolvedVersion} onCancel={() => setRemixing(false)} onSaved={async name => { createdRemix.current = {name,workspace:selectedArtifact.workspace,kind:selectedArtifact.kind ?? "canvas"}; await loadGallery(); setSelectedVersion("working"); setQuery(""); setRemixing(false); }} /> : null}
+          {!creatingScript && selectedArtifact && selectedArtifact.kind !== "script" && gallery?.capabilities?.links ? <div className="canvas-execution"><ExecutionControls key={selectedArtifact.key + "execution"} workspace={selectedArtifact.workspace} name={selectedArtifact.name} kind="canvas" /></div> : null}
           {!creatingScript && selectedArtifact && gallery?.capabilities?.links ? <LinkSettings key={selectedArtifact.key} artifact={selectedArtifact} onSaved={loadGallery} /> : null}
           <section id="canvas-panel" className="canvas-stage" aria-label={tab === "preview" ? "Canvas preview" : "Canvas source"}>
             {creatingScript ? (

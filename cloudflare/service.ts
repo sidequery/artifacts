@@ -4,6 +4,7 @@ import type { DurableObjectStub, DurableObjectNamespace } from "@cloudflare/work
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { CanvasLibrary, CanvasEdit, CompiledCanvas } from "./library";
 import { compileCanvasSource, compileCanvasServerSource, typecheckCanvasSource, typecheckCanvasServerSource } from "./compiler";
+import type { CanvasScheduleInput } from "./canvas-execution";
 import type { CanvasBackend } from "./backend";
 import type { LinkUpdate } from "./links";
 import { ArtifactService, type HostedArtifacts } from "./artifact-service";
@@ -120,8 +121,31 @@ export class CloudCanvasService {
         const { _meta, ...payload } = preview;
         return { ...text(payload, !preview.ok), structuredContent: payload, ...(_meta ? { _meta } : {}) };
       }
+      case "canvas_schedule":
+      case "canvas_runs": {
+        const snapshot = await this.snapshot({ name: args.name as string });
+        const backend = this.backends.getByName(JSON.stringify([this.libraryKey, this.workspace, snapshot.name]));
+        if (name === "canvas_runs") {
+          const payload = { runs: await backend.runs({ limit: args.limit as number | undefined }) };
+          return { ...text(payload), structuredContent: payload };
+        }
+        // Existing canvases gain a validated active revision when first scheduled.
+        // Reads and pause remain usable while a draft is invalid.
+        if (args.action === "set" || args.action === "resume") {
+          const current = await backend.activeRevision();
+          if (!current) {
+            const compiled = await this.compile(snapshot);
+            if (!compiled.ok) throw new Error(formatCanvasCheck(compiled.diagnostics));
+            const preview = await this.preview(snapshot, compiled);
+            if (preview.ok && "canvas" in preview) await this.activate(snapshot, preview.canvas.versionId, preview.canvas.revision, compiled);
+          }
+        }
+        const { name: _name, ...input } = args;
+        const payload = { schedule: await backend.schedule(input as CanvasScheduleInput) };
+        return { ...text(payload), structuredContent: payload };
+      }
       case "canvas_request": {
-        const response = await this.request({ name: args.name as string | undefined, version_id: args.version_id as string | undefined }, args.request as CanvasHttpRequest);
+        const response = await this.request({ name: args.name as string | undefined, version_id: args.version_id as string | undefined }, args.request as CanvasHttpRequest, "manual");
         return { ...text({ status: response.status }), structuredContent: { response } };
       }
       default: throw new Error("Unknown tool");
@@ -144,7 +168,7 @@ export class CloudCanvasService {
       runtime: compiled.artifact.runtime, compiled_id: compiled.artifact.id, initial_state: snapshot.state, mode: "preview",
       ...(snapshot.version_id ? { version_id: snapshot.version_id } : {}),
     });
-    const canvas = { name: version.name, versionId: version.id, eventId: event.id, sourceHash: version.source_hash };
+    const canvas = { name: version.name, versionId: version.id, revision: version.revision, eventId: event.id, sourceHash: version.source_hash };
     return { ...base, ok: true, canvas, _meta: { canvas: { ...canvas, js: compiled.js, state: snapshot.state, server: snapshot.server_source !== null, ...(this.plugins ? { plugins: true } : {}), ...(this.fileStorage ? { files: true } : {}) } satisfies CanvasAppPayload } };
   }
 
@@ -173,6 +197,7 @@ export class CloudCanvasService {
           return { ...text(superseded, true), structuredContent: superseded };
         }
       }
+      if (details.ok && "canvas" in details) await this.activate(mutation, details.canvas.versionId, details.canvas.revision, compiled);
       const result = { ...payload, ...await this.artifacts.linkDetails(target) };
       return { ...text(result, !details.ok), structuredContent: { ...result, preview: { ...details, ...await this.artifacts.linkDetails(target) } }, ...(_meta ? { _meta } : {}) };
     } catch (error) {
@@ -211,7 +236,14 @@ export class CloudCanvasService {
     }] };
   }
 
-  async request(selection: { name?: string; version_id?: string }, request: CanvasHttpRequest) {
+  private async activate(snapshot: Snapshot, version_id: string, revision: number, compiled: Compiled) {
+    if (!compiled.ok || !compiled.artifact) throw new Error(formatCanvasCheck(compiled.diagnostics));
+    const code = compiled.artifact.server_js;
+    const hash = createHash("sha256").update(code ?? "").digest("hex");
+    await this.backends.getByName(JSON.stringify([this.libraryKey, this.workspace, snapshot.name])).activate({ code, hash, version_id, revision });
+  }
+
+  async request(selection: { name?: string; version_id?: string }, request: CanvasHttpRequest, trigger: "http" | "manual" = "http") {
     const snapshot = await this.snapshot(selection.version_id ? { version_id: selection.version_id } : { name: selection.name });
     if (selection.name && snapshot.name !== selection.name.trim().replace(/\.canvas\.tsx$/, "")) throw new Error("Server version does not belong to this canvas");
     if (snapshot.server_source === null) throw new Error("Canvas has no server");
@@ -220,7 +252,7 @@ export class CloudCanvasService {
     const code = compiled.artifact.server_js;
     const hash = createHash("sha256").update(code).digest("hex");
     const backend = this.backends.getByName(JSON.stringify([this.libraryKey, this.workspace, snapshot.name]));
-    return backend.request({ code, hash, request });
+    return backend.request({ code, hash, version_id: snapshot.version_id ?? undefined, request, trigger });
   }
 
   async fileRequest(selection: { name?: string; version_id?: string }, input: CanvasFileRequest, writable = true): Promise<unknown> {

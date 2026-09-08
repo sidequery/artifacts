@@ -4,7 +4,7 @@ let runtime: Miniflare;
 beforeAll(async()=>{
   const build=await Bun.build({entrypoints:[new URL("./scripts-test-worker.ts",import.meta.url).pathname],target:"browser",format:"esm",external:["cloudflare:workers","node:*","fs","fs/promises"]});
   if (!build.success) throw new Error(build.logs.join("\n"));
-  runtime=new Miniflare({unsafeInspectDurableObjects:true,cf:false,port:0,workers:[{config:{name:"scripts-test",type:"worker",compatibilityDate:"2026-09-06",compatibilityFlags:["nodejs_compat"],manifest:{mainModule:"test.js",modulesRoot:import.meta.dir,modules:{"test.js":{type:"esm",contents:await build.outputs[0]!.text()}}},env:{SCRIPTS:{type:"durable-object",worker:"scripts-test",exportName:"ScriptLibrary"},SCRIPT_BACKENDS:{type:"durable-object",worker:"scripts-test",exportName:"ScriptBackend"},LOADER:{type:"worker-loader"}},exports:{ScriptLibrary:{type:"durable-object",storage:"sqlite"},ScriptBackend:{type:"durable-object",storage:"sqlite"}}},dev:{outboundService:{type:"fetcher",handler:()=>new MFResponse("upstream success")}}}]});
+  runtime=new Miniflare({unsafeInspectDurableObjects:true,cf:false,port:0,workers:[{config:{name:"scripts-test",type:"worker",compatibilityDate:"2026-09-06",compatibilityFlags:["nodejs_compat"],manifest:{mainModule:"test.js",modulesRoot:import.meta.dir,modules:{"test.js":{type:"esm",contents:await build.outputs[0]!.text()}}},env:{LINKS:{type:"durable-object",worker:"scripts-test",exportName:"ArtifactLinks"},SCRIPTS:{type:"durable-object",worker:"scripts-test",exportName:"ScriptLibrary"},SCRIPT_BACKENDS:{type:"durable-object",worker:"scripts-test",exportName:"ScriptBackend"},LOADER:{type:"worker-loader"}},exports:{ArtifactLinks:{type:"durable-object",storage:"sqlite"},ScriptLibrary:{type:"durable-object",storage:"sqlite"},ScriptBackend:{type:"durable-object",storage:"sqlite"}}},dev:{outboundService:{type:"fetcher",handler:()=>new MFResponse("upstream success")}}}]});
   await runtime.ready;
 });
 afterAll(async()=>{await runtime?.dispose();});
@@ -102,6 +102,63 @@ test("remix copies an immutable source revision, never secrets or activation, an
   await expect(call("remix",{workspace:"other",version_id:version.id,new_name:"copy"})).rejects.toThrow("not found");
   await expect(call("remix",{workspace,version_id:version.id,new_name:"copy"},"bob")).rejects.toThrow("not found");
   await expect(call("remix",{workspace,name,version_id:version.id,new_name:"ambiguous"})).rejects.toThrow("not both");
+});
+
+test("run history records HTTP outcomes and correlates concurrent logs without exposing host tables",async()=>{
+  const code=`export default {async fetch(request,env){const tag=await request.text(); console.log('before',tag); await fetch('https://upstream.example'); console.log('after',tag); const host=env.sql.exec("select name from sqlite_master where name='execution_runs'").toArray();return Response.json({host,internal:request.headers.get("x-canvas-internal-run")});}}`;
+  const responses=await Promise.all([run(code,{},"history","first"),run(code,{},"history","second")]);
+  for(const response of responses) expect(await response.json()).toEqual({host:[],internal:null});
+  const runs=await call("backend/runs",{},"history");
+  expect(runs).toHaveLength(2);
+  for(const entry of runs) {
+    expect(entry).toMatchObject({status:"succeeded",trigger:"http",http_status:200,revision:"unused"});
+    expect(entry.duration_ms).toBeGreaterThanOrEqual(0);
+    const logs=await call("backend/logs",{run_id:entry.id},"history");
+    expect(logs.every((log:any)=>log.run_id===entry.id)).toBe(true);
+    const messages=logs.filter((log:any)=>log.level==="log").map((log:any)=>log.message);
+    expect(messages).toHaveLength(2);
+    expect(messages[0].split(" ")[1]).toBe(messages[1].split(" ")[1]);
+  }
+  await run('export default {fetch(){return new Response("bad",{status:503})}}',{},"history");
+  expect((await call("backend/runs",{limit:1},"history"))[0]).toMatchObject({status:"failed",http_status:503});
+  await expect(call("backend/runs",{limit:101},"history")).rejects.toThrow("limit");
+});
+
+test("native alarms execute current revision and secrets, pause/resume and run-now preserve configuration, redelivery is skipped",async()=>{
+  const library="scheduled";
+  const code=`export default {fetch(request,env){console.log(env.secrets.TOKEN);env.sql.exec("create table if not exists ticks(n integer)");env.sql.exec("insert into ticks values(1)");return new Response("ok");}}`;
+  const draft=await call("writeDraft",{...identity,source:code},library);
+  const active=await call("activate",{...identity,source_hash:draft.source_hash,code},library);
+  await call("link",{hash:active.hash},library);
+  await call("setSecret",{...identity,key:"TOKEN",value:"schedule-secret"},library);
+  const config={action:"set",identity:{libraryKey:library,...identity,origin:"https://scripts.invalid"},interval_seconds:60,request:{path:"/tick",method:"POST",headers:[]}};
+  const schedule=await call("backend/schedule",config,library);
+  expect(schedule).toMatchObject({interval_seconds:60,paused:false});
+  expect(schedule.next_run_at).toBeGreaterThan(Date.now());
+  expect(await call("backend/runs",{},library)).toEqual([]);
+  await expect(call("backend/schedule",{...config,interval_seconds:0},library)).rejects.toThrow("interval_seconds");
+  expect(await call("backend/schedule",{},library)).toEqual(schedule);
+  await call("backend/schedule",{action:"pause"},library);
+  expect(await call("backend/schedule",{},library)).toMatchObject({paused:true,next_run_at:null});
+  await call("backend/schedule",{action:"run_now"},library);
+  expect((await call("backend/runs",{},library))[0]).toMatchObject({trigger:"manual",status:"succeeded",revision:active.hash});
+  await call("backend/schedule",{action:"resume"},library);
+  await call("backend/due",{},library);
+  const deadline=Date.now()+5000;
+  let runs:any[]=[];
+  while(Date.now()<deadline){runs=await call("backend/runs",{},library);if(runs.some(r=>r.trigger==="schedule"&&r.status!=="running"))break;await Bun.sleep(25);}
+  expect(runs).toHaveLength(2);
+  expect(runs[0]).toMatchObject({trigger:"schedule",status:"succeeded"});
+  await call("backend/repeatAlarm",{},library); // duplicate alarm delivery
+  expect(await call("backend/runs",{},library)).toHaveLength(2);
+  expect(JSON.stringify(await call("backend/logs",{},library))).not.toContain("schedule-secret");
+  const newer=code.replace('new Response("ok")','new Response("failed",{status:503})');
+  const revision=await call("writeDraft",{...identity,source:newer},library);
+  const activated=await call("activate",{...identity,source_hash:revision.source_hash,code:newer},library);
+  await call("link",{hash:activated.hash},library);
+  await call("backend/schedule",{action:"run_now"},library);
+  expect((await call("backend/runs",{limit:1},library))[0]).toMatchObject({status:"failed",revision:activated.hash,http_status:503});
+  await call("backend/schedule",{action:"pause"},library);
 });
 
 test("project changes invalidate script validation and restore complete module snapshots", async () => {

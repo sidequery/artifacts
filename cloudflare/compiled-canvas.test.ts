@@ -52,6 +52,7 @@ test("edits persist compiled revisions; every read and restart works with the co
     expect(first.isError).not.toBe(true);
     const firstCanvas = first._meta.canvas;
     const firstVersion = firstCanvas.versionId;
+    expect(await call("/activated", { name: "example" })).toMatchObject({ version_id: firstVersion, code: expect.stringContaining("server-one") });
     expect(await call("/compiler", { allowed: false })).toMatchObject({ client: 1, server: 1 });
     for (let index = 0; index < 3; index++) {
       expect((await tool("canvas_open", { name: "example" }))._meta.canvas.js).toBe(firstCanvas.js);
@@ -108,6 +109,7 @@ test("edits persist compiled revisions; every read and restart works with the co
     const projectEdit = await tool("canvas_edit", { name: "project", file: "helper.ts", edits: [{ old_text: "original-helper", new_text: "updated-helper" }] });
     expect(projectEdit.isError).not.toBe(true);
     expect(projectEdit._meta.canvas.js).toContain("updated-helper");
+    expect(await call("/activated", { name: "project" })).toMatchObject({ version_id: projectEdit._meta.canvas.versionId, code: expect.stringContaining("updated-helper") });
     expect(projectEdit._meta.canvas.js).not.toBe(projectFirst.js);
     expect(projectEdit._meta.canvas.versionId).not.toBe(projectFirst.versionId);
     await call("/compiler", { allowed: false });
