@@ -1,3 +1,4 @@
+import { publicOrigin } from "./public-origin";
 import type { Env } from "./worker";
 import { authenticate } from "./auth";
 import { authenticateBetterAuth } from "./better-auth";
@@ -70,7 +71,7 @@ export async function artifactRoute(request: Request, env: Env): Promise<Respons
   }
   if (!link.version_id) return new Response("Artifact has no valid version", { status: 409 });
   const service = new CloudArtifactService(env.LIBRARIES.getByName(link.libraryKey), link.workspace, env.BACKENDS, link.libraryKey, undefined, plugins,
-    env.FILE_BACKENDS ? { backends: env.FILE_BACKENDS, origin: url.origin } : undefined);
+    env.FILE_BACKENDS ? { backends: env.FILE_BACKENDS, origin: publicOrigin(request.url, env.ARTIFACTS_PUBLIC_ORIGIN) } : undefined);
   if (url.pathname === `/${slug}/_artifact/files`) {
     if (request.method !== "POST") return new Response("Method not allowed", { status: 405, headers: { Allow: "POST" } });
     const origin = request.headers.get("Origin");
@@ -125,7 +126,7 @@ export async function artifactRoute(request: Request, env: Env): Promise<Respons
   const preview = await service.preview(snapshot);
   if (!preview.ok || !preview._meta) return new Response(preview.check, { status: 400 });
   const payload = preview._meta.artifact;
-  const frame = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src ${url.origin}/api/artifact/files/transfer/ ${url.origin}/api/canvas/files/transfer/; form-action 'none'; base-uri 'none'"><style>body{margin:0;background:#181818;color:#f0f0f0;font-family:system-ui,sans-serif}#root{padding:24px}</style></head><body><div id="root"></div><script>window.__herdrCanvas=window.__artifacts=${scriptJson({ artifactId: payload.name, canvasId: payload.name, state: payload.state, theme: { kind: "dark" }, plugins: payload.plugins, ...(payload.files ? { filesVersionId: payload.versionId } : {}), route: { path: (url.pathname.slice(slug.length + 1) || "/") + url.search, basePath: `/${slug}`, external: true }, ...(payload.server ? { serverVersionId: payload.versionId } : {}) })};${galleryBridge.replace(/<\/script/gi, "<\\/script")}</script><script type="module">${payload.js.replace(/<\/script/gi, "<\\/script")}</script></body></html>`;
+  const frame = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src ${publicOrigin(request.url, env.ARTIFACTS_PUBLIC_ORIGIN)}/api/artifact/files/transfer/ ${publicOrigin(request.url, env.ARTIFACTS_PUBLIC_ORIGIN)}/api/canvas/files/transfer/; form-action 'none'; base-uri 'none'"><style>body{margin:0;background:#181818;color:#f0f0f0;font-family:system-ui,sans-serif}#root{padding:24px}</style></head><body><div id="root"></div><script>window.__herdrCanvas=window.__artifacts=${scriptJson({ artifactId: payload.name, canvasId: payload.name, state: payload.state, theme: { kind: "dark" }, plugins: payload.plugins, ...(payload.files ? { filesVersionId: payload.versionId } : {}), route: { path: (url.pathname.slice(slug.length + 1) || "/") + url.search, basePath: `/${slug}`, external: true }, ...(payload.server ? { serverVersionId: payload.versionId } : {}) })};${galleryBridge.replace(/<\/script/gi, "<\\/script")}</script><script type="module">${payload.js.replace(/<\/script/gi, "<\\/script")}</script></body></html>`;
   return html(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Artifact</title><style>html,body,iframe{width:100%;height:100%;margin:0;border:0;display:block;background:#181818}</style></head><body><iframe title="Artifact" sandbox="allow-scripts"></iframe><script>
 const frame=document.querySelector('iframe');frame.srcdoc=${scriptJson(frame)};
 window.__artifactNavigationHost={frame,basePath:${scriptJson(`/${slug}`)}};

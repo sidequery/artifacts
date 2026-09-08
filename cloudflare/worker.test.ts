@@ -724,3 +724,26 @@ export class ArtifactServer extends DurableObject { fetch() { return Response.js
   expect((await tool("artifact_schedule")).schedule).toMatchObject({ paused: true, next_run_at: null });
   expect((await client.callTool({ name: "artifact_schedule", arguments: { name, action: "resume" } })).isError).toBe(true);
 }, 120000);
+
+test("configured public origin changes generated links without changing local authentication", async () => {
+  const options = structuredClone(runtimeOptions) as any;
+  options.workers[0].config.env.ARTIFACTS_PUBLIC_ORIGIN = {type:"text", value:"https://artifacts.example"};
+  const proxied = new Miniflare(options);
+  const local = (await proxied.ready).origin;
+  try {
+    const response = await fetch(`${local}/api/tools`, {method:"POST", headers:{"content-type":"application/json", origin:local}, body:JSON.stringify({name:"script_write",arguments:{name:"origin-handler",slug:"origin-handler",contents:'export default {fetch(request){return new Response(request.url)}}'}})});
+    expect(response.status).toBe(200);
+    const result = await response.json() as {isError?:boolean};
+    expect(result.isError).not.toBe(true);
+    const listing = await fetch(`${local}/api/gallery`);
+    expect(listing.status).toBe(200);
+    const gallery = await listing.json() as {artifacts:{name:string;url?:string}[]};
+    expect(gallery.artifacts.find(item=>item.name==="origin-handler")?.url).toBe("https://artifacts.example/origin-handler");
+    const execution = await fetch(local+"/api/tools", {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({name:"script_run",arguments:{name:"origin-handler",request:{method:"GET",path:"/check"}}})});
+    const executed = await execution.json() as any;
+    expect(executed.isError).not.toBe(true);
+    expect(atob(executed.structuredContent.response.body)).toBe(local+"/check");
+    const denied = await fetch(`${local}/api/gallery`, {headers:{origin:"https://attacker.example"}});
+    expect(denied.status).toBe(403);
+  } finally { await proxied.dispose(); }
+}, 60000);

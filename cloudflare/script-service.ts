@@ -79,7 +79,7 @@ export class CloudScriptService {
         const request = new Request(new URL(new URL(incoming.url).pathname + new URL(incoming.url).search, hosted.origin), incoming);
         const response = await hosted.scriptBackends.getByName(JSON.stringify([this.artifacts.libraryKey, this.artifacts.workspace, this.artifacts.target("script", name).name])).request({ ...active, request, trigger: "manual" });
         const envelope = await scriptResponse(response, incoming.method);
-        return { ...text({ status: envelope.status, ...(link ? { url: `${hosted.origin}/${link.slug}` } : {}) }), structuredContent: { response: envelope } };
+        return { ...text({ status: envelope.status, ...(link ? { url: `${hosted.publicOrigin ?? hosted.origin}/${link.slug}` } : {}) }), structuredContent: { response: envelope } };
       }
       case "script_remix": case "script_write": case "script_edit": case "script_restore": {
         const target = this.artifacts.target("script", tool === "script_remix" ? args.new_name as string : name);
