@@ -71,7 +71,7 @@ Hosted gallery previews, authenticated private standalone canvases and hosted MC
 
 Inputs and outputs are JSON, limited to 256 KiB. Inputs are validated against `inputSchema`; `outputSchema` is optional. Calls time out after 30 seconds, and handlers receive an abort signal. Cancellation stops waiting in the browser; it does not roll back server work. Handlers should respect the signal and provide their own idempotency where needed. Server exceptions return generic errors without provider details or secrets.
 
-Plugins follow normal deployment upgrades. There is no per-canvas plugin version or retained historical runtime: saved canvases use the deployment's current plugin packages. Keep APIs compatible when upgrading. This foundation does not manage provider OAuth, install packages at runtime, add artifact permission manifests or implement routing.
+Server-side plugin functions follow deployment upgrades. Browser libraries and the Canvas SDK are included in the compiled revision saved on a successful edit; reopening that revision reuses its bundle across restarts and upgrades. A subsequent edit or explicit compilation of the working canvas uses the current build configuration. Keep server APIs compatible with saved browser bundles. This foundation does not manage provider OAuth, install packages at runtime, add artifact permission manifests or implement routing.
 
 ## Complete example
 

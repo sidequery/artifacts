@@ -270,9 +270,24 @@ Hosted MCP supports inline Canvas views, raw-source reads/writes/guarded edits,
 semantic diagnostics, history, archived views and restore. It rejects the local
 `herdr` pane target. `useCanvasState` interactions remain local to their view;
 requests made with `canvasFetch` can mutate durable server state. Raw source and
-initial-state snapshots are persisted; compiled JavaScript is regenerated.
+initial-state snapshots and compiled client/server bundles are persisted.
+Successful writes, edits and restores prepare the compiled artifact before
+activating the revision. Page loads, gallery previews, MCP opens and backend
+requests retrieve that artifact without typechecking or compiling. The revision
+keeps its bundled SDK/browser libraries across process restarts and deployment
+upgrades; later edits use the current compiler and dependency configuration.
 Sources are limited to 256 KiB, serialized state to 64 KiB, and MCP requests to
 1 MiB. Large or particularly complex TypeScript can still exceed runtime budgets.
+
+When upgrading a deployment that previously stored only source, explicitly
+backfill the required revisions through its authenticated MCP endpoint before
+reopening their links. List `canvas_history`, then call
+`canvas_compile({version_id: "..."})` for each revision to retain as a runnable
+view. `canvas_compile({name: "..."})` prepares a working draft. Already compiled
+revisions reuse their pinned output. This does not edit source, rename links,
+execute backends, or erase history. Invalid historical source remains readable
+but cannot produce a runnable artifact until corrected. A missing artifact gives
+an actionable compile diagnostic; a read never starts an implicit build.
 
 ## Native canvas servers and storage
 

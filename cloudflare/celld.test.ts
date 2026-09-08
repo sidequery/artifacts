@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { cp, mkdtemp, rm } from "node:fs/promises";
+import { chmod, cp, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -55,13 +55,13 @@ async function capture(stream: ReadableStream<Uint8Array> | number | undefined) 
   }
 }
 
-async function startCelld() {
+async function startCelld(compiler = esbuild) {
   if (!binary) throw new Error("celld was not found; install celld or set CELLD_BIN to its executable");
   processLogs = "";
   processHandle = Bun.spawn({
     cmd: [binary, "dev", project, "--host", "127.0.0.1", "--port", String(port), "--no-watch"],
     cwd: project,
-    env: { ...process.env, CELLD_ESBUILD: esbuild, CELLD_WORKER_LOADER: "LOADER" },
+    env: { ...process.env, CELLD_ESBUILD: compiler, CELLD_WORKER_LOADER: "LOADER" },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -130,7 +130,7 @@ beforeAll(async () => {
   port = reservePort();
   baseUrl = `http://127.0.0.1:${port}`;
   await startCelld();
-});
+}, 120_000);
 
 afterAll(async () => {
   if (!enabled) return;
@@ -176,15 +176,14 @@ celldTest("runs native canvas SQLite and KV across code update and celld restart
   });
 });
 
-celldTest("aborted previews do not block subsequent compilation", async () => {
+celldTest("aborted archived previews do not block reads or subsequent edits", async () => {
   const version = await withClient(client => write(client, serverV1));
   await withClient(client => write(client, serverV2));
   const url = `${baseUrl}/gallery/preview?version=${version}`;
-  // Exercise disconnects at different points in the real preview pipeline,
-  // including the asynchronous compiler used by subsequent requests.
+  // Previews retrieve saved bundles; disconnects must not interfere with
+  // archived reads or the request-owned compiler used by later edits.
   for (const delay of [10, 25, 50]) {
-    // Select the current server first so the archived preview must compile its
-    // different server source after compiling the client, even after disconnect.
+    // Alternate current backend execution and the archived client/server pair.
     await withClient(client => request(client, "GET"));
     const controller = new AbortController();
     const interrupted = fetch(url, { signal: controller.signal })
@@ -200,4 +199,46 @@ celldTest("aborted previews do not block subsequent compilation", async () => {
     expect(response.status).toBe(200);
     expect(await response.text()).toContain("serverVersionId");
   }
+  await withClient(client => write(client, serverV2.replace("code: 2", "code: 3")));
+  await withClient(async client => {
+    expect(await request(client, "GET")).toMatchObject({ code: 3 });
+  });
 }, 45_000);
+
+celldTest("saved canvas bundles serve after restart with native compilation disabled", async () => {
+  const marker = join(project, "compiler-disabled");
+  const wrapper = join(project, "guarded-esbuild");
+  const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+  await writeFile(wrapper, `#!/bin/sh\nif [ -e ${quote(marker)} ]; then\n  echo 'Unexpected compilation during artifact read' >&2\n  exit 1\nfi\nexec ${quote(esbuild)} "$@"\n`);
+  await chmod(wrapper, 0o700);
+  await stopCelld();
+  await startCelld(wrapper);
+  try {
+    const version = await withClient(async client => {
+      const version = await write(client, serverV1);
+      const link = await client.callTool({ name: "artifact_link", arguments: { kind: "canvas", name: "native-counter", slug: "compiled-counter", access: "private" } });
+      expect(link.isError).not.toBe(true);
+      return version;
+    });
+    for (const restart of [false, true]) {
+      if (restart) {
+        await stopCelld();
+        await rm(marker, { force: true });
+        // Startup packages the application once. Subsequent artifact reads
+        // must not invoke esbuild, even in the new process's first request.
+        await startCelld(wrapper);
+      }
+      await writeFile(marker, "disabled");
+      for (const path of [`/gallery/preview?version=${version}`, "/compiled-counter", "/compiled-counter/details"]) {
+        const response = await fetch(`${baseUrl}${path}`);
+        expect(response.status).toBe(200);
+        expect(await response.text()).toContain("serverVersionId");
+      }
+      await withClient(async client => {
+        const preview = await client.callTool({ name: "canvas_open", arguments: { version_id: version } });
+        expect(preview.isError).not.toBe(true);
+        expect(await request(client, "GET")).toMatchObject({ code: 1 });
+      });
+    }
+  } finally { await rm(marker, { force: true }); }
+}, 180_000);
