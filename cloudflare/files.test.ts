@@ -1,10 +1,10 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { Miniflare } from "miniflare";
 import { request as httpRequest } from "node:http";
-import type { CanvasFile, CanvasFileList } from "../src/sdk/files";
+import type { ArtifactFile, ArtifactFileList } from "../src/sdk/files";
 
 let runtime: Miniflare;
-type Grant = { file: CanvasFile; path: string; expires: string };
+type Grant = { file: ArtifactFile; path: string; expires: string };
 
 beforeAll(async () => {
   const build = await Bun.build({
@@ -15,16 +15,16 @@ beforeAll(async () => {
   runtime = new Miniflare({
     cf: false, port: 0, unsafeInspectDurableObjects: true,
     workers: [{ config: {
-      name: "canvas-files-test", type: "worker", compatibilityDate: "2026-09-06", compatibilityFlags: ["nodejs_compat"],
+      name: "artifact-files-test", type: "worker", compatibilityDate: "2026-09-06", compatibilityFlags: ["nodejs_compat"],
       manifest: {
         mainModule: "files-test-worker.js", modulesRoot: import.meta.dir,
         modules: { "files-test-worker.js": { type: "esm", contents: await build.outputs[0]!.text() } },
       },
       env: {
-        FILES: { type: "r2", name: "canvas-files-test" },
-        FILE_BACKENDS: { type: "durable-object", worker: "canvas-files-test", exportName: "CanvasFiles" },
+        FILES: { type: "r2", name: "artifact-files-test" },
+        FILE_BACKENDS: { type: "durable-object", worker: "artifact-files-test", exportName: "ArtifactFiles" },
       },
-      exports: { CanvasFiles: { type: "durable-object", storage: "sqlite" } },
+      exports: { ArtifactFiles: { type: "durable-object", storage: "sqlite" } },
     }, dev: {} }],
   });
   await runtime.ready;
@@ -54,7 +54,7 @@ function transfer(path: string, method = "GET", body?: Uint8Array) {
     ...(body ? { body } : {}),
   });
 }
-async function list(scope: string) { return call<CanvasFileList>(scope, { operation: "list" }); }
+async function list(scope: string) { return call<ArtifactFileList>(scope, { operation: "list" }); }
 
 test("native R2 roundtrips 2 MiB binary data, metadata, UTF-8 attachment names, and deletion", async () => {
   const scope = "roundtrip";
@@ -65,7 +65,7 @@ test("native R2 roundtrips 2 MiB binary data, metadata, UTF-8 attachment names, 
   expect(await list(scope)).toEqual({ files: [] });
   const written = await transfer(upload.path, "PUT", bytes);
   expect(written.status).toBe(201);
-  const { file } = await written.json() as { file: CanvasFile };
+  const { file } = await written.json() as { file: ArtifactFile };
   expect(file).toMatchObject({ id: upload.file.id, name: upload.file.name, size: bytes.length, type: "application/octet-stream" });
   expect(Number.isNaN(Date.parse(file.uploaded))).toBe(false);
   expect(await list(scope)).toEqual({ files: [file] });
@@ -84,7 +84,7 @@ test("native R2 roundtrips 2 MiB binary data, metadata, UTF-8 attachment names, 
   expect((await transfer(download.path)).status).toBe(404);
 });
 
-test("separate canvas scopes isolate identical filenames and cannot select each other's IDs or grants", async () => {
+test("separate artifact scopes isolate identical filenames and cannot select each other's IDs or grants", async () => {
   const first = await grant("scope-a", 1);
   const second = await grant("scope-b", 1);
   expect((await transfer(first.path, "PUT", new Uint8Array([1]))).status).toBe(201);
@@ -119,12 +119,12 @@ test("upload grants enforce method and size, preserve no pending objects, and co
 test("zero-byte uploads and issued grants survive Durable Object eviction", async () => {
   const scope = "eviction";
   const upload = await grant(scope, 0, "empty.txt", "");
-  await runtime.unsafeEvictDurableObject("canvas-files-test", "CanvasFiles", { name: scope });
+  await runtime.unsafeEvictDurableObject("artifact-files-test", "ArtifactFiles", { name: scope });
   // dispatchFetch drops content-length for an empty typed array; exercise real HTTP instead.
   const emptyPut = await fetch(new URL(upload.path, await runtime.ready), { method: "PUT", headers: { "content-length": "0" }, body: new Uint8Array() });
   expect({ status: emptyPut.status, body: await emptyPut.json() }).toMatchObject({ status: 201 });
   const download = await call<Grant>(scope, { operation: "download", id: upload.file.id });
-  await runtime.unsafeEvictDurableObject("canvas-files-test", "CanvasFiles", { name: scope });
+  await runtime.unsafeEvictDurableObject("artifact-files-test", "ArtifactFiles", { name: scope });
   expect((await list(scope)).files[0]).toMatchObject({ id: upload.file.id, size: 0, type: "application/octet-stream" });
   const response = await transfer(download.path);
   expect(response.status).toBe(200);
@@ -137,7 +137,7 @@ test("expired grants cannot transfer and cleanup removes them without deleting s
   await transfer(uploaded.path, "PUT", new Uint8Array([42]));
   const download = await call<Grant>(scope, { operation: "download", id: uploaded.file.id });
   const pending = await grant(scope, 1, "pending.bin");
-  const storage = await runtime.unsafeGetDurableObjectStorage("canvas-files-test", "CanvasFiles", { name: scope });
+  const storage = await runtime.unsafeGetDurableObjectStorage("artifact-files-test", "ArtifactFiles", { name: scope });
   await storage.exec("update file_grants set expires = 0");
   expect((await transfer(download.path)).status).toBe(404);
   expect((await transfer(pending.path, "PUT", new Uint8Array([1]))).status).toBe(404);
@@ -169,7 +169,7 @@ test("invalid names, IDs, request shapes, and sizes above 25 MiB are rejected be
 test.each([false, true])("deleting an in-flight upload prevents resurrection, including cleanup failure=%s", async cleanupFailure => {
   const scope = `delete-during-upload-${cleanupFailure}`;
   const upload = await grant(scope, 2);
-  const storage = await runtime.unsafeGetDurableObjectStorage("canvas-files-test", "CanvasFiles", { name: scope });
+  const storage = await runtime.unsafeGetDurableObjectStorage("artifact-files-test", "ArtifactFiles", { name: scope });
   let resolveResponse!: (value: { status: number; body: string }) => void;
   let rejectResponse!: (error: Error) => void;
   const response = new Promise<{ status: number; body: string }>((resolve, reject) => { resolveResponse = resolve; rejectResponse = reject; });
@@ -206,7 +206,7 @@ test.each([false, true])("deleting an in-flight upload prevents resurrection, in
       ? { status: 500, body: JSON.stringify({ error: "File transfer failed" }) }
       : { status: 409, body: JSON.stringify({ error: "Upload was canceled" }) });
     expect(await list(scope)).toEqual({ files: [] });
-    const bucket = await runtime.getR2Bucket("FILES", "canvas-files-test");
+    const bucket = await runtime.getR2Bucket("FILES", "artifact-files-test");
     const key = `canvases/${upload.path.split("/")[5]}/${upload.file.id}`;
     if (cleanupFailure) {
       expect(await bucket.head(key)).not.toBeNull();
@@ -230,7 +230,7 @@ test("R2 pagination returns every scoped file once and preserves metadata across
   const scope = "pagination";
   const upload = await grant(scope, 0);
   const prefix = `canvases/${upload.path.split("/")[5]}/`;
-  const bucket = await runtime.getR2Bucket("FILES", "canvas-files-test");
+  const bucket = await runtime.getR2Bucket("FILES", "artifact-files-test");
   const ids = Array.from({ length: 105 }, () => crypto.randomUUID()).sort();
   await Promise.all(ids.map(id => bucket.put(prefix + id, new Uint8Array([7]), {
     customMetadata: { name: `${id}.txt` }, httpMetadata: { contentType: "text/plain" },
@@ -239,7 +239,7 @@ test("R2 pagination returns every scoped file once and preserves metadata across
   const first = await list(scope);
   expect(first.files).toHaveLength(100);
   expect(first.cursor).toBeString();
-  const last = await call<CanvasFileList>(scope, { operation: "list", cursor: first.cursor });
+  const last = await call<ArtifactFileList>(scope, { operation: "list", cursor: first.cursor });
   expect(last.files).toHaveLength(5);
   expect(last.cursor).toBeUndefined();
   expect([...first.files, ...last.files].map(file => file.id)).toEqual(ids);
@@ -252,7 +252,7 @@ test("pending grants are capped at 128 and expired grants free capacity", async 
   const denied = await request(scope, { operation: "upload", name: "over-quota", size: 0, type: "" });
   expect(denied.status).toBe(400);
   expect(await denied.text()).toContain("Too many pending file transfers");
-  const storage = await runtime.unsafeGetDurableObjectStorage("canvas-files-test", "CanvasFiles", { name: scope });
+  const storage = await runtime.unsafeGetDurableObjectStorage("artifact-files-test", "ArtifactFiles", { name: scope });
   await storage.exec("update file_grants set expires = 0");
   expect((await grant(scope, 0)).file.size).toBe(0);
   expect(await storage.exec("select count(*) as count from file_grants")).toEqual([{ count: 1 }]);
@@ -264,12 +264,12 @@ test("cleanup reclaims stale uploaded objects while retaining live uploads and c
   const completed = await grant(scope, 1);
   expect((await transfer(completed.path, "PUT", new Uint8Array([1]))).status).toBe(201);
   const prefix = `canvases/${completed.path.split("/")[5]}/`;
-  const bucket = await runtime.getR2Bucket("FILES", "canvas-files-test");
+  const bucket = await runtime.getR2Bucket("FILES", "artifact-files-test");
   const staleId = crypto.randomUUID();
   const activeId = crypto.randomUUID();
   await bucket.put(prefix + staleId, "stale");
   await bucket.put(prefix + activeId, "active");
-  const storage = await runtime.unsafeGetDurableObjectStorage("canvas-files-test", "CanvasFiles", { name: scope });
+  const storage = await runtime.unsafeGetDurableObjectStorage("artifact-files-test", "ArtifactFiles", { name: scope });
   await storage.exec("insert into file_uploads values (?, 0, 0), (?, 0, ?)", staleId, activeId, Date.now() + 600_000);
   expect((await list(scope)).files.map(file => file.id)).toEqual([completed.file.id]);
   expect((await request(scope, { operation: "download", id: staleId })).status).toBe(400);
@@ -278,4 +278,21 @@ test("cleanup reclaims stale uploaded objects while retaining live uploads and c
   expect(await bucket.head(prefix + activeId)).not.toBeNull();
   expect(await storage.exec("select id, canceled from file_uploads")).toEqual([{ id: activeId, canceled: 0 }]);
   expect((await list(scope)).files.map(file => file.id)).toEqual([completed.file.id]);
+});
+
+
+test("previously stored uploads remain readable through old and new transfer routes", async () => {
+  const scope = "legacy-uploads";
+  const upload = await grant(scope, 0);
+  const id = crypto.randomUUID();
+  const bucket = await runtime.getR2Bucket("FILES", "artifact-files-test");
+  await bucket.put(`canvases/${upload.path.split("/")[5]}/${id}`, "existing bytes", { customMetadata: { name: "existing.txt" } });
+  expect((await list(scope)).files).toEqual([expect.objectContaining({ id, name: "existing.txt" })]);
+  const download = await call<Grant>(scope, { operation: "download", id });
+  expect(download.path).toStartWith("/api/canvas/files/transfer/");
+  for (const path of [download.path, download.path.replace("/canvas/", "/artifact/")]) {
+    const response = await transfer(path);
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("existing bytes");
+  }
 });

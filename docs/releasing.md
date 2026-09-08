@@ -1,6 +1,6 @@
-# Releasing @sidequery/canvas
+# Releasing @sidequery/artifacts
 
-Canvas requires Bun 1.4 or newer. The bun package includes the CLI, its source
+Artifacts requires Bun 1.4 or newer. The bun package includes the CLI, its source
 assets used by Bun at runtime, and the prebuilt Worker/assets used by the optional
 local celld server. Consumers do not need Wrangler or a source checkout.
 
@@ -8,7 +8,7 @@ local celld server. Consumers do not need Wrangler or a source checkout.
 
 The `Publish npm package` workflow (`.github/workflows/publish.yml`) uses npm
 trusted publishing (OIDC). It runs only when manually dispatched on `main` in
-`sidequery/canvas`; merging a PR does not publish. Enter the exact `package.json`
+`sidequery/artifacts`; merging a PR does not publish. Enter the exact `package.json`
 version when dispatching. The workflow checks types and source tests, builds one
 tarball, exercises that archive in an isolated consumer including native server
 persistence, then publishes the same archive from a separate GitHub-hosted job.
@@ -21,13 +21,19 @@ is stored in GitHub or 1Password for routine releases.
 The package must first exist on npm before its trusted publisher can be configured.
 For the first approved release, use the local validation and publication steps
 below with interactive npm authentication (or a temporary bootstrap credential).
-Then open `@sidequery/canvas` package settings on npm and add this trusted publisher:
+Then configure the trusted publisher with the npm CLI (11.17 or newer):
+
+```bash
+npm trust github @sidequery/artifacts --repo sidequery/artifacts --file publish.yml --allow-publish
+```
+
+The equivalent settings on the npm package page are:
 
 | Field | Value |
 | --- | --- |
 | Provider | GitHub Actions |
 | Organization | `sidequery` |
-| Repository | `canvas` |
+| Repository | `artifacts` |
 | Workflow filename | `publish.yml` |
 | Environment | Leave blank |
 | Allowed actions | Enable direct `npm publish` |
@@ -48,10 +54,10 @@ publication verifies the connection. Subsequent releases need a new package vers
 4. Run the native package check on a supported platform:
    `CELLD_PACKAGE_INTEGRATION=1 bun run test:package`.
 5. Run `bun pm pack --destination /tmp` to build a release tarball. Test that exact
-   archive with `CANVAS_PACKAGE_ARCHIVE=/tmp/sidequery-canvas-VERSION.tgz
+   archive with `ARTIFACTS_PACKAGE_ARCHIVE=/tmp/sidequery-artifacts-VERSION.tgz
    CELLD_PACKAGE_INTEGRATION=1 bun test scripts/package.integration.test.ts --timeout 360000`.
 6. After release approval and authentication for the `@sidequery` scope,
-   publish that tarball with `bun publish /tmp/sidequery-canvas-VERSION.tgz --access public`.
+   publish that tarball with `npm publish /tmp/sidequery-artifacts-VERSION.tgz --access public --ignore-scripts`.
 
 A package build is not a registry publication. CI validates packaging without
 publishing. Never enable a login daemon as an install or publish lifecycle script.

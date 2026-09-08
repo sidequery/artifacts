@@ -10,7 +10,7 @@ export type HostedArtifacts = {
   origin: string;
 };
 
-/** Shared artifact identity and URL metadata for canvas and script operations. */
+/** Shared artifact identity and URL metadata for artifact and script operations. */
 export class ArtifactService {
   constructor(readonly workspace: string, readonly libraryKey: string, readonly hosted?: HostedArtifacts) {}
 
@@ -19,8 +19,8 @@ export class ArtifactService {
     return this.hosted;
   }
 
-  target(kind: "canvas" | "script", name: string): ArtifactTarget {
-    return { libraryKey: this.libraryKey, workspace: this.workspace, kind, name: name.trim().replace(kind === "canvas" ? /\.canvas\.tsx$/ : /\.script\.ts$/, "") };
+  target(kind: "artifact" | "script", name: string): ArtifactTarget {
+    return { libraryKey: this.libraryKey, workspace: this.workspace, kind, name: name.trim().replace(kind === "artifact" ? /\.artifact\.tsx$/ : /\.script\.ts$/, "") };
   }
 
   async linkDetails(target: ArtifactTarget) {

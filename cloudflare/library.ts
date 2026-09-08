@@ -6,10 +6,10 @@ import type { HistoryEntry, ServeEvent, Version } from "../src/historyTypes";
 
 export const MAX_SOURCE_BYTES = 256 * 1024;
 export const MAX_STATE_BYTES = 64 * 1024;
-const CANVAS_SUFFIX = ".canvas.tsx";
+const ARTIFACTS_SUFFIX = ".artifact.tsx";
 const encoder = new TextEncoder();
 
-export type CanvasEdit = { old_text: string; new_text: string };
+export type ArtifactEdit = { old_text: string; new_text: string };
 
 type DraftRow = {
   workspace: string; name: string; source: string; server_source: string | null; source_hash: string;
@@ -17,7 +17,7 @@ type DraftRow = {
 };
 type DraftListRow = Pick<DraftRow, "workspace" | "name" | "source_hash" | "updated_at">;
 type StoredVersion = Version & { server_source: string | null; compiled_id: string | null; project: ArtifactProject };
-export type CompiledCanvas = { id: string; runtime: string; client_js: string; server_js: string | null };
+export type CompiledArtifact = { id: string; runtime: string; client_js: string; server_js: string | null };
 type CompiledRow = { id: string; runtime: string; source_hash: string; server_hash: string | null; project_hash: string };
 type VersionRow = Omit<StoredVersion, "project"> & { project: string };
 function projectFile(project: ArtifactProject, file: string): string {
@@ -48,22 +48,22 @@ function pagination(input: { offset?: number; limit?: number }, defaultLimit: nu
   return { offset, limit };
 }
 
-function canvasName(value: unknown): string {
-  if (typeof value !== "string") throw new Error("canvas name is required");
+function artifactName(value: unknown): string {
+  if (typeof value !== "string") throw new Error("artifact name is required");
   const trimmed = value.trim();
   if (trimmed === "" || trimmed === "." || trimmed === ".." || trimmed.includes("/") || trimmed.includes("\\") || trimmed.includes("\0")) {
-    throw new Error("canvas name must be a file name without paths");
+    throw new Error("artifact name must be a file name without paths");
   }
-  const name = trimmed.endsWith(CANVAS_SUFFIX) ? trimmed.slice(0, -CANVAS_SUFFIX.length) : trimmed;
-  if (!name || name === "." || name === "..") throw new Error("canvas name is required");
-  if (bytes(`${name}${CANVAS_SUFFIX}`) > 255) throw new Error("canvas name exceeds 255 bytes including suffix");
+  const name = trimmed.endsWith(ARTIFACTS_SUFFIX) ? trimmed.slice(0, -ARTIFACTS_SUFFIX.length) : trimmed;
+  if (!name || name === "." || name === "..") throw new Error("artifact name is required");
+  if (bytes(`${name}${ARTIFACTS_SUFFIX}`) > 255) throw new Error("artifact name exceeds 255 bytes including suffix");
   return name;
 }
 
 function sourceText(value: unknown, appendNewline = false): string {
   if (typeof value !== "string") throw new Error("source must be a string");
   const source = appendNewline && !value.endsWith("\n") ? `${value}\n` : value;
-  if (bytes(source) > MAX_SOURCE_BYTES) throw new Error("Canvas source exceeds 256 KiB");
+  if (bytes(source) > MAX_SOURCE_BYTES) throw new Error("Artifact source exceeds 256 KiB");
   return source;
 }
 
@@ -78,19 +78,19 @@ function jsonState(value: unknown): string {
   try { encoded = JSON.stringify(value); }
   catch { throw new Error("state must be JSON serializable"); }
   if (encoded === undefined) throw new Error("state must be JSON serializable");
-  if (bytes(encoded) > MAX_STATE_BYTES) throw new Error("Canvas state exceeds 64 KiB");
+  if (bytes(encoded) > MAX_STATE_BYTES) throw new Error("Artifact state exceeds 64 KiB");
   return encoded;
 }
 
 function now(): string { return new Date().toISOString(); }
 function uuid(): string { return crypto.randomUUID(); }
-function sourcePath(workspace: string, name: string): string { return `${workspace}/${name}${CANVAS_SUFFIX}`; }
-function serverSourcePath(workspace: string, name: string): string { return `${workspace}/${name}.canvas.server.ts`; }
+function sourcePath(workspace: string, name: string): string { return `${workspace}/${name}${ARTIFACTS_SUFFIX}`; }
+function serverSourcePath(workspace: string, name: string): string { return `${workspace}/${name}.artifact.server.ts`; }
 function rows<Row extends Record<string, SqlStorageValue>>(cursor: SqlStorageCursor<Row>): Row[] { return cursor.toArray(); }
 function first<Row extends Record<string, SqlStorageValue>>(cursor: SqlStorageCursor<Row>): Row | null { return rows(cursor)[0] ?? null; }
 export function sha256(value: string): string { return createHash("sha256").update(value).digest("hex"); }
 
-export class CanvasLibrary extends DurableObject<unknown> {
+export class ArtifactLibrary extends DurableObject<unknown> {
   private readonly state: DurableObjectState;
   private readonly sql: SqlStorage;
   private readonly projectStorage: ProjectStorage;
@@ -129,6 +129,7 @@ export class CanvasLibrary extends DurableObject<unknown> {
       if (!rows(this.sql.exec<{ name: string }>("pragma table_info(versions)")).some(column => column.name === "compiled_id")) {
         this.sql.exec("alter table versions add column compiled_id text");
       }
+      // Keep deployed SQL names so existing compiled revisions remain readable.
       this.sql.exec(`create table if not exists compiled_canvases (
         workspace text not null, name text not null, id text not null, runtime text not null,
         source_hash text not null, server_hash text, primary key(workspace,name,id)
@@ -152,12 +153,12 @@ export class CanvasLibrary extends DurableObject<unknown> {
     });
   }
 
-  saveCompiled(input: { workspace: string; name: string; source: string; server_source: string | null; runtime: string; client_js: string; server_js: string | null; project?: ArtifactProject }): CompiledCanvas {
-    const workspace = workspaceName(input.workspace), name = canvasName(input.name);
+  saveCompiled(input: { workspace: string; name: string; source: string; server_source: string | null; runtime: string; client_js: string; server_js: string | null; project?: ArtifactProject }): CompiledArtifact {
+    const workspace = workspaceName(input.workspace), name = artifactName(input.name);
     const source = sourceText(input.source), server = input.server_source === null ? null : sourceText(input.server_source);
     const runtime = runtimeName(input.runtime);
     if (typeof input.client_js !== "string" || !input.client_js ||
-      (server === null ? input.server_js !== null : typeof input.server_js !== "string" || !input.server_js)) throw new Error("invalid compiled canvas output");
+      (server === null ? input.server_js !== null : typeof input.server_js !== "string" || !input.server_js)) throw new Error("invalid compiled artifact output");
     const project = normalizeProject(input.project);
     const project_hash = projectHash(project);
     // Preserve IDs of bundles written before projects were supported.
@@ -165,7 +166,7 @@ export class CanvasLibrary extends DurableObject<unknown> {
     return this.state.storage.transactionSync(() => {
       const existing = this.compiled({ workspace, name, id });
       if (existing) {
-        if (existing.client_js !== input.client_js || existing.server_js !== input.server_js) throw new Error("compiled canvas output is immutable");
+        if (existing.client_js !== input.client_js || existing.server_js !== input.server_js) throw new Error("compiled artifact output is immutable");
         return existing;
       }
       this.sql.exec("insert into compiled_canvases(workspace,name,id,runtime,source_hash,server_hash,project_hash) values(?,?,?,?,?,?,?)",
@@ -186,8 +187,8 @@ export class CanvasLibrary extends DurableObject<unknown> {
     });
   }
 
-  compiled(input: { workspace: string; name: string; id?: string; source?: string; server_source?: string | null; runtime?: string; project?: ArtifactProject }): CompiledCanvas | null {
-    const workspace = workspaceName(input.workspace), name = canvasName(input.name);
+  compiled(input: { workspace: string; name: string; id?: string; source?: string; server_source?: string | null; runtime?: string; project?: ArtifactProject }): CompiledArtifact | null {
+    const workspace = workspaceName(input.workspace), name = artifactName(input.name);
     let metadata: CompiledRow | null;
     if (input.id !== undefined) {
       metadata = first(this.sql.exec<CompiledRow>("select * from compiled_canvases where workspace=? and name=? and id=?", workspace, name, input.id));
@@ -212,13 +213,13 @@ export class CanvasLibrary extends DurableObject<unknown> {
       ? rows(this.sql.exec<DraftListRow>("select workspace,name,source_hash,updated_at from drafts where workspace = ? order by workspace,name limit ? offset ?", workspace, limit, offset))
       : rows(this.sql.exec<DraftListRow>("select workspace,name,source_hash,updated_at from drafts order by workspace,name limit ? offset ?", limit, offset));
     return result.map(row => ({
-      id: row.name, name: `${row.name}${CANVAS_SUFFIX}`, path: sourcePath(row.workspace, row.name),
+      id: row.name, name: `${row.name}${ARTIFACTS_SUFFIX}`, path: sourcePath(row.workspace, row.name),
       workspace: row.workspace, source_hash: row.source_hash, updated_at: row.updated_at,
     }));
   }
 
   writeDraft(input: { workspace: string; name: string; source: string; server_source?: string | null; project?: ArtifactProject }) {
-    const workspace = workspaceName(input.workspace); const name = canvasName(input.name);
+    const workspace = workspaceName(input.workspace); const name = artifactName(input.name);
     const source = sourceText(input.source, true); const source_hash = sha256(source); const timestamp = now();
     const requestedServer = input.server_source === undefined ? undefined
       : input.server_source === null ? null : sourceText(input.server_source);
@@ -238,17 +239,17 @@ export class CanvasLibrary extends DurableObject<unknown> {
   }
 
   remix(input: { workspace: string; name?: string; version_id?: string; new_name: string; runtime: string }) {
-    const workspace = workspaceName(input.workspace), name = canvasName(input.new_name), runtime = runtimeName(input.runtime);
+    const workspace = workspaceName(input.workspace), name = artifactName(input.new_name), runtime = runtimeName(input.runtime);
     if (Boolean(input.name) === Boolean(input.version_id)) throw new Error("provide name or version_id, but not both");
     return this.state.storage.transactionSync(() => {
-      if (first(this.sql.exec("select name from drafts where workspace=? and name=? union all select name from artifacts where workspace=? and name=?", workspace, name, workspace, name))) throw new Error("Destination canvas already exists; choose a new name");
+      if (first(this.sql.exec("select name from drafts where workspace=? and name=? union all select name from artifacts where workspace=? and name=?", workspace, name, workspace, name))) throw new Error("Destination artifact already exists; choose a new name");
       let origin: StoredVersion;
       if (input.version_id) {
         const version = this.findVersion(workspace, input.version_id);
         if (!version) throw new Error("version not found in this workspace");
         origin = version;
       } else {
-        const draft = this.draft(workspace, canvasName(input.name));
+        const draft = this.draft(workspace, artifactName(input.name));
         origin = this.capture(workspace, draft.name, draft.source, draft.server_source, this.projectStorage.read(draft.project), runtime, "remix-source", null, false);
       }
       const timestamp = now();
@@ -261,11 +262,11 @@ export class CanvasLibrary extends DurableObject<unknown> {
   }
 
   readRange(input: { workspace: string; name: string; part?: "client" | "server"; file?: string; start_line?: number; end_line?: number }) {
-    const workspace = workspaceName(input.workspace); const name = canvasName(input.name);
+    const workspace = workspaceName(input.workspace); const name = artifactName(input.name);
     const row = this.draft(workspace, name);
     const part = input.part ?? "client";
     if (part !== "client" && part !== "server") throw new Error("part must be client or server");
-    if (input.file === undefined && part === "server" && row.server_source === null) throw new Error("canvas has no server source");
+    if (input.file === undefined && part === "server" && row.server_source === null) throw new Error("artifact has no server source");
     const project = this.projectStorage.read(row.project);
     const selected = input.file === undefined ? (part === "client" ? row.source : row.server_source!) : projectFile(project, input.file);
     const lines = selected === "" ? [""] : selected.match(/[^\n]*\n|[^\n]+$/g) ?? [];
@@ -274,7 +275,7 @@ export class CanvasLibrary extends DurableObject<unknown> {
     if (!Number.isSafeInteger(start) || start < 1 || !Number.isSafeInteger(end) || end < start) {
       throw new Error("line range must contain positive integers with end_line >= start_line");
     }
-    if (start > Math.max(1, lines.length)) throw new Error("start_line is past the end of the canvas");
+    if (start > Math.max(1, lines.length)) throw new Error("start_line is past the end of the artifact");
     const actualEnd = Math.min(end, lines.length);
     return {
       path: input.file ?? (part === "client" ? sourcePath(workspace, name) : serverSourcePath(workspace, name)),
@@ -285,8 +286,8 @@ export class CanvasLibrary extends DurableObject<unknown> {
     };
   }
 
-  editDraft(input: { workspace: string; name: string; part?: "client" | "server"; file?: string; edits: CanvasEdit[]; expected_hash?: string }) {
-    const workspace = workspaceName(input.workspace); const name = canvasName(input.name);
+  editDraft(input: { workspace: string; name: string; part?: "client" | "server"; file?: string; edits: ArtifactEdit[]; expected_hash?: string }) {
+    const workspace = workspaceName(input.workspace); const name = artifactName(input.name);
     const part = input.part ?? "client";
     if (part !== "client" && part !== "server") throw new Error("part must be client or server");
     if (!Array.isArray(input.edits) || input.edits.length === 0) throw new Error("edits must be a non-empty array");
@@ -295,12 +296,12 @@ export class CanvasLibrary extends DurableObject<unknown> {
     }
     return this.state.storage.transactionSync(() => {
       const original = this.draft(workspace, name);
-      if (input.file === undefined && part === "server" && original.server_source === null) throw new Error("canvas has no server source");
+      if (input.file === undefined && part === "server" && original.server_source === null) throw new Error("artifact has no server source");
       let project = this.projectStorage.read(original.project);
       const originalSelected = input.file === undefined ? (part === "client" ? original.source : original.server_source!) : projectFile(project, input.file);
       const originalHash = input.file === undefined && part === "client" ? original.source_hash : sha256(originalSelected);
       if (input.expected_hash !== undefined && originalHash !== input.expected_hash) {
-        throw new Error("canvas changed since read; read it again before editing");
+        throw new Error("artifact changed since read; read it again before editing");
       }
       let selected = originalSelected;
       for (const [index, edit] of input.edits.entries()) {
@@ -328,12 +329,12 @@ export class CanvasLibrary extends DurableObject<unknown> {
   }
 
   getState(input: { workspace: string; name: string }) {
-    const workspace = workspaceName(input.workspace); const name = canvasName(input.name);
+    const workspace = workspaceName(input.workspace); const name = artifactName(input.name);
     return JSON.parse(this.draft(workspace, name).state) as Record<string, unknown>;
   }
 
   setState(input: { workspace: string; name: string; key: string; value: unknown }) {
-    const workspace = workspaceName(input.workspace); const name = canvasName(input.name);
+    const workspace = workspaceName(input.workspace); const name = artifactName(input.name);
     if (typeof input.key !== "string" || !input.key || ["__proto__", "constructor", "prototype"].includes(input.key)) throw new Error("invalid state key");
     return this.state.storage.transactionSync(() => {
       const row = this.draft(workspace, name);
@@ -345,14 +346,14 @@ export class CanvasLibrary extends DurableObject<unknown> {
   }
 
   attachCompiled(input: { workspace: string; name: string; version_id: string; compiled_id: string }) {
-    const workspace = workspaceName(input.workspace), name = canvasName(input.name);
+    const workspace = workspaceName(input.workspace), name = artifactName(input.name);
     return this.state.storage.transactionSync(() => {
       const version = this.findVersion(workspace, input.version_id);
       const compiled = first(this.sql.exec<CompiledRow>("select * from compiled_canvases where workspace=? and name=? and id=?", workspace, name, input.compiled_id));
       if (!version || version.name !== name || !compiled || compiled.project_hash !== projectHash(version.project) || compiled.source_hash !== sha256(version.source) || compiled.server_hash !== (version.server_source === null ? null : sha256(version.server_source))) {
-        throw new Error("compiled canvas does not match version in this workspace");
+        throw new Error("compiled artifact does not match version in this workspace");
       }
-      if (version.compiled_id !== null && version.compiled_id !== input.compiled_id) throw new Error("version compiled canvas is immutable");
+      if (version.compiled_id !== null && version.compiled_id !== input.compiled_id) throw new Error("version compiled artifact is immutable");
       if (version.compiled_id === null) this.sql.exec("update versions set compiled_id=? where id=?", input.compiled_id, version.id);
       return { ok: true };
     });
@@ -363,7 +364,7 @@ export class CanvasLibrary extends DurableObject<unknown> {
     initial_state: Record<string, unknown>; mode: "live" | "replay" | "preview";
     pane_id?: string; session_id?: string; version_id?: string; compiled_id?: string;
   }) {
-    const workspace = workspaceName(input.workspace); const name = canvasName(input.name);
+    const workspace = workspaceName(input.workspace); const name = artifactName(input.name);
     const source = sourceText(input.source); const runtime = runtimeName(input.runtime);
     const server_source = input.server_source == null ? null : sourceText(input.server_source);
     const project = input.project === undefined ? emptyProject() : normalizeProject(input.project);
@@ -377,7 +378,7 @@ export class CanvasLibrary extends DurableObject<unknown> {
       if (input.compiled_id !== undefined) {
         const compiled = first(this.sql.exec<CompiledRow>("select * from compiled_canvases where workspace=? and name=? and id=?", workspace, name, input.compiled_id));
         if (!compiled || compiled.project_hash !== projectHash(project) || compiled.source_hash !== sha256(source) || compiled.server_hash !== (server_source === null ? null : sha256(server_source)) || compiled.runtime !== runtime) {
-          throw new Error("compiled canvas does not match serve snapshot");
+          throw new Error("compiled artifact does not match serve snapshot");
         }
       }
       if (input.version_id !== undefined) {
@@ -386,7 +387,7 @@ export class CanvasLibrary extends DurableObject<unknown> {
           throw new Error("archived serve snapshot does not match version in this workspace");
         }
         if (input.compiled_id !== undefined) {
-          if (archived.compiled_id !== null && archived.compiled_id !== input.compiled_id) throw new Error("version compiled canvas is immutable");
+          if (archived.compiled_id !== null && archived.compiled_id !== input.compiled_id) throw new Error("version compiled artifact is immutable");
           if (archived.compiled_id === null) this.sql.exec("update versions set compiled_id=? where id=?", input.compiled_id, archived.id);
           archived.compiled_id = input.compiled_id;
         }
@@ -405,7 +406,7 @@ export class CanvasLibrary extends DurableObject<unknown> {
 
   history(input: { workspace?: string; name?: string; offset?: number; limit?: number } = {}): HistoryEntry[] {
     const workspace = optionalWorkspace(input.workspace);
-    const name = input.name === undefined ? undefined : canvasName(input.name);
+    const name = input.name === undefined ? undefined : artifactName(input.name);
     const { offset, limit } = pagination(input, 100, 100);
     return rows(this.sql.exec<HistoryEntry>(`select a.id as artifact_id, a.name, a.source_path, a.workspace,
       v.id as version_id, v.revision, v.created_at, v.source_hash, v.runtime, v.reason, v.restored_from,
@@ -457,7 +458,7 @@ export class CanvasLibrary extends DurableObject<unknown> {
     if (Boolean(input.name) === Boolean(input.version_id)) throw new Error("provide name or version_id, but not both");
     if (input.name) {
       if (input.event_id !== undefined) throw new Error("event_id requires version_id");
-      const name = canvasName(input.name); const draft = this.draft(workspace, name);
+      const name = artifactName(input.name); const draft = this.draft(workspace, name);
       return { workspace, name, path: sourcePath(workspace, name), source: draft.source, server_source: draft.server_source, project: this.projectStorage.read(draft.project),
         state: JSON.parse(draft.state) as Record<string, unknown>, version_id: null, event_id: null, compiled_id: null };
     }
@@ -473,7 +474,7 @@ export class CanvasLibrary extends DurableObject<unknown> {
 
   private draft(workspace: string, name: string): DraftRow {
     const result = first(this.sql.exec<DraftRow>("select * from drafts where workspace = ? and name = ?", workspace, name));
-    if (!result) throw new Error("canvas not found");
+    if (!result) throw new Error("artifact not found");
     return result;
   }
 

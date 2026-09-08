@@ -19,8 +19,8 @@ let browser: Browser;
 let origin: string;
 const clients: Client[] = [];
 const authSecret = "auth-flow-test-only-secret-with-at-least-32-characters";
-const counterClient = await readFile(new URL("../examples/counter.canvas.tsx", import.meta.url), "utf8");
-const counterServer = await readFile(new URL("../examples/counter.canvas.server.ts", import.meta.url), "utf8");
+const counterClient = await readFile(new URL("../examples/counter.artifact.tsx", import.meta.url), "utf8");
+const counterServer = await readFile(new URL("../examples/counter.artifact.server.ts", import.meta.url), "utf8");
 
 beforeAll(async () => {
   fixture = await startOidcFixture();
@@ -39,8 +39,8 @@ beforeAll(async () => {
     AUTH_MODE: "better-auth", ENVIRONMENT: "local", BETTER_AUTH_URL: origin,
     BETTER_AUTH_SECRET: authSecret,
     BETTER_AUTH_ALLOWED_DOMAINS: "example.test",
-    BETTER_AUTH_TRUSTED_IP_HEADER: "x-canvas-test-ip",
-    BETTER_AUTH_OIDC_PROVIDERS: JSON.stringify([{ providerId: "company", discoveryUrl: `${fixture.origin}/.well-known/openid-configuration`, clientId: "canvas-test", clientSecret: "fixture-only-not-real-secret", scopes: ["openid", "profile", "email"], pkce: true }]),
+    BETTER_AUTH_TRUSTED_IP_HEADER: "x-artifact-test-ip",
+    BETTER_AUTH_OIDC_PROVIDERS: JSON.stringify([{ providerId: "company", discoveryUrl: `${fixture.origin}/.well-known/openid-configuration`, clientId: "artifact-test", clientSecret: "fixture-only-not-real-secret", scopes: ["openid", "profile", "email"], pkce: true }]),
   };
   if (process.env.CELLD_AUTH_INTEGRATION === "1") {
     celldRuntime = await startCelldAuthRuntime({ port, bindings: configuration });
@@ -49,22 +49,22 @@ beforeAll(async () => {
   }
   const bindings = Object.fromEntries(Object.entries(configuration).map(([key, value]) => [key, { type: "text" as const, value }]));
   runtime = new Miniflare({ cf: false, host: "127.0.0.1", port, workers: [{ config: {
-    name: "canvas-auth-test", type: "worker", compatibilityDate: "2026-09-06", compatibilityFlags: ["nodejs_compat"],
+    name: "artifacts-auth-test", type: "worker", compatibilityDate: "2026-09-06", compatibilityFlags: ["nodejs_compat"],
     manifest: { mainModule: "worker.js", modulesRoot, modules },
     env: { ...bindings,
-      AUTH_DB: { type: "d1", id: "canvas-auth-test", name: "canvas-auth" },
-      LIBRARIES: { type: "durable-object", worker: "canvas-auth-test", exportName: "CanvasLibrary" },
-      BACKENDS: { type: "durable-object", worker: "canvas-auth-test", exportName: "CanvasBackend" },
-      LINKS: { type: "durable-object", worker: "canvas-auth-test", exportName: "ArtifactLinks" },
-      SCRIPTS: { type: "durable-object", worker: "canvas-auth-test", exportName: "ScriptLibrary" },
-      SCRIPT_BACKENDS: { type: "durable-object", worker: "canvas-auth-test", exportName: "ScriptBackend" },
+      AUTH_DB: { type: "d1", id: "artifacts-auth-test", name: "artifacts-auth" },
+      LIBRARIES: { type: "durable-object", worker: "artifacts-auth-test", exportName: "ArtifactLibrary" },
+      BACKENDS: { type: "durable-object", worker: "artifacts-auth-test", exportName: "ArtifactBackend" },
+      LINKS: { type: "durable-object", worker: "artifacts-auth-test", exportName: "ArtifactLinks" },
+      SCRIPTS: { type: "durable-object", worker: "artifacts-auth-test", exportName: "ScriptLibrary" },
+      SCRIPT_BACKENDS: { type: "durable-object", worker: "artifacts-auth-test", exportName: "ScriptBackend" },
       LOADER: { type: "worker-loader" }, ASSETS: { type: "assets" },
     },
-    exports: { ArtifactLinks: { type: "durable-object", storage: "sqlite" }, ScriptLibrary: { type: "durable-object", storage: "sqlite" }, ScriptBackend: { type: "durable-object", storage: "sqlite" }, CanvasLibrary: { type: "durable-object", storage: "sqlite" }, CanvasBackend: { type: "durable-object", storage: "sqlite" } },
+    exports: { ArtifactLinks: { type: "durable-object", storage: "sqlite" }, ScriptLibrary: { type: "durable-object", storage: "sqlite" }, ScriptBackend: { type: "durable-object", storage: "sqlite" }, ArtifactLibrary: { type: "durable-object", storage: "sqlite" }, ArtifactBackend: { type: "durable-object", storage: "sqlite" } },
     assets: { directory: join(import.meta.dir, "../dist/cloudflare/assets"), hasUserWorker: true, runWorkerFirst: true, htmlHandling: "none" },
   }, dev: {} }] });
   await runtime.ready;
-  const db = await runtime.getD1Database("AUTH_DB", "canvas-auth-test");
+  const db = await runtime.getD1Database("AUTH_DB", "artifacts-auth-test");
   for (const migration of (await readdir(join(import.meta.dir, "migrations"))).filter(name => name.endsWith(".sql")).sort()) {
     const sql = await readFile(join(import.meta.dir, "migrations", migration), "utf8");
     await db.exec(sql.replace(/^--.*$/gm, "").trim());
@@ -95,8 +95,8 @@ class TestOAuthProvider implements OAuthClientProvider {
   savedTokens?: OAuthTokens;
   verifier = "";
   authorizationUrl?: URL;
-  constructor(readonly redirectUrl: string, readonly scope = "canvas offline_access") {}
-  get clientMetadata() { return { redirect_uris: [this.redirectUrl], client_name: "Canvas integration client", token_endpoint_auth_method: "none", grant_types: ["authorization_code", "refresh_token"], response_types: ["code"], scope: this.scope }; }
+  constructor(readonly redirectUrl: string, readonly scope = "artifacts offline_access") {}
+  get clientMetadata() { return { redirect_uris: [this.redirectUrl], client_name: "Artifact integration client", token_endpoint_auth_method: "none", grant_types: ["authorization_code", "refresh_token"], response_types: ["code"], scope: this.scope }; }
   state() { return "test-oauth-state"; }
   clientInformation() { return this.information; }
   saveClientInformation(information: OAuthClientInformationMixed) { this.information = information; }
@@ -178,17 +178,17 @@ test("real OIDC and MCP OAuth share per-user gallery, source and database bounda
     const bobPage = await bobContext.newPage();
     const previewRequests: string[] = [];
     bobPage.on("request", request => {
-      if (["/gallery/preview", "/api/canvas/request"].includes(new URL(request.url()).pathname)) {
+      if (["/gallery/preview", "/api/artifact/request"].includes(new URL(request.url()).pathname)) {
         previewRequests.push(`Started ${request.url()}`);
       }
     });
     bobPage.on("requestfailed", request => {
-      if (["/gallery/preview", "/api/canvas/request"].includes(new URL(request.url()).pathname)) {
+      if (["/gallery/preview", "/api/artifact/request"].includes(new URL(request.url()).pathname)) {
         previewRequests.push(`${request.url()}: ${request.failure()?.errorText}`);
       }
     });
     bobPage.on("response", response => {
-      if (["/gallery/preview", "/api/canvas/request"].includes(new URL(response.url()).pathname)) {
+      if (["/gallery/preview", "/api/artifact/request"].includes(new URL(response.url()).pathname)) {
         previewRequests.push(`${response.url()}: ${response.status()}`);
       }
     });
@@ -205,7 +205,7 @@ test("real OIDC and MCP OAuth share per-user gallery, source and database bounda
     const publicKeys = await (await fetch(`${origin}/api/auth/jwks`)).json();
     await jwtVerify(aliceProvider.savedTokens!.access_token, createLocalJWKSet(publicKeys as any), { issuer: `${origin}/api/auth`, audience: `${origin}/mcp` });
     if (runtime) {
-      const db = await runtime.getD1Database("AUTH_DB", "canvas-auth-test");
+      const db = await runtime.getD1Database("AUTH_DB", "artifacts-auth-test");
       const account = await db.prepare('select "accessToken" from "account" where "userId" = ?').bind(aliceSession.user.id).first<{ accessToken: string }>();
       const plaintext = await symmetricDecrypt({ key: authSecret, data: account!.accessToken });
       expect(account!.accessToken).not.toBe(plaintext);
@@ -216,12 +216,12 @@ test("real OIDC and MCP OAuth share per-user gallery, source and database bounda
     const teamAlice = await connect(aliceProvider, "team"), teamBob = await connect(bobProvider, "team");
     let privateVersion = "";
     for (const client of [alice, bob, teamAlice]) {
-      const result = await client.callTool({ name: "canvas_write", arguments: { name: "counter", contents: counterClient, server: counterServer } });
+      const result = await client.callTool({ name: "artifact_write", arguments: { name: "counter", contents: counterClient, server: counterServer } });
       expect(result.isError).not.toBe(true);
-      if (client === alice) privateVersion = (result._meta as any).canvas.versionId;
+      if (client === alice) privateVersion = (result._meta as any).artifact.versionId;
     }
     const counter = async (client: Client, method = "GET") => {
-      const result = await client.callTool({ name: "canvas_request", arguments: { name: "counter", request: { path: "/counter", method } } });
+      const result = await client.callTool({ name: "artifact_request", arguments: { name: "counter", request: { path: "/counter", method } } });
       expect(result.isError).not.toBe(true);
       return JSON.parse(atob((result.structuredContent as any).response.body)).value;
     };
@@ -231,8 +231,8 @@ test("real OIDC and MCP OAuth share per-user gallery, source and database bounda
     expect(await counter(teamBob, "POST")).toBe(2);
     expect(await counter(alice)).toBe(1);
     expect(await counter(bob)).toBe(0);
-    expect((await bob.callTool({ name: "canvas_version", arguments: { version_id: privateVersion } })).isError).toBe(true);
-    expect((await bob.callTool({ name: "canvas_restore", arguments: { version_id: privateVersion } })).isError).toBe(true);
+    expect((await bob.callTool({ name: "artifact_version", arguments: { version_id: privateVersion } })).isError).toBe(true);
+    expect((await bob.callTool({ name: "artifact_restore", arguments: { version_id: privateVersion } })).isError).toBe(true);
     for (const path of [`/api/source?version=${privateVersion}`, `/gallery/preview?version=${privateVersion}`, `/api/source?library=team&version=${privateVersion}`]) {
       expect((await bobContext.request.get(`${origin}${path}&workspace=test&subject=${aliceSession.user.id}`)).status()).toBe(404);
     }
@@ -257,7 +257,7 @@ test("real OIDC and MCP OAuth share per-user gallery, source and database bounda
       const body = await frame.locator("body").innerText({ timeout: 500 }).catch(() => "Preview body unavailable");
       throw new Error(`${String(error)}\nGallery: ${bobPage.url()}\nPreview: ${await bobPage.locator("iframe").getAttribute("src")}\n${body}\n${previewRequests.join("\n")}\n${celldRuntime?.logs().split("\n").filter(line => /ERROR|WARN| at |    at /.test(line)).join("\n") ?? ""}`);
     }
-    expect((await aliceContext.request.post(`${origin}/api/canvas/request`, { headers: { Origin: "https://evil.example" }, data: {} })).status()).toBe(403);
+    expect((await aliceContext.request.post(`${origin}/api/artifact/request`, { headers: { Origin: "https://evil.example" }, data: {} })).status()).toBe(403);
     const token = aliceProvider.savedTokens!.access_token;
     expect((await fetch(`${origin}/mcp`, { headers: { Authorization: `Bearer ${token.slice(0, -10)}tampered00` } })).status).toBe(401);
     const cookie = (await aliceContext.cookies()).find(cookie => cookie.name.endsWith("session_token"))!;
@@ -270,9 +270,9 @@ test("real OIDC and MCP OAuth share per-user gallery, source and database bounda
     expect(insufficient.headers.get("www-authenticate")).toContain('error="insufficient_scope"');
     expect(await auth(aliceProvider, { serverUrl: `${origin}/mcp` })).toBe("AUTHORIZED");
     expect(decodeJwt(aliceProvider.savedTokens!.access_token).sub).toBe(aliceSession.user.id);
-    expect(payload(await alice.callTool({ name: "canvas_list", arguments: {} })).canvases).toHaveLength(1);
+    expect(payload(await alice.callTool({ name: "artifact_list", arguments: {} })).artifacts).toHaveLength(1);
     await alicePage.getByRole("button", { name: "Sign out" }).click();
-    await alicePage.getByRole("heading", { name: "Sign in to Canvas" }).waitFor();
+    await alicePage.getByRole("heading", { name: "Sign in to Artifact" }).waitFor();
     expect((await aliceContext.request.get(`${origin}/api/gallery`)).status()).toBe(401);
     expect((await fetch(`${origin}/mcp`, { headers: { Authorization: `Bearer ${token}` } })).status).toBe(401);
     expect((await fetch(`${origin}/mcp`, { headers: { Authorization: `Bearer ${aliceProvider.savedTokens!.access_token}` } })).status).toBe(401);
@@ -298,7 +298,7 @@ test("standard MCP registration infers native redirects without relaxing Better 
     { redirects: ["http://localhost:4787/callback"], expected: "native" },
     { redirects: ["http://127.0.0.1:4787/callback"], expected: "native" },
     { redirects: ["http://[::1]:4787/callback"], expected: "native" },
-    { redirects: ["com.example.canvas:/callback"], expected: "native" },
+    { redirects: ["com.example.artifacts:/callback"], expected: "native" },
     { redirects: ["https://client.example/callback"], expected: "web" },
     { redirects: ["https://client.example/callback"], type: "native", expected: "native" },
     { redirects: ["https://client.example/callback", "http://127.0.0.1:4787/callback"], expected: "native" },
@@ -313,9 +313,9 @@ test("standard MCP registration infers native redirects without relaxing Better 
   ];
   for (const [index, item] of cases.entries()) {
     const response = await fetch(`${origin}/api/auth/oauth2/register`, {
-      method: "POST", headers: { "Content-Type": "application/json", "x-canvas-test-ip": `192.0.2.${index + 1}` },
+      method: "POST", headers: { "Content-Type": "application/json", "x-artifact-test-ip": `192.0.2.${index + 1}` },
       body: JSON.stringify({ client_name: "Registration contract", redirect_uris: item.redirects,
-        token_endpoint_auth_method: "none", grant_types: ["authorization_code"], response_types: ["code"], scope: "canvas",
+        token_endpoint_auth_method: "none", grant_types: ["authorization_code"], response_types: ["code"], scope: "artifacts",
         ...(item.type ? { application_type: item.type } : {}),
       }),
     });

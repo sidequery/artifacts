@@ -4,14 +4,14 @@ import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import { flagBoolean, flagString, parseArgs, type ParsedArgs } from "./args";
-import { canvasesDirFrom } from "./canvasFile";
+import { artifactsDirFrom } from "./artifactFile";
 import { clearServerReady, ServerDaemonManager, writeServerReady } from "./local/server-daemon";
 import { runCelldServer } from "./local/server";
 import { writeDaemonState, daemonStatePath } from "./local/preview-daemon";
 import { createHerdrClient, type PanePlacement } from "./herdr";
 import { runMcpServer } from "./mcp/stdio";
-import { createCanvasServer } from "./serve";
-import { CanvasService } from "./service";
+import { createArtifactServer } from "./serve";
+import { ArtifactService } from "./service";
 import { historyPath } from "./history";
 import { PLUGIN_ROOT } from "./paths";
 
@@ -34,7 +34,7 @@ export async function runServerCommand(args: ParsedArgs, dependencies: {
 
   if (action) {
     if (flagString(args.flags, "state-dir") || flagString(args.flags, "managed-ready")) {
-      throw new Error("--state-dir is available only for foreground `canvas server`");
+      throw new Error("--state-dir is available only for foreground `artifacts server`");
     }
     const manager = dependencies.manager ?? new ServerDaemonManager();
     if (action === "start") {
@@ -53,7 +53,7 @@ export async function runServerCommand(args: ParsedArgs, dependencies: {
     return true;
   }
 
-  if (flagBoolean(args.flags, "at-login")) throw new Error("use `canvas server start --at-login` to enable start at login");
+  if (flagBoolean(args.flags, "at-login")) throw new Error("use `artifacts server start --at-login` to enable start at login");
   const port = numberFlag("port");
   const stateDir = flagString(args.flags, "state-dir");
   const readyPath = flagString(args.flags, "managed-ready");
@@ -114,12 +114,12 @@ async function main(): Promise<void> {
   if (await runServerCommand(args)) return;
 
   const cwd = process.cwd();
-  const canvasesDir = resolve(flagString(args.flags, "dir") ?? canvasesDirFrom(cwd));
+  const artifactsDir = resolve(flagString(args.flags, "dir") ?? artifactsDirFrom(cwd));
   const historyDb = flagString(args.flags, "history-db");
-  const env = historyDb ? { ...process.env, HERDR_CANVAS_HISTORY_DB: resolve(historyDb) } : process.env;
-  const service = new CanvasService({
+  const env = historyDb ? { ...process.env, ARTIFACTS_HISTORY_DB: resolve(historyDb) } : process.env;
+  const service = new ArtifactService({
     cwd,
-    canvasesDir,
+    artifactsDir,
     herdr: createHerdrClient(),
     inProcessServer: flagBoolean(args.flags, "in-process"),
     env,
@@ -156,13 +156,13 @@ async function main(): Promise<void> {
   }
 
   if (args.command === "list") {
-    printJson({ ok: true, canvases: service.list(), dir: canvasesDir });
+    printJson({ ok: true, artifacts: service.list(), dir: artifactsDir });
     return;
   }
 
   if (args.command === "write") {
     const name = args.positionals[0];
-    requireArg(name, "missing canvas name");
+    requireArg(name, "missing artifact name");
     const contents = await readContents(args);
     const projectFile = flagString(args.flags, "project");
     printJson(projectFile ? await service.writeProject(name, contents, JSON.parse(await Bun.file(projectFile).text())) : service.write(name, contents));
@@ -171,7 +171,7 @@ async function main(): Promise<void> {
 
   if (args.command === "read") {
     const name = args.positionals[0];
-    requireArg(name, "missing canvas name");
+    requireArg(name, "missing artifact name");
     const lineFlag = (key: string) => args.flags[key] === undefined ? undefined : Number(args.flags[key] === true ? NaN : args.flags[key]);
     printJson(service.readRange(name, { file: flagString(args.flags, "source-file"), start_line: lineFlag("start-line"), end_line: lineFlag("end-line") }));
     return;
@@ -179,10 +179,10 @@ async function main(): Promise<void> {
 
   if (args.command === "edit") {
     const name = args.positionals[0];
-    requireArg(name, "missing canvas name");
+    requireArg(name, "missing artifact name");
     const payload: unknown = JSON.parse(await readContents(args));
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("edit input must be an object with edits and optional expected_hash");
-    const input = payload as { edits: Parameters<CanvasService["edit"]>[1]; expected_hash?: string };
+    const input = payload as { edits: Parameters<ArtifactService["edit"]>[1]; expected_hash?: string };
     const result = service.edit(name, input.edits, input.expected_hash, flagString(args.flags, "source-file"));
     printJson(result);
     if (!result.ok) process.exitCode = 1;
@@ -191,14 +191,14 @@ async function main(): Promise<void> {
 
   if (args.command === "typecheck") {
     const name = args.positionals[0];
-    requireArg(name, "missing canvas name");
+    requireArg(name, "missing artifact name");
     printJson(service.typecheck(name));
     return;
   }
 
   if (args.command === "compile") {
     const name = args.positionals[0];
-    requireArg(name, "missing canvas name");
+    requireArg(name, "missing artifact name");
     const result = await service.compile(name);
     printJson({
       ok: result.ok,
@@ -211,9 +211,9 @@ async function main(): Promise<void> {
   }
 
   if (args.command === "open") {
-    const name = args.positionals[0] ?? (args.flags.version === undefined ? process.env.HERDR_CANVAS_NAME : undefined);
+    const name = args.positionals[0] ?? (args.flags.version === undefined ? process.env.ARTIFACTS_NAME : undefined);
     const versionId = flagString(args.flags, "version");
-    if (Boolean(name) === Boolean(versionId)) throw new Error("provide a canvas name or --version ID, but not both");
+    if (Boolean(name) === Boolean(versionId)) throw new Error("provide an artifact name or --version ID, but not both");
     const result = await service.open(name ?? "", {
       versionId,
       eventId: flagString(args.flags, "event"),
@@ -231,15 +231,15 @@ async function main(): Promise<void> {
   if (args.command === "serve" || args.command === "web") {
     const gallery = args.command === "web";
     const port = Number(flagString(args.flags, "port") ?? (gallery ? "4784" : "0"));
-    const server = await createCanvasServer({ canvasesDir, port, env, gallery });
-    if (!gallery) writeDaemonState(daemonStatePath(canvasesDir, env), {
+    const server = await createArtifactServer({ artifactsDir, port, env, gallery });
+    if (!gallery) writeDaemonState(daemonStatePath(artifactsDir, env), {
       pid: process.pid,
       port: server.port,
       url: server.url,
-      canvasesDir,
+      artifactsDir,
       historyDb: historyPath(env),
     });
-    printJson({ ok: true, url: server.url, port: server.port, dir: canvasesDir });
+    printJson({ ok: true, url: server.url, port: server.port, dir: artifactsDir });
     if (gallery) {
       const stop = () => { server.stop(); process.exit(0); };
       process.once("SIGINT", stop);
@@ -279,29 +279,29 @@ function requireArg(value: string | undefined, message: string): asserts value i
 }
 
 function printHelp(): void {
-  console.log(`canvas
+  console.log(`artifacts
 
 Usage:
-  canvas --version
-  canvas list [--dir PATH]
-  canvas write NAME [--file PATH | --stdin] [--project PROJECT_JSON]
-  canvas read NAME [--source-file PATH] [--start-line N] [--end-line N]
-  canvas edit NAME [--source-file PATH] [--file PATH | --stdin]
-  canvas typecheck NAME
-  canvas compile NAME
-  canvas open NAME [--placement split|tab|zoomed|overlay] [--no-open]
-  canvas serve [--dir PATH] [--port N]
-  canvas web [--port 4784] [--dir PATH]
-  canvas mcp
-  canvas history [NAME]
-  canvas show VERSION_ID [--source]
-  canvas open --version VERSION_ID [--event EVENT_ID] [--placement split|tab|zoomed|overlay]
-  canvas restore VERSION_ID
-  canvas remix SOURCE NEW_NAME
-  canvas remix NEW_NAME --version VERSION_ID
-  canvas server [--port 4786] [--state-dir PATH]
-  canvas server start [--port 4786] [--at-login]
-  canvas server stop | status | logs [--lines 100] | uninstall
+  artifacts --version
+  artifacts list [--dir PATH]
+  artifacts write NAME [--file PATH | --stdin] [--project PROJECT_JSON]
+  artifacts read NAME [--source-file PATH] [--start-line N] [--end-line N]
+  artifacts edit NAME [--source-file PATH] [--file PATH | --stdin]
+  artifacts typecheck NAME
+  artifacts compile NAME
+  artifacts open NAME [--placement split|tab|zoomed|overlay] [--no-open]
+  artifacts serve [--dir PATH] [--port N]
+  artifacts web [--port 4784] [--dir PATH]
+  artifacts mcp
+  artifacts history [NAME]
+  artifacts show VERSION_ID [--source]
+  artifacts open --version VERSION_ID [--event EVENT_ID] [--placement split|tab|zoomed|overlay]
+  artifacts restore VERSION_ID
+  artifacts remix SOURCE NEW_NAME
+  artifacts remix NEW_NAME --version VERSION_ID
+  artifacts server [--port 4786] [--state-dir PATH]
+  artifacts server start [--port 4786] [--at-login]
+  artifacts server stop | status | logs [--lines 100] | uninstall
 
 All commands accept --dir PATH and --history-db PATH.
 read returns up to 200 lines by default, with a source_hash and next_line.
@@ -312,8 +312,8 @@ do not roll back applied edits. Results omit source text.
 History keeps source and dependency snapshots. Opening a saved version builds with the installed SDK and uses
 isolated UI state. Restore archives the working copy and adds a new revision.
 
-Canvases live in <workspace>/canvases/*.canvas.tsx and import the SDK from
-"sidequery/canvas", plus declared project helpers and dependencies. open creates a managed Canvas pane
+Artifacts live in <workspace>/artifacts/*.artifact.tsx and import the SDK from
+"sidequery/artifacts", plus declared project helpers and dependencies. open creates a managed Artifact pane
 powered internally by Terminal Browser in app mode.
 `);
 }

@@ -5,10 +5,10 @@ import files from "../dist/cloudflare/compiler-files.json";
 import browserPlugins from "../dist/cloudflare/plugin-browser.json";
 import browserRuntime from "../dist/cloudflare/browser-runtime.json";
 import { sandboxToDiagnostics, type Diagnostic } from "../src/diagnostics";
-import { scanCanvasSource } from "../src/sandbox";
+import { scanArtifactSource } from "../src/sandbox";
 
-const sourcePath = "canvas.canvas.tsx";
-const serverPath = "canvas.canvas.server.ts";
+const sourcePath = "artifact.artifact.tsx";
+const serverPath = "artifact.artifact.server.ts";
 const sdkPath = "src/sdk/index.ts";
 const compilerFiles: Record<string, string> = { ...files, ...browserPlugins.files };
 const options: ts.CompilerOptions = {
@@ -16,7 +16,7 @@ const options: ts.CompilerOptions = {
     moduleResolution: ts.ModuleResolutionKind.Bundler, jsx: ts.JsxEmit.ReactJSX,
     strict: true, noEmit: true, skipLibCheck: true, esModuleInterop: true,
     allowSyntheticDefaultImports: true, baseUrl: "/",
-    paths: { ...browserPlugins.paths, "@sidequery/canvas": [sdkPath], "sidequery/canvas": [sdkPath], "herdr/canvas": [sdkPath], "cursor/canvas": [sdkPath] },
+    paths: { ...browserPlugins.paths, "@sidequery/artifacts": [sdkPath], "sidequery/artifacts": [sdkPath], "sidequery/canvas": [sdkPath], "@sidequery/canvas": [sdkPath], "herdr/canvas": [sdkPath], "cursor/canvas": [sdkPath] },
     types: [],
 };
 const normalize = (path: string) => path.replace(/^\//, "");
@@ -47,7 +47,7 @@ const host: ts.LanguageServiceHost = {
       return text === undefined ? undefined : ts.ScriptSnapshot.fromString(text);
     },
     getDefaultLibFileName: () => `/node_modules/typescript/lib/lib.es2022${serverMode ? "" : ".full"}.d.ts`,
-    writeFile: () => { throw new Error("Canvas typechecking does not emit files"); },
+    writeFile: () => { throw new Error("Artifact typechecking does not emit files"); },
     getCurrentDirectory: () => "/",
     useCaseSensitiveFileNames: () => true, getNewLine: () => "\n",
     fileExists: path => read(path) !== undefined, readFile: read,
@@ -59,7 +59,7 @@ const host: ts.LanguageServiceHost = {
 };
 let languageService: ts.LanguageService | undefined;
 
-export function typecheckCanvasSource(source: string, project = emptyProject()): Diagnostic[] {
+export function typecheckArtifactSource(source: string, project = emptyProject()): Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
   const reachable = new Map<string, string>([[sourcePath, source]]);
   for (const [path, code] of reachable) {
@@ -84,20 +84,20 @@ export function typecheckCanvasSource(source: string, project = emptyProject()):
   }
   for (const [path, code] of reachable) {
     if (path.endsWith(".json")) continue;
-    const imports: string[] = [...Object.keys(browserPlugins.paths), "@sidequery/canvas", "react", "react-dom", "react-dom/client", "react-router", "react/jsx-runtime", "react/jsx-dev-runtime"];
+    const imports: string[] = [...Object.keys(browserPlugins.paths), "@sidequery/artifacts", "react", "react-dom", "react-dom/client", "react-router", "react/jsx-runtime", "react/jsx-dev-runtime"];
     // Permit local paths and declared package subpaths; the virtual compiler still resolves every import.
     for (const match of code.matchAll(/(?:from\s*|import\s*)["']([^"']+)["']/g)) {
       const specifier = match[1]!;
       if (specifier.startsWith("./") || specifier.startsWith("../") || Object.keys(project.dependencies).some(name => specifier === name || specifier.startsWith(`${name}/`))) imports.push(specifier);
     }
-    const violations = scanCanvasSource(code, imports).filter(item => path === sourcePath || item.kind !== "export");
+    const violations = scanArtifactSource(code, imports).filter(item => path === sourcePath || item.kind !== "export");
     diagnostics.push(...sandboxToDiagnostics(path, violations));
   }
   if (diagnostics.length) return diagnostics;
   return typecheckSource(source, false, false, project);
 }
 
-export function typecheckCanvasServerSource(source: string, project = emptyProject()): Diagnostic[] {
+export function typecheckArtifactServerSource(source: string, project = emptyProject()): Diagnostic[] {
   return typecheckSource(source, true, false, project);
 }
 
@@ -109,7 +109,7 @@ function typecheckSource(source: string, server: boolean, script = false, projec
   sourceVersion++;
   languageService ??= ts.createLanguageService(host);
   const program = languageService.getProgram();
-  if (!program) throw new Error("Could not initialize Canvas TypeScript project");
+  if (!program) throw new Error("Could not initialize Artifact TypeScript project");
   const diagnostics: Diagnostic[] = ts.getPreEmitDiagnostics(program)
     .filter(diagnostic => diagnostic.category === ts.DiagnosticCategory.Error)
     .map(diagnostic => {
@@ -122,11 +122,11 @@ function typecheckSource(source: string, server: boolean, script = false, projec
         ...(position ? { line: position.line + 1, column: position.character + 1 } : {}),
       };
     });
-  if (server && !script) diagnostics.push(...validateCanvasServerClass(program));
+  if (server && !script) diagnostics.push(...validateArtifactServerClass(program));
   return diagnostics;
 }
 
-function validateCanvasServerClass(program: ts.Program): Diagnostic[] {
+function validateArtifactServerClass(program: ts.Program): Diagnostic[] {
   const file = program.getSourceFiles().find(source => normalize(source.fileName) === serverPath);
   if (!file) return [serverClassDiagnostic()];
   const checker = program.getTypeChecker();
@@ -140,10 +140,10 @@ function validateCanvasServerClass(program: ts.Program): Diagnostic[] {
   const durableObject = resolve(moduleSymbol && checker.getExportsOfModule(moduleSymbol)
     .find(symbol => symbol.name === "DurableObject"));
   const fileSymbol = checker.getSymbolAtLocation(file);
-  const canvasServer = resolve(fileSymbol && checker.getExportsOfModule(fileSymbol)
-    .find(symbol => symbol.name === "CanvasServer"));
-  const declaration = canvasServer?.declarations?.find(node => ts.isClassDeclaration(node) && node.getSourceFile() === file);
-  if (!durableObject || !canvasServer || !declaration) return [serverClassDiagnostic(declaration)];
+  const artifactServer = resolve(fileSymbol && checker.getExportsOfModule(fileSymbol)
+    .find(symbol => symbol.name === serverExportName(program)));
+  const declaration = artifactServer?.declarations?.find(node => ts.isClassDeclaration(node) && node.getSourceFile() === file);
+  if (!durableObject || !artifactServer || !declaration) return [serverClassDiagnostic(declaration)];
 
   const seen = new Set<ts.Type>();
   const inheritsDurableObject = (type: ts.Type): boolean => {
@@ -154,14 +154,14 @@ function validateCanvasServerClass(program: ts.Program): Diagnostic[] {
       return symbol === durableObject || inheritsDurableObject(base);
     });
   };
-  return inheritsDurableObject(checker.getDeclaredTypeOfSymbol(canvasServer)) ? [] : [serverClassDiagnostic(declaration)];
+  return inheritsDurableObject(checker.getDeclaredTypeOfSymbol(artifactServer)) ? [] : [serverClassDiagnostic(declaration)];
 }
 
 function serverClassDiagnostic(node?: ts.Node): Diagnostic {
   const position = node?.getSourceFile().getLineAndCharacterOfPosition(node.getStart());
   return {
     severity: "error",
-    message: "Server code must export class CanvasServer extending DurableObject from cloudflare:workers",
+    message: "Server code must export class ArtifactServer (or legacy CanvasServer) extending DurableObject from cloudflare:workers",
     file: serverPath,
     ...(position ? { line: position.line + 1, column: position.character + 1 } : {}),
   };
@@ -171,11 +171,11 @@ let pendingCompilations = 0;
 let nextCompilation = 0;
 let activeCompilation = 0;
 
-export async function compileCanvasSource(source: string, project = emptyProject()) {
+export async function compileArtifactSource(source: string, project = emptyProject()) {
   return queueCompile(source, false, false, project);
 }
 
-export async function compileCanvasServerSource(source: string, project = emptyProject()) {
+export async function compileArtifactServerSource(source: string, project = emptyProject()) {
   return queueCompile(source, true, false, project);
 }
 
@@ -193,8 +193,15 @@ async function queueCompile(source: string, server: boolean, script = false, pro
   finally { activeCompilation++; pendingCompilations--; }
 }
 
+function serverExportName(program: ts.Program): "ArtifactServer" | "CanvasServer" {
+  const file = program.getSourceFiles().find(source => normalize(source.fileName) === serverPath);
+  const checker = program.getTypeChecker();
+  const symbol = file && checker.getSymbolAtLocation(file);
+  return symbol && checker.getExportsOfModule(symbol).some(item => item.name === "ArtifactServer") ? "ArtifactServer" : "CanvasServer";
+}
+
 async function compileServer(source: string, project: ArtifactProject) {
-  const diagnostics = typecheckCanvasServerSource(source, project);
+  const diagnostics = typecheckArtifactServerSource(source, project);
   if (diagnostics.length) return { ok: false, diagnostics };
   try {
     // celld 0.4.1 requires a default Worker export even when only the named
@@ -202,7 +209,7 @@ async function compileServer(source: string, project: ArtifactProject) {
     const result = await createWorker({ files: {
       ...project.lock, ...project.files,
       [serverPath]: source,
-      "server-entry.ts": `export { CanvasServer } from "./${serverPath}"; export default { fetch() { return new Response("Not found", { status: 404 }); } };`,
+      "server-entry.ts": `export { ${serverExportName(languageService!.getProgram()!)} as ArtifactServer } from "./${serverPath}"; export default { fetch() { return new Response("Not found", { status: 404 }); } };`,
     }, entryPoint: "server-entry.ts", target: "es2022", sourcemap: false });
     if (result.warnings?.length) throw new Error(result.warnings.join("\n"));
     const js = result.modules[result.mainModule];
@@ -215,19 +222,21 @@ async function compileServer(source: string, project: ArtifactProject) {
 
 async function compileSource(source: string, project: ArtifactProject) {
   const started = performance.now();
-  const diagnostics = typecheckCanvasSource(source, project);
+  const diagnostics = typecheckArtifactSource(source, project);
   if (diagnostics.length) return { ok: false, diagnostics };
   try {
     const result = await createWorker({
       files: {
         ...project.lock, ...project.files,
         [sourcePath]: source,
-        "entry.ts": `import Canvas from "./${sourcePath}"; globalThis.__herdrCanvasRuntime.mount(Canvas);`,
+        "entry.ts": `import Artifact from "./${sourcePath}"; globalThis.__artifactsRuntime.mount(Artifact);`,
       },
       entryPoint: "entry.ts", target: "es2022",
       jsx: "automatic", minify: false, sourcemap: false,
       define: { "process.env.NODE_ENV": '"production"' },
       virtualModules: {
+        "sidequery/artifacts": browserRuntime.sdkModule,
+        "@sidequery/artifacts": browserRuntime.sdkModule,
         "sidequery/canvas": browserRuntime.sdkModule,
         "@sidequery/canvas": browserRuntime.sdkModule,
         "herdr/canvas": browserRuntime.sdkModule,
@@ -256,11 +265,11 @@ async function compileSource(source: string, project: ArtifactProject) {
   }
 }
 
-/** Scripts use Workers globals and can import supported builtins, without the canvas UI restrictions. */
+/** Scripts use Workers globals and can import supported builtins, without the artifact UI restrictions. */
 export function compileScriptSource(source: string, project = emptyProject()) { return queueCompile(source, true, true, project); }
 
 async function compileScript(source: string, project: ArtifactProject) {
-  const declarations = '\ninterface ScriptEnv { secrets: Record<string, string>; sql: SqlStorage }\ntype __CanvasScriptResult = Response | Promise<Response>;\n';
+  const declarations = '\ninterface ScriptEnv { secrets: Record<string, string>; sql: SqlStorage }\ntype __ArtifactScriptResult = Response | Promise<Response>;\n';
   const diagnostics = typecheckSource(source + declarations, true, true, project);
   const program = languageService!.getProgram()!;
   const file = program.getSourceFiles().find(item => normalize(item.fileName) === serverPath)!;
@@ -271,7 +280,7 @@ async function compileScript(source: string, project: ArtifactProject) {
   const fetch = handler && checker.getPropertyOfType(handler, "fetch");
   const signatures = fetch ? checker.getTypeOfSymbolAtLocation(fetch, file).getCallSignatures() : [];
   if (!signatures.length) diagnostics.push({severity: "error", file: "script.ts", message: "Script must default-export an object with a fetch(request, env, ctx) handler"});
-  const resultType = file.statements.find((node): node is ts.TypeAliasDeclaration => ts.isTypeAliasDeclaration(node) && node.name.text === "__CanvasScriptResult");
+  const resultType = file.statements.find((node): node is ts.TypeAliasDeclaration => ts.isTypeAliasDeclaration(node) && node.name.text === "__ArtifactScriptResult");
   if (resultType && signatures.some(signature => !checker.isTypeAssignableTo(checker.getReturnTypeOfSignature(signature), checker.getTypeFromTypeNode(resultType.type)))) {
     diagnostics.push({severity: "error", file: "script.ts", message: "Script fetch handler must return a Response or Promise<Response>"});
   }

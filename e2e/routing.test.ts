@@ -1,28 +1,32 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { chromium, type Browser } from "playwright";
 import { rmSync } from "node:fs";
-import { compileCanvas } from "../src/compile";
-import { typecheckCanvas } from "../src/typecheck";
-import { tempDir, writeCanvas } from "../src/test/fixtures";
-import { ROUTING_CANVAS } from "../src/test/routing";
+import { compileArtifact } from "../src/compile";
+import { typecheckArtifact } from "../src/typecheck";
+import { tempDir, writeArtifact } from "../src/test/fixtures";
+import { ROUTING_ARTIFACT } from "../src/test/routing";
 let browser: Browser;
 let server: ReturnType<typeof Bun.serve>;
 let dir: string;
 beforeAll(async () => {
-  dir = tempDir("canvas-routing-");
-  const source = writeCanvas(dir, "routes", ROUTING_CANVAS);
-  expect(typecheckCanvas(source)).toEqual([]);
-  const compiled = await compileCanvas(source);
+  dir = tempDir("artifact-routing-");
+  const source = writeArtifact(dir, "routes", ROUTING_ARTIFACT);
+  expect(typecheckArtifact(source)).toEqual([]);
+  const compiled = await compileArtifact(source);
   expect(compiled.ok).toBe(true);
   const host = await Bun.build({ entrypoints: [new URL("../src/runtime/navigation-host.ts", import.meta.url).pathname], target: "browser", format: "iife" });
   expect(host.success).toBe(true);
   const hostJs = await host.outputs[0]!.text();
   server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(request) {
     const url = new URL(request.url);
-    const external = url.pathname.startsWith("/sales");
-    const context = external ? { route: { path: (url.pathname.slice(6) || "/") + url.search, basePath: "/sales", external: true } } : {};
-    const frame = `<div id="root"></div><script>window.__herdrCanvas=${JSON.stringify(context)};<\/script><script type="module">${compiled.js!.replace(/<\/script/gi, "<\\/script")}<\/script>`;
-    return new Response(`<iframe sandbox="allow-scripts"></iframe><script>const frame=document.querySelector('iframe');frame.srcdoc=${JSON.stringify(frame).replaceAll("<", "\\u003c")};window.__canvasNavigationHost={frame,basePath:'/sales'};${hostJs.replace(/<\/script/gi, "<\\/script")}<\/script>`, { headers: { "content-type": "text/html" } });
+    const legacy = url.pathname.startsWith("/legacy");
+    const basePath = legacy ? "/legacy" : "/sales";
+    const external = legacy || url.pathname.startsWith("/sales");
+    const context = external ? { route: { path: (url.pathname.slice(basePath.length) || "/") + url.search, basePath, external: true } } : {};
+    // Emulate a stored pre-rename bundle: its bridge global and wire protocol are immutable.
+    const js = legacy ? compiled.js!.replaceAll("__artifacts", "__herdrCanvas").replaceAll("artifact/navigation-ready", "canvas/navigation-ready").replaceAll("artifact/navigate", "canvas/navigate").replaceAll("artifact/location", "canvas/location") : compiled.js!;
+    const frame = `<div id="root"></div><script>window.__artifacts=${JSON.stringify(context)};window.__herdrCanvas=window.__artifacts;<\/script><script type="module">${js.replace(/<\/script/gi, "<\\/script")}<\/script>`;
+    return new Response(`<iframe sandbox="allow-scripts"></iframe><script>const frame=document.querySelector('iframe');frame.srcdoc=${JSON.stringify(frame).replaceAll("<", "\\u003c")};window.__artifactNavigationHost={frame,basePath:${JSON.stringify(basePath)}};${hostJs.replace(/<\/script/gi, "<\\/script")}<\/script>`, { headers: { "content-type": "text/html" } });
   } });
   browser = await chromium.launch({ headless: true });
 }, 60000);
@@ -48,20 +52,21 @@ test("embedded routing supports layouts, params, queries and history without nav
   await page.close();
 });
 
-test("standalone deep links, relative links, reload, replace and browser back/forward share one history", async () => {
+test.each([false, true])("standalone deep links and history support cached legacy runtime=%s", async legacy => {
+  const basePath = legacy ? "/legacy" : "/sales";
   const page = await browser.newPage();
   page.setDefaultTimeout(5000);
   page.on("pageerror", error => console.error(error.message));
   const errors: string[] = []; page.on("pageerror", error => errors.push(error.message));
   const origin = `http://127.0.0.1:${server.port}`;
-  await page.goto(`${origin}/sales/accounts/123?tab=activity#latest`);
+  await page.goto(`${origin}${basePath}/accounts/123?tab=activity#latest`);
   const frame = page.frameLocator("iframe");
   await frame.getByRole("heading", {name:"Account 123"}).waitFor();
   await frame.getByText("Hash: #latest", {exact:true}).waitFor();
-  expect(await frame.getByRole("link", {name:"Next account"}).getAttribute("href")).toBe("/sales/accounts/456");
+  expect(await frame.getByRole("link", {name:"Next account"}).getAttribute("href")).toBe(`${basePath}/accounts/456`);
   await frame.getByRole("link", {name:"Next account"}).click();
   await frame.getByRole("heading", {name:"Account 456"}).waitFor();
-  expect(page.url()).toBe(`${origin}/sales/accounts/456`);
+  expect(page.url()).toBe(`${origin}${basePath}/accounts/456`);
   await page.reload();
   await frame.getByRole("heading", {name:"Account 456"}).waitFor();
   await page.goBack();
@@ -73,7 +78,7 @@ test("standalone deep links, relative links, reload, replace and browser back/fo
   await frame.getByText('State: {"from":"replace"}', {exact:true}).waitFor();
   await frame.getByRole("button", {name:"Back",exact:true}).click();
   await frame.getByRole("heading", {name:"Account 123"}).waitFor();
-  expect(page.url()).toBe(`${origin}/sales/accounts/123?tab=activity#latest`);
+  expect(page.url()).toBe(`${origin}${basePath}/accounts/123?tab=activity#latest`);
   expect(errors).toEqual([]);
   await page.close();
 }, 60000);

@@ -1,21 +1,21 @@
-import type { CanvasHttpRequest } from "../src/httpTypes";
+import type { ArtifactHttpRequest } from "../src/httpTypes";
 import { normalizeTiming, nextOccurrence, type ScheduleTiming } from "./schedule";
 
-export type CanvasSchedule = ScheduleTiming & { paused: boolean; next_run_at: number | null; request: CanvasHttpRequest };
-export type CanvasScheduleInput = ScheduleTiming & { action?: "get" | "set" | "pause" | "resume" | "run_now"; request?: CanvasHttpRequest };
-export type CanvasRun = { id: string; revision: string; trigger: string; started_at: string; finished_at: string | null; duration_ms: number | null; status: string; http_status: number | null };
-export type CanvasActive = { code: string | null; hash: string; version_id: string; revision: number };
-export type CanvasClaim = { schedule: CanvasSchedule; active: CanvasActive | undefined; run: { id: string; started: number } };
+export type ArtifactSchedule = ScheduleTiming & { paused: boolean; next_run_at: number | null; request: ArtifactHttpRequest };
+export type ArtifactScheduleInput = ScheduleTiming & { action?: "get" | "set" | "pause" | "resume" | "run_now"; request?: ArtifactHttpRequest };
+export type ArtifactRun = { id: string; revision: string; trigger: string; started_at: string; finished_at: string | null; duration_ms: number | null; status: string; http_status: number | null };
+export type ArtifactActive = { code: string | null; hash: string; version_id: string; revision: number };
+export type ArtifactClaim = { schedule: ArtifactSchedule; active: ArtifactActive | undefined; run: { id: string; started: number } };
 
-/** Supervisor storage belongs to the host, separate from CanvasServer's facet. */
-export class CanvasExecution {
+/** Supervisor storage belongs to the host, separate from ArtifactServer's facet. */
+export class ArtifactExecution {
   constructor(private storage: DurableObjectStorage) {
     storage.sql.exec("create table if not exists host_schedule(id integer primary key check(id=1),payload text not null)");
     storage.sql.exec("create table if not exists active_server(id integer primary key check(id=1),payload text not null)");
     storage.sql.exec("create table if not exists execution_runs(id text primary key,revision text not null,trigger text not null,started_at text not null,finished_at text,duration_ms integer,status text not null,http_status integer)");
     storage.sql.exec("update execution_runs set status='interrupted' where status='running'");
   }
-  async activate(active: CanvasActive) {
+  async activate(active: ArtifactActive) {
     await this.storage.transaction(async storage => {
       const previous = this.readActive();
       if (previous && previous.revision > active.revision) return;
@@ -27,9 +27,9 @@ export class CanvasExecution {
       }
     });
   }
-  private readActive(): CanvasActive | undefined {
+  private readActive(): ArtifactActive | undefined {
     const row = this.storage.sql.exec<{ payload: string }>("select payload from active_server where id=1").toArray()[0];
-    return row ? JSON.parse(row.payload) as CanvasActive : undefined;
+    return row ? JSON.parse(row.payload) as ArtifactActive : undefined;
   }
   async active() { return this.readActive(); }
   start(revision: string, trigger: string) {
@@ -43,17 +43,17 @@ export class CanvasExecution {
   }
   runs(limit = 100) {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error("limit must be between 1 and 100");
-    return this.storage.sql.exec<CanvasRun>("select * from execution_runs order by started_at desc,rowid desc limit ?", limit).toArray();
+    return this.storage.sql.exec<ArtifactRun>("select * from execution_runs order by started_at desc,rowid desc limit ?", limit).toArray();
   }
-  private readSchedule(): CanvasSchedule | null {
+  private readSchedule(): ArtifactSchedule | null {
     const row = this.storage.sql.exec<{ payload: string }>("select payload from host_schedule where id=1").toArray()[0];
-    return row ? JSON.parse(row.payload) as CanvasSchedule : null;
+    return row ? JSON.parse(row.payload) as ArtifactSchedule : null;
   }
-  private writeSchedule(schedule: CanvasSchedule) {
+  private writeSchedule(schedule: ArtifactSchedule) {
     this.storage.sql.exec("insert into host_schedule(id,payload) values(1,?) on conflict(id) do update set payload=excluded.payload", JSON.stringify(schedule));
   }
   async get() { return this.readSchedule(); }
-  async update(input: CanvasScheduleInput) {
+  async update(input: ArtifactScheduleInput) {
     const action = input.action ?? "get";
     if (action === "get") return this.get();
     if (!["set", "pause", "resume"].includes(action)) throw new Error("Invalid schedule action");
@@ -61,17 +61,17 @@ export class CanvasExecution {
       const previous = this.readSchedule();
       if (action !== "set" && !previous) throw new Error("No schedule configured");
       const active = this.readActive();
-      if (action !== "pause" && !active?.code) throw new Error("Canvas has no validated server");
+      if (action !== "pause" && !active?.code) throw new Error("Artifact has no validated server");
       const timing = action === "set" ? normalizeTiming(input) : previous!;
       const request = action === "set" ? input.request ?? { path: "/", method: "GET", headers: [] } : previous!.request;
-      const result: CanvasSchedule = { ...normalizeTiming(timing), request, paused: action === "pause", next_run_at: action === "pause" ? null : nextOccurrence(timing) };
+      const result: ArtifactSchedule = { ...normalizeTiming(timing), request, paused: action === "pause", next_run_at: action === "pause" ? null : nextOccurrence(timing) };
       this.writeSchedule(result);
       if (result.next_run_at === null) await storage.deleteAlarm(); else await storage.setAlarm(result.next_run_at);
       return result;
     });
   }
   /** Claim before invoking; redelivered alarms cannot repeat side effects. */
-  async claim(): Promise<CanvasClaim | null> {
+  async claim(): Promise<ArtifactClaim | null> {
     return this.storage.transaction(async storage => {
       const schedule = this.readSchedule();
       if (!schedule || schedule.paused || schedule.next_run_at === null) return null;

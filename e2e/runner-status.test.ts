@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { chromium, type Browser } from "playwright";
-import { compileCanvas } from "../src/compile";
-import { canvasHtml } from "../src/html";
-import { typecheckCanvas } from "../src/typecheck";
+import { compileArtifact } from "../src/compile";
+import { artifactHtml } from "../src/html";
+import { typecheckArtifact } from "../src/typecheck";
 import type { Snapshot, Item } from "../examples/runner-status/types";
 
 let browser: Browser;
@@ -29,9 +29,9 @@ const fixture: Snapshot = {
   runnerFetchedAt: created, checkedAt: created, errors: ["acme/web: GitHub request failed"], refreshSeconds: 45,
 };
 beforeAll(async () => {
-  const source = new URL("../examples/runner-status/runner-status.canvas.tsx", import.meta.url).pathname;
-  expect(typecheckCanvas(source)).toEqual([]);
-  const compiled = await compileCanvas(source);
+  const source = new URL("../examples/runner-status/runner-status.artifact.tsx", import.meta.url).pathname;
+  expect(typecheckArtifact(source)).toEqual([]);
+  const compiled = await compileArtifact(source);
   expect(compiled.diagnostics).toEqual([]);
   expect(compiled.ok).toBe(true);
   const builds = await Promise.all(["gallery-request", "navigation-host"].map(name => Bun.build({ entrypoints: [new URL(`../src/runtime/${name}.ts`, import.meta.url).pathname], target: "browser", format: "iife" })));
@@ -46,15 +46,15 @@ beforeAll(async () => {
     if (url.pathname === "/original") return new Response(original, { headers });
     if (url.pathname === "/api/status") return Response.json(paritySnapshot);
     const context = { plugins: true, route: { path: url.pathname.slice(7) || "/", basePath: "/status", external: true } };
-    // Exercise the actual Canvas document, including its default 24px root padding.
-    const frame = canvasHtml({ title: "Runner status", canvasId: "runner-status", scriptUrl: "/unused.js" })
-      .replace(/window\.__herdrCanvas = [^;]*;/, () => `window.__herdrCanvas=${JSON.stringify(context)};${bridge}`)
+    // Exercise the actual Artifact document, including its default 24px root padding.
+    const frame = artifactHtml({ title: "Runner status", artifactId: "runner-status", scriptUrl: "/unused.js" })
+      .replace(/window\.__artifacts = [^;]*;/, () => `window.__artifacts=${JSON.stringify(context)};${bridge}`)
       .replace('<script type="module" src="/unused.js"></script>', () => `<script type="module">${compiled.js!.replace(/<\/script/gi, "<\\/script")}<\/script>`);
     const snapshot = url.searchParams.has("parity") ? paritySnapshot : url.searchParams.has("empty") ? { ...fixture, runners: [], jobs: [], errors: [], sources: [] } : fixture;
     return new Response(`<style>body{margin:0}iframe{width:100vw;height:100vh;border:0}</style><iframe sandbox="allow-scripts"></iframe><script>
       const frame=document.querySelector('iframe');window.fixture=${JSON.stringify(snapshot)};window.fail=${url.searchParams.has("fail")};window.requests=0;
-      window.addEventListener('message',event=>{if(event.source!==frame.contentWindow||event.data?.type!=='canvas/plugin-request')return;window.requests++;setTimeout(()=>frame.contentWindow.postMessage({type:'canvas/plugin-response',id:event.data.id,...(window.fail?{error:'Fixture disconnected'}:{result:window.fixture})},'*'),50)});
-      frame.srcdoc=${JSON.stringify(frame).replaceAll("<", "\\u003c")};window.__canvasNavigationHost={frame,basePath:'/status'};${host}
+      window.addEventListener('message',event=>{if(event.source!==frame.contentWindow||event.data?.type!=='artifact/plugin-request')return;window.requests++;setTimeout(()=>frame.contentWindow.postMessage({type:'artifact/plugin-response',id:event.data.id,...(window.fail?{error:'Fixture disconnected'}:{result:window.fixture})},'*'),50)});
+      frame.srcdoc=${JSON.stringify(frame).replaceAll("<", "\\u003c")};window.__artifactNavigationHost={frame,basePath:'/status'};${host}
     <\/script>`, { headers: { "content-type": "text/html; charset=utf-8" } });
   } });
   browser = await chromium.launch({ headless: true });
@@ -143,15 +143,15 @@ test("runner sample exposes initial failure, retry, empty pool and missing runne
   } finally { await page.close(); }
 }, 120000);
 
-test("runner canvas preserves the original app's rendered layout, typography, controls and icons", async () => {
+test("runner artifact preserves the original app's rendered layout, typography, controls and icons", async () => {
   const original = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
-  const canvas = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
-  original.setDefaultTimeout(30000); canvas.setDefaultTimeout(30000);
+  const artifact = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+  original.setDefaultTimeout(30000); artifact.setDefaultTimeout(30000);
   try {
-    await original.clock.setFixedTime(fixedTime); await canvas.clock.setFixedTime(fixedTime);
+    await original.clock.setFixedTime(fixedTime); await artifact.clock.setFixedTime(fixedTime);
     await original.goto(`http://127.0.0.1:${server.port}/original`);
-    await canvas.goto(`http://127.0.0.1:${server.port}/status/runners?parity=1`);
-    const frame = canvas.frameLocator("iframe");
+    await artifact.goto(`http://127.0.0.1:${server.port}/status/runners?parity=1`);
+    const frame = artifact.frameLocator("iframe");
     await original.getByText("Build", { exact: true }).waitFor();
     await frame.getByText("Build", { exact: true }).waitFor();
     expect(await frame.locator("#root").evaluate(element => getComputedStyle(element).padding)).toBe("0px");
@@ -170,7 +170,7 @@ test("runner canvas preserves the original app's rendered layout, typography, co
       return [selector, { x: rect.x, y: rect.y, width: rect.width, height: rect.height, font: css.font, color: css.color, background: css.backgroundColor, padding: css.padding, border: css.border, gap: css.gap }];
     }));
     for (const width of [1280, 390]) {
-      await original.setViewportSize({ width, height: 1000 }); await canvas.setViewportSize({ width, height: 1000 });
+      await original.setViewportSize({ width, height: 1000 }); await artifact.setViewportSize({ width, height: 1000 });
       const expected = await original.evaluate(measure, selectors);
       const actual = await frame.locator("body").evaluate((_body, selectors) => {
         return Object.fromEntries(selectors.map(selector => {
@@ -191,8 +191,8 @@ test("runner canvas preserves the original app's rendered layout, typography, co
       expect(differences).toEqual([]);
       if (process.env.RUNNER_STATUS_SCREENSHOTS) {
         await original.screenshot({ path: `/tmp/runner-status-original-${width}.png`, fullPage: true });
-        await canvas.screenshot({ path: `/tmp/runner-status-canvas-${width}.png`, fullPage: true });
+        await artifact.screenshot({ path: `/tmp/runner-status-artifact-${width}.png`, fullPage: true });
       }
     }
-  } finally { await original.close(); await canvas.close(); }
+  } finally { await original.close(); await artifact.close(); }
 }, 120000);

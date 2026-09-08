@@ -24,8 +24,8 @@ jobs:
       - run: bun run test:mcp-ui
       - name: Test configured browser plugin in workerd
         run: |
-          CANVAS_PLUGINS_CONFIG=src/test/plugins/config.ts bun run build:cloudflare-compiler
-          CANVAS_PLUGIN_TEST=1 bun test cloudflare/compiler.test.ts --test-name-pattern 'deployment browser plugin' --timeout 60000
+          ARTIFACTS_PLUGINS_CONFIG=src/test/plugins/config.ts bun run build:cloudflare-compiler
+          ARTIFACTS_PLUGIN_TEST=1 bun test cloudflare/compiler.test.ts --test-name-pattern 'deployment browser plugin' --timeout 60000
       # Rebuild the default deployment before the normal runtime and package checks.
       - run: bun run test:cloudflare
       - run: bun run typecheck:cloudflare

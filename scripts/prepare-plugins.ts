@@ -4,12 +4,12 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import Ajv from "ajv";
 import standaloneCode from "ajv/dist/standalone";
-import type { CanvasPlugin } from "../src/plugins/config";
+import type { ArtifactPlugin } from "../src/plugins/config";
 import type { PluginInfo } from "../src/plugins/types";
 import { prepareBrowserPlugins } from "./prepare-browser-plugins";
 
-const reserved = new Set(["react", "react-dom", "react-router", "@sidequery/canvas"]);
-export function validatePlugins(value: unknown): readonly CanvasPlugin[] {
+const reserved = new Set(["react", "react-dom", "react-router", "@sidequery/artifacts"]);
+export function validatePlugins(value: unknown): readonly ArtifactPlugin[] {
   if (!Array.isArray(value) || value.length > 64) throw new Error("Plugin config must export an array of at most 64 plugins");
   const names = new Set<string>();
   for (const plugin of value) {
@@ -37,12 +37,14 @@ export function validatePlugins(value: unknown): readonly CanvasPlugin[] {
       }
     }
   }
-  return value as CanvasPlugin[];
+  return value as ArtifactPlugin[];
 }
 
-export async function preparePlugins(root: string, output: string, selectedConfig = process.env.CANVAS_PLUGINS_CONFIG) {
-  const configPath = resolve(root, selectedConfig ?? "canvas.plugins.ts");
-  if (selectedConfig && !existsSync(configPath)) throw new Error("CANVAS_PLUGINS_CONFIG does not exist");
+export async function preparePlugins(root: string, output: string, selectedConfig = process.env.ARTIFACTS_PLUGINS_CONFIG ?? process.env.CANVAS_PLUGINS_CONFIG) {
+  const defaultConfig = existsSync(resolve(root, "artifacts.plugins.ts")) ? "artifacts.plugins.ts"
+    : existsSync(resolve(root, "canvas.plugins.ts")) ? "canvas.plugins.ts" : "artifacts.plugins.ts";
+  const configPath = resolve(root, selectedConfig ?? defaultConfig);
+  if (selectedConfig && !existsSync(configPath)) throw new Error("ARTIFACTS_PLUGINS_CONFIG does not exist");
   const configured = existsSync(configPath);
   const plugins = validatePlugins(configured ? (await import(pathToFileURL(configPath).href)).default : []);
   const browser = await prepareBrowserPlugins(plugins, configured ? dirname(configPath) : root);
@@ -74,7 +76,7 @@ export async function preparePlugins(root: string, output: string, selectedConfi
   let configImport = relative(output, configPath).replaceAll("\\", "/");
   if (!configImport.startsWith(".") && !isAbsolute(configImport)) configImport = `./${configImport}`;
   const server = configured ? `import plugins from ${JSON.stringify(configImport)};\nexport default plugins;\n`
-    : 'import type { CanvasPlugin } from "../../src/plugins/config";\nexport default [] as readonly CanvasPlugin[];\n';
+    : 'import type { ArtifactPlugin } from "../../src/plugins/config";\nexport default [] as readonly ArtifactPlugin[];\n';
   await Promise.all([
     writeFile(join(output, "plugin-browser.json"), JSON.stringify(browser)),
     writeFile(join(output, "plugin-catalog.json"), JSON.stringify(catalog)),

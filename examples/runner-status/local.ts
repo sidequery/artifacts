@@ -2,7 +2,7 @@ import { chmod, cp, mkdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { Database } from "bun:sqlite";
-import { canvasDataRoot, ensureCelldRuntime } from "../../src/local/celld-runtime";
+import { artifactDataRoot, ensureCelldRuntime } from "../../src/local/celld-runtime";
 import { prepareCelldConfig } from "../../scripts/prepare-celld";
 import { readConfig } from "./collector";
 
@@ -22,27 +22,27 @@ export async function seed(origin: string) {
       body: JSON.stringify({ name, arguments: args }), signal: AbortSignal.timeout(120_000),
     });
     const result = await response.json() as { isError?: boolean; structuredContent?: { ok?: boolean } };
-    if (!response.ok || result.isError || result.structuredContent?.ok === false) throw new Error(`${name} failed; inspect the Canvas gallery`);
+    if (!response.ok || result.isError || result.structuredContent?.ok === false) throw new Error(`${name} failed; inspect the Artifact gallery`);
   }
   // Preserve edits and revision history when restarting an existing example.
   const source = await fetch(`${origin}/api/source?name=runner-status`);
   await source.body?.cancel();
   if (source.status === 404) {
-    await call("canvas_guide", {});
-    await call("canvas_write", { name: "runner-status", contents: await Bun.file(join(import.meta.dir, "runner-status.canvas.tsx")).text() });
-  } else if (!source.ok) throw new Error("Unable to inspect existing canvas");
+    await call("artifact_guide", {});
+    await call("artifact_write", { name: "runner-status", contents: await Bun.file(join(import.meta.dir, "runner-status.artifact.tsx")).text() });
+  } else if (!source.ok) throw new Error("Unable to inspect existing artifact");
   let offset: number | null = 0;
   while (offset !== null) {
     const response = await fetch(`${origin}/api/gallery?offset=${offset}`);
-    if (!response.ok) throw new Error("Unable to inspect existing canvas link");
+    if (!response.ok) throw new Error("Unable to inspect existing artifact link");
     const gallery = await response.json() as { artifacts: { name: string; kind?: string; slug?: string }[]; nextOffset: number | null };
-    const existing = gallery.artifacts.find(item => item.name === "runner-status" && item.kind === "canvas");
+    const existing = gallery.artifacts.find(item => item.name === "runner-status" && item.kind === "artifact");
     if (existing?.slug) return `${origin}/${existing.slug}`;
     if (existing) break;
     offset = gallery.nextOffset;
   }
   // Recover a first start interrupted between saving the source and linking it.
-  await call("artifact_link", { kind: "canvas", name: "runner-status", slug: "runner-status", access: "private" });
+  await call("artifact_link", { kind: "artifact", name: "runner-status", slug: "runner-status", access: "private" });
   return `${origin}/runner-status`;
 }
 
@@ -58,10 +58,10 @@ export async function main() {
     githubToken = (await new Response(auth.stdout).text()).trim();
     if (await auth.exited !== 0 || !githubToken) throw new Error("Set GITHUB_TOKEN or sign in with gh auth login");
   }
-  const binary = process.env.CELLD_BIN ?? await ensureCelldRuntime({ dataRoot: canvasDataRoot(), notify: console.log });
+  const binary = process.env.CELLD_BIN ?? await ensureCelldRuntime({ dataRoot: artifactDataRoot(), notify: console.log });
   await mkdir(directory, { recursive: true, mode: 0o700 });
   await chmod(directory, 0o700);
-  // Like canvas server, hold a process-owned lock across builds and execution.
+  // Like artifacts server, hold a process-owned lock across builds and execution.
   // Different ports must not let two launchers rewrite the same native project.
   const lock = new Database(join(directory, "launcher-lock.sqlite"), { create: true });
   try { lock.exec("begin exclusive"); }
@@ -82,7 +82,7 @@ export async function main() {
   await writeFile(buildConfig, JSON.stringify(base, null, 2), { mode: 0o600 });
 
   // Build tools never receive the GitHub credential through our generated config.
-  const environment: NodeJS.ProcessEnv = { ...process.env, CANVAS_PLUGINS_CONFIG: join(import.meta.dir, "local.plugins.ts") };
+  const environment: NodeJS.ProcessEnv = { ...process.env, ARTIFACTS_PLUGINS_CONFIG: join(import.meta.dir, "local.plugins.ts") };
   delete environment.GITHUB_TOKEN;
   delete environment.GH_TOKEN;
   let child: ReturnType<typeof Bun.spawn> | undefined;

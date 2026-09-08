@@ -1,28 +1,28 @@
 import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 
-import { themeFromKind, type CanvasHostTheme } from "./tokens";
-import type { CanvasHttpRequest, CanvasHttpResponse } from "./server";
+import { themeFromKind, type ArtifactHostTheme } from "./tokens";
+import type { ArtifactHttpRequest, ArtifactHttpResponse } from "./server";
 import type { PluginRequest } from "../plugins/types";
-import type { CanvasFileRequest } from "./files";
+import type { ArtifactFileRequest } from "./files";
 
-export type CanvasAction =
+export type ArtifactAction =
   | { type: "openFile"; path: string; selection?: { startLine?: number; endLine?: number } }
   | { type: "promptAgent"; prompt: string }
   | { type: "openUrl"; url: string };
 
-export type SetCanvasState<T> = Dispatch<SetStateAction<T>>;
+export type SetArtifactState<T> = Dispatch<SetStateAction<T>>;
 
 export type HostBridge = {
-  route?: import("./routing").CanvasRoute;
-  canvasId?: string;
+  route?: import("./routing").ArtifactRoute;
+  artifactId?: string;
   state?: Record<string, unknown>;
   theme?: { kind?: string };
   persistUrl?: string;
   actionUrl?: string;
-  onAction?: (action: CanvasAction) => void;
-  onRequest?: (request: CanvasHttpRequest) => Promise<CanvasHttpResponse>;
+  onAction?: (action: ArtifactAction) => void;
+  onRequest?: (request: ArtifactHttpRequest) => Promise<ArtifactHttpResponse>;
   onPluginCall?: (request: PluginRequest) => Promise<unknown>;
-  onFileRequest?: (request: CanvasFileRequest) => Promise<unknown>;
+  onFileRequest?: (request: ArtifactFileRequest) => Promise<unknown>;
   onFileDownload?: (url: string) => Promise<void>;
 };
 
@@ -30,7 +30,7 @@ function hostBridge(): HostBridge {
   if (typeof window === "undefined") {
     return {};
   }
-  return (window as Window & { __herdrCanvas?: HostBridge }).__herdrCanvas ?? {};
+  return (window as Window & { __artifacts?: HostBridge }).__artifacts ?? {};
 }
 
 export function themeKindFromHost(kind: string | undefined, prefersLight: boolean): "dark" | "light" {
@@ -40,12 +40,12 @@ export function themeKindFromHost(kind: string | undefined, prefersLight: boolea
   return prefersLight ? "light" : "dark";
 }
 
-export function useHostTheme(): CanvasHostTheme {
+export function useHostTheme(): ArtifactHostTheme {
   const [generation, setGeneration] = useState(0);
   useEffect(() => {
     const changed = () => setGeneration(value => value + 1);
-    window.addEventListener("canvas-theme-change", changed);
-    return () => window.removeEventListener("canvas-theme-change", changed);
+    window.addEventListener("artifact-theme-change", changed);
+    return () => window.removeEventListener("artifact-theme-change", changed);
   }, []);
   return useMemo(() => {
     const prefersLight = typeof window !== "undefined" && Boolean(window.matchMedia?.("(prefers-color-scheme: light)").matches);
@@ -53,14 +53,14 @@ export function useHostTheme(): CanvasHostTheme {
   }, [generation]);
 }
 
-export function useCanvasState<T>(key: string, defaultValue: T): [T, SetCanvasState<T>] {
+export function useArtifactState<T>(key: string, defaultValue: T): [T, SetArtifactState<T>] {
   const [value, setValue] = useState<T>(() => {
     const stored = hostBridge().state?.[key];
     return stored === undefined ? defaultValue : (stored as T);
   });
 
   const persistUrl = hostBridge().persistUrl;
-  const setter: SetCanvasState<T> = (action) => {
+  const setter: SetArtifactState<T> = (action) => {
     setValue((prev) => {
       const next = typeof action === "function" ? (action as (current: T) => T)(prev) : action;
       if (persistUrl) {
@@ -76,7 +76,7 @@ export function useCanvasState<T>(key: string, defaultValue: T): [T, SetCanvasSt
   return [value, setter];
 }
 
-export function useCanvasAction(): (action: CanvasAction) => void {
+export function useArtifactAction(): (action: ArtifactAction) => void {
   const actionUrl = hostBridge().actionUrl;
   return (action) => {
     if (hostBridge().onAction) {

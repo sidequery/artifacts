@@ -18,8 +18,8 @@ export type BetterAuthEnvironment = TeamAuthEnvironment & {
   BETTER_AUTH_SECRET?: string;
   BETTER_AUTH_TRUSTED_IP_HEADER?: string;
 };
-export type CanvasUser = { id: string; name: string; email: string; emailVerified: boolean };
-export class CanvasAuthConfigurationError extends Error {}
+export type ArtifactUser = { id: string; name: string; email: string; emailVerified: boolean };
+export class ArtifactAuthConfigurationError extends Error {}
 
 function nativeRedirectHint(value: unknown): boolean {
   if (typeof value !== "string") return false;
@@ -32,7 +32,7 @@ function nativeRedirectHint(value: unknown): boolean {
 }
 
 export function authOrigin(env: BetterAuthEnvironment): string {
-  if (!env.BETTER_AUTH_URL) throw new Error("Configure BETTER_AUTH_URL for this Canvas deployment");
+  if (!env.BETTER_AUTH_URL) throw new Error("Configure BETTER_AUTH_URL for this Artifact deployment");
   const url = new URL(env.BETTER_AUTH_URL);
   if (url.username || url.password || url.pathname !== "/" || url.search || url.hash
     || (url.protocol !== "https:" && !(url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)))) {
@@ -41,13 +41,20 @@ export function authOrigin(env: BetterAuthEnvironment): string {
   return url.origin;
 }
 
-export function canvasAuthOptions(env: BetterAuthEnvironment, database: NonNullable<BetterAuthOptions["database"]> = env.AUTH_DB!) {
+/** Existing OAuth clients retain their original scope; new clients request artifacts. */
+export function requireArtifactScope(scope: unknown): void {
+  if (typeof scope !== "string" || !scope.split(" ").some(value => value === "artifacts" || value === "canvas")) {
+    throw createInsufficientScopeError(["artifacts"]);
+  }
+}
+
+export function artifactAuthOptions(env: BetterAuthEnvironment, database: NonNullable<BetterAuthOptions["database"]> = env.AUTH_DB!) {
   const origin = authOrigin(env);
   if (!database) throw new Error("Configure the AUTH_DB binding and apply the auth database migrations");
   if (!env.BETTER_AUTH_SECRET || env.BETTER_AUTH_SECRET.length < 32) throw new Error("Configure BETTER_AUTH_SECRET with at least 32 random characters");
   const providers = teamProviderOptions(env);
   return {
-    appName: "Canvas",
+    appName: "Artifacts",
     baseURL: origin,
     basePath: "/api/auth",
     secret: env.BETTER_AUTH_SECRET,
@@ -84,7 +91,7 @@ export function canvasAuthOptions(env: BetterAuthEnvironment, database: NonNulla
       jwt({ jwks: { keyPairConfig: { alg: "RS256" } } }),
       mcp({
         loginPage: "/sign-in", consentPage: "/consent", resource: `${origin}/mcp`,
-        scopes: ["openid", "profile", "email", "offline_access", "canvas"],
+        scopes: ["openid", "profile", "email", "offline_access", "artifacts", "canvas"],
         grantTypes: ["authorization_code", "refresh_token"],
         accessTokenExpiresIn: 300,
         allowDynamicClientRegistration: true,
@@ -96,22 +103,22 @@ export function canvasAuthOptions(env: BetterAuthEnvironment, database: NonNulla
   } satisfies BetterAuthOptions;
 }
 
-function instantiateAuth(env: BetterAuthEnvironment) { return betterAuth(canvasAuthOptions(env)); }
-export type CanvasAuth = ReturnType<typeof instantiateAuth>;
-export async function getCanvasAuth(env: BetterAuthEnvironment): Promise<CanvasAuth> {
+function instantiateAuth(env: BetterAuthEnvironment) { return betterAuth(artifactAuthOptions(env)); }
+export type ArtifactAuth = ReturnType<typeof instantiateAuth>;
+export async function getArtifactAuth(env: BetterAuthEnvironment): Promise<ArtifactAuth> {
   // Keep router/context state request-local: sharing an instance across
   // concurrent celld requests can leave its auth handlers waiting forever.
-  let auth: CanvasAuth;
+  let auth: ArtifactAuth;
   try { auth = instantiateAuth(env); }
-  catch (error) { throw new CanvasAuthConfigurationError(error instanceof Error ? error.message : "Invalid authentication configuration", { cause: error }); }
+  catch (error) { throw new ArtifactAuthConfigurationError(error instanceof Error ? error.message : "Invalid authentication configuration", { cause: error }); }
   // Provider discovery (and any schema check enabled by a deployment) must
   // finish in its originating request; workerd cancels I/O when it returns.
   try {
     const context = await auth.$context;
     await context.checkSchema?.();
   } catch (error) {
-    console.error("Canvas authentication initialization failed", error);
-    throw new CanvasAuthConfigurationError("Authentication is unavailable; verify provider configuration and auth database migrations", { cause: error });
+    console.error("Artifacts authentication initialization failed", error);
+    throw new ArtifactAuthConfigurationError("Authentication is unavailable; verify provider configuration and auth database migrations", { cause: error });
   }
   return auth;
 }
@@ -123,16 +130,16 @@ export function browserSignIn(request: Request): Response {
   if (request.method === "GET" && ["/", "/gallery"].includes(current.pathname)) {
     return new Response(null, { status: 302, headers: { Location: login, "Cache-Control": "no-store" } });
   }
-  return Response.json({ error: "Sign in to Canvas", loginUrl: login }, {
-    status: 401, headers: { "X-Canvas-Auth": "better-auth", "Cache-Control": "no-store" },
+  return Response.json({ error: "Sign in to Artifacts", loginUrl: login }, {
+    status: 401, headers: { "X-Artifact-Auth": "better-auth", "Cache-Control": "no-store" },
   });
 }
 
 /** Browser sessions and OAuth access tokens resolve to the same Better Auth
  * user ID. Provider tokens and caller-supplied identity headers are never used
- * as Canvas authorization credentials. */
-export async function authenticateBetterAuth(request: Request, env: BetterAuthEnvironment): Promise<CanvasUser | Response> {
-  const auth = await getCanvasAuth(env);
+ * as Artifact authorization credentials. */
+export async function authenticateBetterAuth(request: Request, env: BetterAuthEnvironment): Promise<ArtifactUser | Response> {
+  const auth = await getArtifactAuth(env);
   const context = await auth.$context;
   const origin = authOrigin(env);
   const isMcp = new URL(request.url).pathname === "/mcp";
@@ -161,7 +168,7 @@ export async function authenticateBetterAuth(request: Request, env: BetterAuthEn
       method: request.method, url: request.url,
       replayStore: createDpopReplayStore(context.internalAdapter),
     });
-    if (typeof claims.scope !== "string" || !claims.scope.split(" ").includes("canvas")) throw createInsufficientScopeError(["canvas"]);
+    requireArtifactScope(claims.scope);
     if (typeof claims.sub !== "string" || !claims.sub || typeof claims.sid !== "string" || !claims.sid) throw new APIError("UNAUTHORIZED", { message: "A user session is required" });
     // JWT verification alone accepts a token until expiry after sign-out.
     // Check the attached session as well so both surfaces revoke together.
@@ -176,7 +183,7 @@ export async function authenticateBetterAuth(request: Request, env: BetterAuthEn
   } catch (error) {
     if (isDpopBindingError(error)) error = new APIError("UNAUTHORIZED", { error: error.code, error_description: error.message });
     else if (error instanceof errors.JOSEError) error = new APIError("UNAUTHORIZED", { message: "Invalid or expired access token" });
-    const challenge = createResourceServerChallenge(error, resource, { challengeScopes: ["canvas"] });
+    const challenge = createResourceServerChallenge(error, resource, { challengeScopes: ["artifacts"] });
     if (!challenge) throw error;
     return Response.json({ jsonrpc: "2.0", id: null, error: { code: -32000, message: challenge.message } }, {
       status: challenge.statusCode, headers: { ...challenge.headers, "Cache-Control": "no-store" },

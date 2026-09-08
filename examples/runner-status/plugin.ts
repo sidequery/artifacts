@@ -1,8 +1,8 @@
-import type { CanvasPlugin } from "../../src/plugins/config";
+import type { ArtifactPlugin } from "../../src/plugins/config";
 import type { PluginUser } from "../../src/plugins/types";
 import type { Snapshot } from "./types";
 
-export function runnerStatusPlugin(options: { allowedUsers: readonly PluginUser[]; allowLoopback?: boolean }): CanvasPlugin {
+export function runnerStatusPlugin(options: { allowedUsers: readonly PluginUser[]; allowLoopback?: boolean }): ArtifactPlugin {
   return {
     name: "github-runners",
     description: "Shared self-hosted GitHub runner pool: assignments, steps, queued jobs and source freshness.",

@@ -1,5 +1,5 @@
 import { normalizeProject, emptyProject } from "./project";
-import { compileCanvasSource, compileCanvasServerSource, compileScriptSource, typecheckCanvasSource, typecheckCanvasServerSource } from "./compiler";
+import { compileArtifactSource, compileArtifactServerSource, compileScriptSource, typecheckArtifactSource, typecheckArtifactServerSource } from "./compiler";
 import { readRequestText } from "./http";
 import type { ExecutionContext } from "@cloudflare/workers-types";
 
@@ -14,7 +14,7 @@ export default {
     let project = emptyProject();
     try { source = await readRequestText(request, request.headers.get("content-type")?.includes("application/json") ? 10 * 1024 * 1024 : 256 * 1024); }
     catch (error) {
-      if (error instanceof RangeError) return new Response("Canvas source exceeds 256 KiB", { status: 413 });
+      if (error instanceof RangeError) return new Response("Artifact source exceeds 256 KiB", { status: 413 });
       throw error;
     }
     if (request.headers.get("content-type")?.includes("application/json")) {
@@ -22,10 +22,10 @@ export default {
       source = input.source; project = normalizeProject(input.project);
     }
     const compilation = url.pathname === "/compile-script" ? compileScriptSource(source, project)
-      : url.pathname === "/compile-server" ? compileCanvasServerSource(source, project)
-      : url.pathname === "/compile" ? compileCanvasSource(source, project) : undefined;
+      : url.pathname === "/compile-server" ? compileArtifactServerSource(source, project)
+      : url.pathname === "/compile" ? compileArtifactSource(source, project) : undefined;
     if (compilation) ctx.waitUntil(compilation);
     return Response.json(compilation ? await compilation
-      : { diagnostics: url.pathname === "/typecheck-server" ? typecheckCanvasServerSource(source, project) : typecheckCanvasSource(source, project) });
+      : { diagnostics: url.pathname === "/typecheck-server" ? typecheckArtifactServerSource(source, project) : typecheckArtifactSource(source, project) });
   },
 };

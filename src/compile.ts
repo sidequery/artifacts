@@ -18,24 +18,24 @@ export type CompileResult = {
   diagnostics: Diagnostic[];
 };
 
-export function canvasAliasPlugin(canvasPath: string, source?: string, plugins: BrowserPlugins = loadBrowserPlugins()): BunPlugin {
-  const absCanvas = resolve(canvasPath);
+export function artifactAliasPlugin(artifactPath: string, source?: string, plugins: BrowserPlugins = loadBrowserPlugins()): BunPlugin {
+  const absArtifact = resolve(artifactPath);
   return {
-    name: "herdr-canvas-alias",
+    name: "artifacts-alias",
     setup(build) {
       build.onResolve({ filter: /.*/ }, args => Object.hasOwn(plugins.paths, args.path)
-        ? { path: args.path, namespace: "canvas-browser-plugin" } : undefined);
-      build.onLoad({ filter: /.*/, namespace: "canvas-browser-plugin" }, args => ({
+        ? { path: args.path, namespace: "artifact-browser-plugin" } : undefined);
+      build.onLoad({ filter: /.*/, namespace: "artifact-browser-plugin" }, args => ({
         contents: plugins.modules[args.path], loader: "js", resolveDir: PLUGIN_ROOT,
       }));
       if (source !== undefined) {
-        build.onLoad({ filter: /\.canvas\.tsx$/ }, (args) => args.path === absCanvas ? { contents: source, loader: "tsx" } : undefined);
+        build.onLoad({ filter: /\.artifact\.tsx$/ }, (args) => args.path === absArtifact ? { contents: source, loader: "tsx" } : undefined);
       }
-      build.onResolve({ filter: /^(@sidequery\/canvas|sidequery\/canvas|herdr\/canvas|cursor\/canvas)$/ }, () => ({
+      build.onResolve({ filter: /^((@sidequery|sidequery)\/(artifacts|canvas)|(herdr|cursor)\/canvas)$/ }, () => ({
         path: SDK_ENTRY,
       }));
-      build.onResolve({ filter: /^herdr-canvas-entry$/ }, () => ({
-        path: absCanvas,
+      build.onResolve({ filter: /^artifacts-entry$/ }, () => ({
+        path: absArtifact,
       }));
       // Resolve shared runtimes to one package entry. Bun plugin builds can drop
       // React Router ESM re-export chunks; the package CJS entry preserves them.
@@ -44,9 +44,9 @@ export function canvasAliasPlugin(canvasPath: string, source?: string, plugins: 
       }));
       // User modules resolve only inside the materialized snapshot, never host files.
       build.onResolve({ filter: /.*/ }, args => {
-        if (!args.importer.startsWith(dirname(absCanvas) + "/")) return;
+        if (!args.importer.startsWith(dirname(absArtifact) + "/")) return;
         const path = Bun.resolveSync(args.path, args.resolveDir || dirname(args.importer));
-        if (!path.startsWith(dirname(absCanvas) + "/")) throw new Error(`import escapes canvas project: ${args.path}`);
+        if (!path.startsWith(dirname(absArtifact) + "/")) throw new Error(`import escapes artifact project: ${args.path}`);
         return { path };
       });
 
@@ -54,10 +54,10 @@ export function canvasAliasPlugin(canvasPath: string, source?: string, plugins: 
   };
 }
 
-export async function compileCanvas(canvasPath: string, snapshot?: string, plugins: BrowserPlugins = loadBrowserPlugins(), project: ArtifactProject = readLocalProject(canvasPath)): Promise<CompileResult> {
-  const absCanvas = resolve(canvasPath);
-  const source = snapshot ?? readFileSync(absCanvas, "utf8");
-  const violations = projectDiagnostics(absCanvas, source, project, Object.keys(plugins.paths));
+export async function compileArtifact(artifactPath: string, snapshot?: string, plugins: BrowserPlugins = loadBrowserPlugins(), project: ArtifactProject = readLocalProject(artifactPath)): Promise<CompileResult> {
+  const absArtifact = resolve(artifactPath);
+  const source = snapshot ?? readFileSync(absArtifact, "utf8");
+  const violations = projectDiagnostics(absArtifact, source, project, Object.keys(plugins.paths));
   if (violations.length > 0) {
     return {
       ok: false,
@@ -77,7 +77,7 @@ export async function compileCanvas(canvasPath: string, snapshot?: string, plugi
       define: {
         "process.env.NODE_ENV": JSON.stringify("production"),
       },
-      plugins: [canvasAliasPlugin(snapshotProject.path, source, plugins)],
+      plugins: [artifactAliasPlugin(snapshotProject.path, source, plugins)],
     });
   } catch (error) {
     snapshotProject.dispose();
@@ -87,7 +87,7 @@ export async function compileCanvas(canvasPath: string, snapshot?: string, plugi
         {
           severity: "error",
           message: error instanceof AggregateError ? [...error.errors].map(String).join("\n") : error instanceof Error ? error.message : String(error),
-          file: absCanvas,
+          file: absArtifact,
         },
       ],
     };
@@ -100,7 +100,7 @@ export async function compileCanvas(canvasPath: string, snapshot?: string, plugi
       diagnostics: result.logs.map((log) => ({
         severity: "error" as const,
         message: String(log),
-        file: absCanvas,
+        file: absArtifact,
       })),
     };
   }

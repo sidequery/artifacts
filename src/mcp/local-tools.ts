@@ -1,8 +1,8 @@
-import { CanvasService, type CanvasEdit, type ReadOptions } from "../service";
-import { canvasIdFromFile } from "../canvasFile";
-import { canvasGuideResult } from "./guide";
+import { ArtifactService, type ArtifactEdit, type ReadOptions } from "../service";
+import { artifactIdFromFile } from "../artifactFile";
+import { artifactGuideResult } from "./guide";
 import type { JsonRpcRequest, JsonRpcResponse } from "./protocol";
-import { CANVAS_APP_URI, CANVAS_RESOURCE, canvasAppHtml, canvasAppResult } from "./app";
+import { ARTIFACTS_APP_URI, ARTIFACTS_RESOURCE, artifactAppHtml, artifactAppResult } from "./app";
 
 const PROTOCOL_VERSION = "2025-06-18";
 
@@ -11,7 +11,7 @@ import { MCP_TOOLS } from "./tools";
 
 export async function handleMcpRequest(
   request: JsonRpcRequest,
-  service: CanvasService,
+  service: ArtifactService,
 ): Promise<JsonRpcResponse | undefined> {
   if (request.id === undefined) {
     return undefined;
@@ -22,7 +22,7 @@ export async function handleMcpRequest(
       return ok(request.id, {
         protocolVersion: PROTOCOL_VERSION,
         capabilities: { tools: {}, resources: {} },
-        serverInfo: { name: "canvas", version: "0.1.0" },
+        serverInfo: { name: "artifacts", version: "0.1.0" },
       });
     }
     if (request.method === "ping") {
@@ -31,12 +31,12 @@ export async function handleMcpRequest(
     if (request.method === "tools/list") {
       return ok(request.id, { tools: MCP_TOOLS });
     }
-    if (request.method === "resources/list") return ok(request.id, { resources: [CANVAS_RESOURCE] });
+    if (request.method === "resources/list") return ok(request.id, { resources: [ARTIFACTS_RESOURCE] });
     if (request.method === "resources/templates/list") return ok(request.id, { resourceTemplates: [] });
     if (request.method === "resources/read") {
       const params = request.params as { uri?: string } | undefined;
-      if (params?.uri !== CANVAS_APP_URI) return error(request.id, -32002, "unknown resource");
-      return ok(request.id, { contents: [{ ...CANVAS_RESOURCE, text: await canvasAppHtml() }] });
+      if (params?.uri !== ARTIFACTS_APP_URI) return error(request.id, -32002, "unknown resource");
+      return ok(request.id, { contents: [{ ...ARTIFACTS_RESOURCE, text: await artifactAppHtml() }] });
     }
     if (request.method === "tools/call") {
       const params = (request.params ?? {}) as { name?: string; arguments?: Record<string, unknown> };
@@ -50,33 +50,33 @@ export async function handleMcpRequest(
 }
 
 async function callTool(
-  service: CanvasService,
+  service: ArtifactService,
   name: string,
   args: Record<string, unknown>,
 ): Promise<{ content: Array<{ type: "text"; text: string }>; isError?: boolean; structuredContent?: Record<string, unknown>; _meta?: Record<string, unknown> }> {
-  if (name === "canvas_guide") return canvasGuideResult();
-  if (name === "canvas_read" || name === "canvas_edit") {
-    if (typeof args.name !== "string") throw new Error("canvas name must be a string");
-    if (name === "canvas_read") {
+  if (name === "artifact_guide") return artifactGuideResult();
+  if (name === "artifact_read" || name === "artifact_edit") {
+    if (typeof args.name !== "string") throw new Error("artifact name must be a string");
+    if (name === "artifact_read") {
       return text(JSON.stringify(service.readRange(args.name, { file: args.file, start_line: args.start_line, end_line: args.end_line } as ReadOptions)));
     }
-    const result = service.edit(args.name, args.edits as CanvasEdit[], args.expected_hash as string | undefined, args.file as string | undefined);
+    const result = service.edit(args.name, args.edits as ArtifactEdit[], args.expected_hash as string | undefined, args.file as string | undefined);
     return withPreview(service, result, { name: args.name });
   }
-  if (name === "canvas_history") return text(JSON.stringify({ versions: service.history(args.name === undefined ? undefined : String(args.name)) }, null, 2));
-  if (name === "canvas_version") return text(JSON.stringify(service.version(String(args.version_id)), null, 2));
-  if (name === "canvas_remix") {
-    const result = service.remix(args as Parameters<CanvasService["remix"]>[0]);
+  if (name === "artifact_history") return text(JSON.stringify({ versions: service.history(args.name === undefined ? undefined : String(args.name)) }, null, 2));
+  if (name === "artifact_version") return text(JSON.stringify(service.version(String(args.version_id)), null, 2));
+  if (name === "artifact_remix") {
+    const result = service.remix(args as Parameters<ArtifactService["remix"]>[0]);
     return withPreview(service, result, { name: result.name });
   }
-  if (name === "canvas_restore") {
+  if (name === "artifact_restore") {
     const result = service.restore(String(args.version_id));
-    return withPreview(service, result, { name: canvasIdFromFile(result.path) });
+    return withPreview(service, result, { name: artifactIdFromFile(result.path) });
   }
-  if (name === "canvas_list") {
-    return text(JSON.stringify({ canvases: service.list() }, null, 2));
+  if (name === "artifact_list") {
+    return text(JSON.stringify({ artifacts: service.list() }, null, 2));
   }
-  if (name === "canvas_write") {
+  if (name === "artifact_write") {
     if (args.target !== undefined && args.target !== "inline" && args.target !== "herdr") throw new Error("target must be inline or herdr");
     const written = args.project === undefined ? service.write(String(args.name), String(args.contents ?? "")) : await service.writeProject(String(args.name), String(args.contents ?? ""), args.project);
     let opened: unknown;
@@ -86,22 +86,22 @@ async function callTool(
     const payload = { ...written, opened };
     return withPreview(service, payload, { name: String(args.name) });
   }
-  if (name === "canvas_typecheck") {
+  if (name === "artifact_typecheck") {
     const result = service.typecheck(String(args.name));
     return text(`${result.check}\n\n${JSON.stringify(result, null, 2)}`, result.diagnostics.length > 0);
   }
-  if (name === "canvas_compile") {
+  if (name === "artifact_compile") {
     const result = await service.compile(String(args.name));
     return text(
       `${result.check}\n\n${JSON.stringify({ ok: result.ok, path: result.path, bytes: result.js?.length ?? 0 }, null, 2)}`,
       !result.ok,
     );
   }
-  if (name === "canvas_open") {
+  if (name === "artifact_open") {
     if (Boolean(args.name) === Boolean(args.version_id)) throw new Error("provide name or version_id, but not both");
     if (args.target !== undefined && args.target !== "inline" && args.target !== "herdr") throw new Error("target must be inline or herdr");
     if (args.target !== "herdr") {
-      const result = await canvasAppResult(service, args as { name?: string; version_id?: string; event_id?: string });
+      const result = await artifactAppResult(service, args as { name?: string; version_id?: string; event_id?: string });
       return previewResult(result);
     }
     const result = await service.open(args.name === undefined ? "" : String(args.name), {
@@ -114,16 +114,16 @@ async function callTool(
   throw new Error(`unknown tool: ${name}`);
 }
 
-function previewResult(result: Awaited<ReturnType<typeof canvasAppResult>>) {
+function previewResult(result: Awaited<ReturnType<typeof artifactAppResult>>) {
   const { _meta, ...payload } = result;
   return { ...text(`${result.check}\n\n${JSON.stringify(payload, null, 2)}`, !result.ok), structuredContent: payload, ...(_meta ? { _meta } : {}) };
 }
 
-async function withPreview(service: CanvasService, result: { ok: boolean; check: string; [key: string]: unknown }, selection: { name: string }) {
+async function withPreview(service: ArtifactService, result: { ok: boolean; check: string; [key: string]: unknown }, selection: { name: string }) {
   if (!result.ok) return { ...text(JSON.stringify(result, null, 2), true), structuredContent: result };
   // Write/edit/restore have already applied. Preview failure must not imply rollback.
   try {
-    const preview = await canvasAppResult(service, selection);
+    const preview = await artifactAppResult(service, selection);
     const { _meta, ...details } = preview;
     const payload = { ...result, preview: details };
     return { ...text(JSON.stringify(preview.ok ? result : payload, null, 2), !preview.ok), structuredContent: payload, ...(_meta ? { _meta } : {}) };

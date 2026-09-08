@@ -9,7 +9,7 @@ export async function pluginCall<T>(plugin: string, operation: string, input: un
   }
   const encoded = JSON.stringify({ plugin, operation, input });
   if (new TextEncoder().encode(encoded).byteLength > 256 * 1024) throw new RangeError("Plugin input exceeds 256 KiB");
-  const bridge = (globalThis as typeof globalThis & { __herdrCanvas?: { onPluginCall?: (request: PluginRequest) => Promise<unknown> } }).__herdrCanvas;
+  const bridge = (globalThis as typeof globalThis & { __artifacts?: { onPluginCall?: (request: PluginRequest) => Promise<unknown> } }).__artifacts;
   if (!bridge?.onPluginCall) throw new Error("Plugin functions are unavailable in this view");
   const request: PluginRequest = JSON.parse(encoded);
   return new Promise<T>((resolve, reject) => {

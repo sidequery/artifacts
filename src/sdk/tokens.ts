@@ -1,6 +1,6 @@
 export type Tone = "success" | "danger" | "warning" | "info" | "neutral";
 
-export type CanvasPalette = {
+export type ArtifactPalette = {
   foreground: string;
   foregroundSecondary: string;
   foregroundTertiary: string;
@@ -28,7 +28,7 @@ export type CanvasPalette = {
   info: string;
 };
 
-export const canvasPaletteDark: CanvasPalette = {
+export const artifactPaletteDark: ArtifactPalette = {
   foreground: "#F0F0F0",
   foregroundSecondary: "#C2C2C2",
   foregroundTertiary: "#9A9A9A",
@@ -56,7 +56,7 @@ export const canvasPaletteDark: CanvasPalette = {
   info: "#88C0D0",
 };
 
-export const canvasPaletteLight: CanvasPalette = {
+export const artifactPaletteLight: ArtifactPalette = {
   foreground: "#141414",
   foregroundSecondary: "#3A3A3A",
   foregroundTertiary: "#5C5C5C",
@@ -118,7 +118,7 @@ export type AccentTokens = {
   control: string;
 };
 
-export type CanvasTokens = {
+export type ArtifactTokens = {
   text: TextTokens;
   bg: SurfaceTokens;
   fill: FillTokens;
@@ -126,13 +126,13 @@ export type CanvasTokens = {
   accent: AccentTokens;
 };
 
-export type CanvasHostTheme = CanvasTokens & {
+export type ArtifactHostTheme = ArtifactTokens & {
   kind: "dark" | "light";
-  tokens: CanvasTokens;
-  palette: CanvasPalette;
+  tokens: ArtifactTokens;
+  palette: ArtifactPalette;
 };
 
-export function tokensFromPalette(palette: CanvasPalette): CanvasTokens {
+export function tokensFromPalette(palette: ArtifactPalette): ArtifactTokens {
   return {
     text: {
       primary: palette.foreground,
@@ -166,13 +166,13 @@ export function tokensFromPalette(palette: CanvasPalette): CanvasTokens {
   };
 }
 
-export function themeFromKind(kind: "dark" | "light"): CanvasHostTheme {
-  const palette = kind === "light" ? canvasPaletteLight : canvasPaletteDark;
+export function themeFromKind(kind: "dark" | "light"): ArtifactHostTheme {
+  const palette = kind === "light" ? artifactPaletteLight : artifactPaletteDark;
   const tokens = tokensFromPalette(palette);
   return { kind, ...tokens, tokens, palette };
 }
 
-export function toneColor(theme: CanvasHostTheme, tone?: Tone | "success" | "danger" | "warning" | "info"): string {
+export function toneColor(theme: ArtifactHostTheme, tone?: Tone | "success" | "danger" | "warning" | "info"): string {
   if (tone === "success") return theme.palette.success;
   if (tone === "danger") return theme.palette.danger;
   if (tone === "warning") return theme.palette.warning;
@@ -180,7 +180,7 @@ export function toneColor(theme: CanvasHostTheme, tone?: Tone | "success" | "dan
   return theme.text.primary;
 }
 
-export const canvasTypography = {
+export const artifactTypography = {
   h1: { fontSize: "24px", lineHeight: "30px", fontWeight: 590 },
   h2: { fontSize: "18px", lineHeight: "24px", fontWeight: 590 },
   h3: { fontSize: "16px", lineHeight: "22px", fontWeight: 590 },

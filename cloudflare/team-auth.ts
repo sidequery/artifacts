@@ -34,7 +34,7 @@ export function teamAllowsUser(env: TeamAuthEnvironment, user: { email?: unknown
 /** This is the deployment's native Better Auth provider configuration seam.
  * JSON options pass through to Better Auth unchanged. Teams needing callbacks
  * or additional provider plugins can configure them here in ordinary TypeScript;
- * the Canvas server and provider picker do not enumerate provider IDs. */
+ * the Artifact server and provider picker do not enumerate provider IDs. */
 export function teamProviderOptions(env: TeamAuthEnvironment) {
   const social = configuredJson(env.BETTER_AUTH_SOCIAL_PROVIDERS, "BETTER_AUTH_SOCIAL_PROVIDERS", {});
   const oidc = configuredJson(env.BETTER_AUTH_OIDC_PROVIDERS, "BETTER_AUTH_OIDC_PROVIDERS", []);

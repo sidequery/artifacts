@@ -1,7 +1,7 @@
-import type { CanvasHttpResponse } from "../src/httpTypes";
+import type { ArtifactHttpResponse } from "../src/httpTypes";
 
 /** MCP transport is bounded; direct script URLs retain ordinary streaming HTTP. */
-export async function scriptResponse(response: Response, method: string): Promise<CanvasHttpResponse> {
+export async function scriptResponse(response: Response, method: string): Promise<ArtifactHttpResponse> {
   const reader = response.body?.getReader();
   let binary = "";
   try {

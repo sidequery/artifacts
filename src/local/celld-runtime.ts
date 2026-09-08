@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -16,14 +17,15 @@ const artifacts: Record<string, Artifact> = {
 
 export function celldArtifact(platform: string = process.platform, arch: string = process.arch): Artifact {
   const artifact = artifacts[`${platform}-${arch}`];
-  if (!artifact) throw new Error(`Managed celld ${CELLD_VERSION} does not support ${platform}/${arch}. Available: macOS arm64 and Linux glibc arm64/x64. Other Canvas commands do not require celld.`);
+  if (!artifact) throw new Error(`Managed celld ${CELLD_VERSION} does not support ${platform}/${arch}. Available: macOS arm64 and Linux glibc arm64/x64. Other Artifact commands do not require celld.`);
   return artifact;
 }
 
-export function canvasDataRoot(env: NodeJS.ProcessEnv = process.env, platform: string = process.platform, home = homedir()): string {
-  if (env.CANVAS_DATA_HOME) return resolve(env.CANVAS_DATA_HOME);
+export function artifactDataRoot(env: NodeJS.ProcessEnv = process.env, platform: string = process.platform, home = homedir()): string {
+  if (env.ARTIFACTS_DATA_HOME || env.CANVAS_DATA_HOME) return resolve(env.ARTIFACTS_DATA_HOME || env.CANVAS_DATA_HOME!);
   const base = platform === "darwin" ? join(home, "Library", "Application Support") : env.XDG_DATA_HOME || join(home, ".local", "share");
-  return join(base, "sidequery-canvas");
+  const current = join(base, "sidequery-artifacts"), legacy = join(base, "sidequery-canvas");
+  return !existsSync(current) && existsSync(legacy) ? legacy : current;
 }
 
 const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");

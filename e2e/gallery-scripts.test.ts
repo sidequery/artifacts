@@ -14,7 +14,7 @@ test("gallery edits scripts without execution and runs requests only on demand",
     if (url.pathname === "/client.js") return new Response(js, { headers: { "content-type": "text/javascript" } });
     if (url.pathname === "/api/session") return Response.json({});
     if (url.pathname === "/api/gallery") return Response.json({ workspace: "default", artifacts: hosted ? artifacts : [{ key: "local", name: "local", workspace: "default", working: true, versions: [] }], ...(hosted ? { capabilities: { scripts: true, links: true } } : {}) });
-    if (url.pathname === "/gallery/preview") return new Response("<p>Canvas preview</p>", { headers: { "content-type": "text/html" } });
+    if (url.pathname === "/gallery/preview") return new Response("<p>Artifact preview</p>", { headers: { "content-type": "text/html" } });
     if (url.pathname === "/api/source") {
       const source = 'export default { fetch() { return new Response("hello"); } };';
       return url.searchParams.get("format") === "json"

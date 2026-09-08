@@ -1,12 +1,12 @@
 import { expect, test } from "bun:test";
 import Ajv from "ajv";
 import { createPluginDispatcher, PluginError, PLUGIN_JSON_LIMIT } from "./plugins";
-import type { CanvasPlugin, PluginOperation, PluginContext } from "../src/plugins/config";
+import type { ArtifactPlugin, PluginOperation, PluginContext } from "../src/plugins/config";
 import { createAuthenticator } from "./auth";
 
 const schema = { type: "object", properties: { value: { type: "integer" } }, required: ["value"], additionalProperties: false };
 function setup(handler: PluginOperation["handler"], extra: Partial<PluginOperation> = {}, timeout = 30_000) {
-  const plugin: CanvasPlugin = { name: "data", description: "Test data", secrets: ["DATA_KEY"], operations: { read: { description: "Read", inputSchema: schema, outputSchema: schema, handler, ...extra } } };
+  const plugin: ArtifactPlugin = { name: "data", description: "Test data", secrets: ["DATA_KEY"], operations: { read: { description: "Read", inputSchema: schema, outputSchema: schema, handler, ...extra } } };
   const ajv = new Ajv({ strict: true });
   const input = ajv.compile(schema), output = ajv.compile(schema);
   return createPluginDispatcher([plugin], { input: (_plugin, _op, value) => input(value), output: (_plugin, _op, value) => output(value) }, timeout);

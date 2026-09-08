@@ -37,7 +37,7 @@ export function githubList(token: string, signal: AbortSignal, request: typeof f
     try {
       signal.throwIfAborted();
       const response = await request(url, { signal, redirect: "manual", headers: {
-        authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "user-agent": "canvas-runner-status",
+        authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "user-agent": "artifact-runner-status",
         "x-github-api-version": "2022-11-28",
       } });
       if (!response.ok) { await response.body?.cancel(); throw new Error("GitHub request failed"); }

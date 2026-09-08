@@ -1,11 +1,11 @@
-import { Button, H1, Row, Stack, Text, canvasFetch, useState, useEffect } from "sidequery/canvas";
+import { Button, H1, Row, Stack, Text, artifactFetch, useState, useEffect } from "sidequery/artifacts";
 
-export default function Canvas() {
+export default function Artifact() {
   const [count, setCount] = useState<number | null>(null);
   const [error, setError] = useState("");
   async function load(method = "GET") {
     try {
-      const response = await canvasFetch("/counter", { method });
+      const response = await artifactFetch("/counter", { method });
       if (!response.ok) throw new Error(`Counter request failed (${response.status})`);
       const data = await response.json() as { value: number };
       setCount(data.value);

@@ -8,19 +8,19 @@ import { relative, resolve } from "node:path";
 import { loadBrowserPlugins } from "./plugins/browser";
 import type { BrowserPlugins } from "./plugins/types";
 
-export function typecheckCanvas(canvasPath: string, plugins: BrowserPlugins = loadBrowserPlugins()): Diagnostic[] {
-  const source = readFileSync(canvasPath, "utf8");
-  const project = readLocalProject(canvasPath);
-  const violations = projectDiagnostics(canvasPath, source, project, Object.keys(plugins.paths));
+export function typecheckArtifact(artifactPath: string, plugins: BrowserPlugins = loadBrowserPlugins()): Diagnostic[] {
+  const source = readFileSync(artifactPath, "utf8");
+  const project = readLocalProject(artifactPath);
+  const violations = projectDiagnostics(artifactPath, source, project, Object.keys(plugins.paths));
   if (violations.length > 0) {
     return violations;
   }
 
   const snapshot = materializeProject(source, project);
-  try { return checkSnapshot(snapshot.path, plugins).map(item => ({ ...item, file: item.file === snapshot.path ? canvasPath : item.file?.replace(snapshot.directory + "/", "") })); } finally { snapshot.dispose(); }
+  try { return checkSnapshot(snapshot.path, plugins).map(item => ({ ...item, file: item.file === snapshot.path ? artifactPath : item.file?.replace(snapshot.directory + "/", "") })); } finally { snapshot.dispose(); }
 }
 
-function checkSnapshot(canvasPath: string, plugins: BrowserPlugins): Diagnostic[] {
+function checkSnapshot(artifactPath: string, plugins: BrowserPlugins): Diagnostic[] {
   const compilerOptions: ts.CompilerOptions = {
     target: ts.ScriptTarget.ES2022,
     module: ts.ModuleKind.ESNext,
@@ -34,6 +34,8 @@ function checkSnapshot(canvasPath: string, plugins: BrowserPlugins): Diagnostic[
     baseUrl: PLUGIN_ROOT,
     paths: {
       ...plugins.paths,
+      "@sidequery/artifacts": [relative(PLUGIN_ROOT, SDK_ENTRY)],
+      "sidequery/artifacts": [relative(PLUGIN_ROOT, SDK_ENTRY)],
       "@sidequery/canvas": [relative(PLUGIN_ROOT, SDK_ENTRY)],
       "sidequery/canvas": [relative(PLUGIN_ROOT, SDK_ENTRY)],
       "herdr/canvas": [relative(PLUGIN_ROOT, SDK_ENTRY)],
@@ -57,14 +59,14 @@ function checkSnapshot(canvasPath: string, plugins: BrowserPlugins): Diagnostic[
     }));
 
   const program = ts.createProgram({
-    rootNames: [canvasPath],
+    rootNames: [artifactPath],
     options: compilerOptions,
     host,
   });
   return ts
     .getPreEmitDiagnostics(program)
     .filter((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error)
-    .map((diagnostic) => toDiagnostic(diagnostic, canvasPath));
+    .map((diagnostic) => toDiagnostic(diagnostic, artifactPath));
 }
 
 function resolveSpecifier(
@@ -73,7 +75,7 @@ function resolveSpecifier(
   options: ts.CompilerOptions,
   host: ts.CompilerHost,
 ): ts.ResolvedModuleFull | undefined {
-  if (specifier === "sidequery/canvas" || specifier === "herdr/canvas" || specifier === "cursor/canvas") {
+  if (["sidequery/artifacts","@sidequery/artifacts","sidequery/canvas","@sidequery/canvas","herdr/canvas","cursor/canvas"].includes(specifier)) {
     return {
       resolvedFileName: SDK_ENTRY,
       extension: ts.Extension.Ts,
@@ -92,7 +94,7 @@ function resolveSpecifier(
   return fromRoot.resolvedModule;
 }
 
-function toDiagnostic(diagnostic: ts.Diagnostic, canvasPath: string): Diagnostic {
+function toDiagnostic(diagnostic: ts.Diagnostic, artifactPath: string): Diagnostic {
   const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n");
   if (diagnostic.file && diagnostic.start !== undefined) {
     const { line, character } = diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start);
@@ -104,5 +106,5 @@ function toDiagnostic(diagnostic: ts.Diagnostic, canvasPath: string): Diagnostic
       column: character + 1,
     };
   }
-  return { severity: "error", message, file: canvasPath };
+  return { severity: "error", message, file: artifactPath };
 }

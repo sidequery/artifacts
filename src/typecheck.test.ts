@@ -1,31 +1,31 @@
 import { expect, test } from "bun:test";
 
-import { formatCanvasCheck } from "./diagnostics";
-import { BAD_TYPE_CANVAS, FORBIDDEN_IMPORT_CANVAS, VALID_CANVAS, tempDir, writeCanvas } from "./test/fixtures";
-import { typecheckCanvas } from "./typecheck";
+import { formatArtifactCheck } from "./diagnostics";
+import { BAD_TYPE_ARTIFACT, FORBIDDEN_IMPORT_ARTIFACT, VALID_ARTIFACT, tempDir, writeArtifact } from "./test/fixtures";
+import { typecheckArtifact } from "./typecheck";
 
 test(
-  "typecheckCanvas accepts a valid canvas",
+  "typecheckArtifact accepts a valid artifact",
   () => {
-    const path = writeCanvas(tempDir(), "overview", VALID_CANVAS);
-    expect(typecheckCanvas(path)).toEqual([]);
+    const path = writeArtifact(tempDir(), "overview", VALID_ARTIFACT);
+    expect(typecheckArtifact(path)).toEqual([]);
   },
   { timeout: 30_000 },
 );
 
-test("typecheckCanvas reports sandbox violations first", () => {
-  const path = writeCanvas(tempDir(), "bad", FORBIDDEN_IMPORT_CANVAS);
-  const diagnostics = typecheckCanvas(path);
+test("typecheckArtifact reports sandbox violations first", () => {
+  const path = writeArtifact(tempDir(), "bad", FORBIDDEN_IMPORT_ARTIFACT);
+  const diagnostics = typecheckArtifact(path);
   expect(diagnostics.length).toBeGreaterThan(0);
-  expect(formatCanvasCheck(diagnostics)).toContain("Canvas TypeScript check:");
+  expect(formatArtifactCheck(diagnostics)).toContain("Artifact TypeScript check:");
   expect(diagnostics.some((item) => item.message.includes("node:fs"))).toBe(true);
 });
 
 test(
-  "typecheckCanvas flags incorrect SDK prop types",
+  "typecheckArtifact flags incorrect SDK prop types",
   () => {
-    const path = writeCanvas(tempDir(), "types", BAD_TYPE_CANVAS);
-    const diagnostics = typecheckCanvas(path);
+    const path = writeArtifact(tempDir(), "types", BAD_TYPE_ARTIFACT);
+    const diagnostics = typecheckArtifact(path);
     expect(diagnostics.length).toBeGreaterThan(0);
     expect(diagnostics.some((item) => /string/i.test(item.message) || /gap/i.test(item.message))).toBe(true);
   },

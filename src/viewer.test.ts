@@ -2,29 +2,29 @@ import { expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { join } from "node:path";
 
-import { tempDir, VALID_CANVAS, writeCanvas } from "./test/fixtures";
+import { tempDir, VALID_ARTIFACT, writeArtifact } from "./test/fixtures";
 import {
-  canvasPaneConfig,
+  artifactPaneConfig,
   paneInputCommand,
-  runManagedCanvasPane,
+  runManagedArtifactPane,
   terminalBrowserCommand,
   type TerminalBrowserChild,
 } from "./viewer";
 
-test("canvasPaneConfig requires a canvas inside its managed directory", () => {
+test("artifactPaneConfig requires an artifact inside its managed directory", () => {
   const dir = tempDir();
-  const path = writeCanvas(dir, "overview", VALID_CANVAS);
-  expect(canvasPaneConfig({ HERDR_CANVAS_PATH: path, HERDR_CANVAS_DIR: dir })).toEqual({
-    canvasPath: path,
-    canvasesDir: dir,
-    canvasId: "overview",
+  const path = writeArtifact(dir, "overview", VALID_ARTIFACT);
+  expect(artifactPaneConfig({ ARTIFACTS_PATH: path, ARTIFACTS_DIR: dir })).toEqual({
+    artifactPath: path,
+    artifactsDir: dir,
+    artifactId: "overview",
   });
-  expect(() => canvasPaneConfig({ HERDR_CANVAS_PATH: path, HERDR_CANVAS_DIR: join(dir, "other") })).toThrow(
-    "canvas path must be inside",
+  expect(() => artifactPaneConfig({ ARTIFACTS_PATH: path, ARTIFACTS_DIR: join(dir, "other") })).toThrow(
+    "artifact path must be inside",
   );
 });
 
-test("terminalBrowserCommand opens the Canvas without browser chrome", () => {
+test("terminalBrowserCommand opens the Artifact without browser chrome", () => {
   expect(terminalBrowserCommand("http://127.0.0.1:4567/c/overview", "/bin/terminal-browser")).toEqual([
     "/bin/terminal-browser",
     "open",
@@ -33,7 +33,16 @@ test("terminalBrowserCommand opens the Canvas without browser chrome", () => {
   ]);
 });
 
-test("paneInputCommand gives the Canvas pane application mouse routing", () => {
+test("existing pane environment remains readable and Artifacts values take priority", () => {
+  const dir = tempDir();
+  const path = writeArtifact(dir, "overview", VALID_ARTIFACT);
+  expect(artifactPaneConfig({ HERDR_CANVAS_PATH: path, HERDR_CANVAS_DIR: dir })).toEqual({
+    artifactPath: path, artifactsDir: dir, artifactId: "overview",
+  });
+  expect(artifactPaneConfig({ ARTIFACTS_PATH: path, ARTIFACTS_DIR: dir, HERDR_CANVAS_PATH: "/missing", HERDR_CANVAS_DIR: "/missing" }).artifactPath).toBe(path);
+});
+
+test("paneInputCommand gives the Artifact pane application mouse routing", () => {
   expect(paneInputCommand({ HERDR_BIN_PATH: "/bin/herdr", HERDR_PANE_ID: "w1:p2" })).toEqual([
     "/bin/herdr",
     "pane",
@@ -46,9 +55,9 @@ test("paneInputCommand gives the Canvas pane application mouse routing", () => {
   expect(() => paneInputCommand({})).toThrow("HERDR_PANE_ID is required");
 });
 
-test("managed Canvas pane owns and stops its server around Terminal Browser", async () => {
+test("managed Artifact pane owns and stops its server around Terminal Browser", async () => {
   const dir = tempDir();
-  const canvasPath = writeCanvas(dir, "overview", VALID_CANVAS);
+  const artifactPath = writeArtifact(dir, "overview", VALID_ARTIFACT);
 
   let stopped = false;
   let launched: string[] = [];
@@ -60,8 +69,8 @@ test("managed Canvas pane owns and stops its server around Terminal Browser", as
     return true;
   };
 
-  const running = runManagedCanvasPane({
-    config: { canvasPath, canvasesDir: dir, canvasId: "overview" },
+  const running = runManagedArtifactPane({
+    config: { artifactPath, artifactsDir: dir, artifactId: "overview" },
     env: { HERDR_PANE_ID: "w1:p2" },
     terminalBrowserBin: "/bin/terminal-browser",
     createServer: async () => ({

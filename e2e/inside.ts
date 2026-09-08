@@ -4,10 +4,10 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
 import { PLUGIN_ROOT } from "../src/paths";
-import { VALID_CANVAS } from "../src/test/fixtures";
+import { VALID_ARTIFACT } from "../src/test/fixtures";
 
-const SESSION = process.env.HERDR_SESSION ?? "canvas-e2e";
-const HOME = process.env.HOME ?? join(tmpdir(), "herdr-canvas-e2e-home");
+const SESSION = process.env.HERDR_SESSION ?? "artifact-e2e";
+const HOME = process.env.HOME ?? join(tmpdir(), "artifacts-e2e-home");
 
 function herdr(args: string[]): { status: number; stdout: string; stderr: string } {
   const result = spawnSync("herdr", args, {
@@ -90,34 +90,34 @@ async function main(): Promise<void> {
     console.error("herdr session is ready");
 
     mustHerdr(["plugin", "link", PLUGIN_ROOT]);
-    mustHerdr(["workspace", "create", "--cwd", PLUGIN_ROOT, "--label", "canvas-e2e", "--focus"]);
+    mustHerdr(["workspace", "create", "--cwd", PLUGIN_ROOT, "--label", "artifact-e2e", "--focus"]);
 
     const plugins = JSON.parse(mustHerdr(["plugin", "list", "--json"])) as {
       result?: { plugins?: Array<{ plugin_id?: string }> };
     };
     const pluginIds = (plugins.result?.plugins ?? []).map((plugin) => plugin.plugin_id ?? "");
-    if (!pluginIds.includes("herdr.canvas")) {
-      throw new Error(`herdr.canvas not linked: ${JSON.stringify(pluginIds)}`);
+    if (!pluginIds.includes("herdr.artifacts")) {
+      throw new Error(`herdr.artifacts not linked: ${JSON.stringify(pluginIds)}`);
     }
 
-    const canvasesDir = mkdtempSync(join(tmpdir(), "herdr-canvas-e2e-"));
-    writeFileSync(join(canvasesDir, "overview.canvas.tsx"), VALID_CANVAS);
-    const historyDb = join(HOME, "canvas-history.sqlite");
-    const canvasEnv = {
+    const artifactsDir = mkdtempSync(join(tmpdir(), "artifacts-e2e-"));
+    writeFileSync(join(artifactsDir, "overview.artifact.tsx"), VALID_ARTIFACT);
+    const historyDb = join(HOME, "artifact-history.sqlite");
+    const artifactEnv = {
       ...process.env, HOME, HERDR_SESSION: SESSION,
-      HERDR_CANVAS_DIR: canvasesDir,
-      HERDR_CANVAS_HISTORY_DB: historyDb,
-      HERDR_PLUGIN_STATE_DIR: join(HOME, "canvas-state"),
+      ARTIFACTS_DIR: artifactsDir,
+      ARTIFACTS_HISTORY_DB: historyDb,
+      HERDR_PLUGIN_STATE_DIR: join(HOME, "artifact-state"),
       SHELL: "/bin/bash", TERM: "xterm-256color",
     };
 
-    const opened = spawnSync("bun", [join(PLUGIN_ROOT, "src/cli.ts"), "open", "overview", "--dir", canvasesDir, "--placement", "tab"], {
+    const opened = spawnSync("bun", [join(PLUGIN_ROOT, "src/cli.ts"), "open", "overview", "--dir", artifactsDir, "--placement", "tab"], {
       encoding: "utf8",
       timeout: 30_000,
-      env: canvasEnv,
+      env: artifactEnv,
     });
     if (opened.status !== 0) {
-      throw new Error(`canvas open failed\n${opened.stdout}\n${opened.stderr}`);
+      throw new Error(`artifacts open failed\n${opened.stdout}\n${opened.stderr}`);
     }
     const payload = JSON.parse(opened.stdout) as {
       ok: boolean;
@@ -127,13 +127,13 @@ async function main(): Promise<void> {
       herdr?: { stdout?: string };
     };
     if (!payload.ok) {
-      throw new Error(`canvas open returned failure: ${opened.stdout}`);
+      throw new Error(`artifacts open returned failure: ${opened.stdout}`);
     }
-    if (payload.check !== "Canvas TypeScript check: no errors") {
+    if (payload.check !== "Artifact TypeScript check: no errors") {
       throw new Error(payload.check ?? "missing typecheck");
     }
-    if (payload.opened !== "canvas-pane") {
-      throw new Error(`open did not create a Canvas-owned pane: ${opened.stdout}`);
+    if (payload.opened !== "artifact-pane") {
+      throw new Error(`open did not create an Artifact-owned pane: ${opened.stdout}`);
     }
 
     const paneOpened = JSON.parse(payload.herdr?.stdout ?? "{}") as {
@@ -146,41 +146,41 @@ async function main(): Promise<void> {
     };
     const pluginPane = paneOpened.result?.plugin_pane;
     const paneId = pluginPane?.pane?.pane_id;
-    if (pluginPane?.plugin_id !== "herdr.canvas" || pluginPane.pane?.label !== "Canvas" || !paneId) {
-      throw new Error(`pane is not owned by herdr.canvas: ${payload.herdr?.stdout}`);
+    if (pluginPane?.plugin_id !== "herdr.artifacts" || pluginPane.pane?.label !== "Artifact" || !paneId) {
+      throw new Error(`pane is not owned by herdr.artifacts: ${payload.herdr?.stdout}`);
     }
 
-    const canvasUrl = await waitForCanvasUrl(paneId);
-    const page = await fetch(canvasUrl);
+    const artifactUrl = await waitForArtifactUrl(paneId);
+    const page = await fetch(artifactUrl);
     const html = await page.text();
-    if (!page.ok || !html.includes("__herdrCanvas") || !html.includes("bundle.js")) {
-      throw new Error(`canvas page was not served: ${page.status} ${html.slice(0, 500)}`);
+    if (!page.ok || !html.includes("__artifacts") || !html.includes("bundle.js")) {
+      throw new Error(`artifact page was not served: ${page.status} ${html.slice(0, 500)}`);
     }
     const scriptPath = html.match(/src="([^\"]+bundle\.js[^\"]*)"/)?.[1];
     if (!scriptPath || !scriptPath.startsWith("/v/")) throw new Error("page bundle was not pinned to a version");
-    const js = await fetch(new URL(scriptPath, canvasUrl));
+    const js = await fetch(new URL(scriptPath, artifactUrl));
     const bundle = await js.text();
     if (!js.ok || !bundle.includes("Overview")) {
-      throw new Error(`canvas bundle missing compiled UI: ${js.status} ${bundle.slice(0, 200)}`);
+      throw new Error(`artifact bundle missing compiled UI: ${js.status} ${bundle.slice(0, 200)}`);
     }
 
     const paneList = mustHerdr(["pane", "list"]);
-    if (!paneList.includes("Canvas")) {
-      throw new Error(`Canvas pane missing after open\n${paneList}`);
+    if (!paneList.includes("Artifact")) {
+      throw new Error(`Artifact pane missing after open\n${paneList}`);
     }
 
     mustHerdr(["pane", "close", paneId]);
-    await waitForServerStop(canvasUrl);
+    await waitForServerStop(artifactUrl);
 
-    const archived = spawnSync("bun", [join(PLUGIN_ROOT, "src/cli.ts"), "history", "overview"], { encoding: "utf8", timeout: 10_000, env: canvasEnv });
+    const archived = spawnSync("bun", [join(PLUGIN_ROOT, "src/cli.ts"), "history", "overview"], { encoding: "utf8", timeout: 10_000, env: artifactEnv });
     if (archived.status !== 0) throw new Error(`history failed after close: ${archived.stderr}`);
     const versions = JSON.parse(archived.stdout).versions as Array<{ version_id: string; serve_count: number }>;
     if (versions.length !== 1 || !versions[0]?.serve_count) throw new Error(`missing durable history: ${archived.stdout}`);
-    unlinkSync(join(canvasesDir, "overview.canvas.tsx")); // Disposable E2E fixture.
-    const reopened = spawnSync("bun", [join(PLUGIN_ROOT, "src/cli.ts"), "open", "--version", versions[0].version_id, "--placement", "tab"], { encoding: "utf8", timeout: 30_000, env: canvasEnv });
+    unlinkSync(join(artifactsDir, "overview.artifact.tsx")); // Disposable E2E fixture.
+    const reopened = spawnSync("bun", [join(PLUGIN_ROOT, "src/cli.ts"), "open", "--version", versions[0].version_id, "--placement", "tab"], { encoding: "utf8", timeout: 30_000, env: artifactEnv });
     if (reopened.status !== 0) throw new Error(`archive reopen failed: ${reopened.stdout}\n${reopened.stderr}`);
     const replayPane = JSON.parse(JSON.parse(reopened.stdout).herdr.stdout).result.plugin_pane.pane.pane_id as string;
-    const replayUrl = await waitForCanvasUrl(replayPane);
+    const replayUrl = await waitForArtifactUrl(replayPane);
     if (!replayUrl.includes(`/v/${versions[0].version_id}`)) throw new Error(`wrong replay URL: ${replayUrl}`);
     const replayPage = await fetch(replayUrl);
     const replayHtml = await replayPage.text();
@@ -195,7 +195,7 @@ async function main(): Promise<void> {
       JSON.stringify(
         {
           ok: true,
-          url: canvasUrl,
+          url: artifactUrl,
           opened: payload.opened,
           pluginId: pluginPane.plugin_id,
           paneId,
@@ -218,7 +218,7 @@ async function main(): Promise<void> {
   }
 }
 
-async function waitForCanvasUrl(paneId: string, timeoutMs = 20_000): Promise<string> {
+async function waitForArtifactUrl(paneId: string, timeoutMs = 20_000): Promise<string> {
   const started = Date.now();
   let last = "";
   while (Date.now() - started < timeoutMs) {
@@ -231,20 +231,20 @@ async function waitForCanvasUrl(paneId: string, timeoutMs = 20_000): Promise<str
     await Bun.sleep(200);
   }
   const paneList = herdr(["pane", "list"]);
-  throw new Error(`Canvas Terminal Browser did not load its managed URL\n${last}\n\npanes:\n${paneList.stdout}\n${paneList.stderr}`);
+  throw new Error(`Artifact Terminal Browser did not load its managed URL\n${last}\n\npanes:\n${paneList.stdout}\n${paneList.stderr}`);
 }
 
-async function waitForServerStop(canvasUrl: string, timeoutMs = 10_000): Promise<void> {
+async function waitForServerStop(artifactUrl: string, timeoutMs = 10_000): Promise<void> {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     try {
-      await fetch(canvasUrl, { signal: AbortSignal.timeout(500) });
+      await fetch(artifactUrl, { signal: AbortSignal.timeout(500) });
     } catch {
       return;
     }
     await Bun.sleep(200);
   }
-  throw new Error(`Canvas server remained alive after its pane closed: ${canvasUrl}`);
+  throw new Error(`Artifact server remained alive after its pane closed: ${artifactUrl}`);
 }
 
 await main();

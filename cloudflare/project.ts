@@ -5,7 +5,7 @@ export type ArtifactProject = { files: Record<string, string>; dependencies: Rec
 export const emptyProject = (): ArtifactProject => ({ files: {}, dependencies: {}, lock: {} });
 const size = (value: string) => new TextEncoder().encode(value).byteLength;
 const packageName = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
-const reserved = new Set(["canvas.canvas.tsx", "canvas.canvas.server.ts", "script.ts", "entry.ts", "server-entry.ts", "package.json", "__proto__", "constructor", "prototype"]);
+const reserved = new Set(["artifact.artifact.tsx", "artifact.artifact.server.ts", "script.ts", "entry.ts", "server-entry.ts", "package.json", "__proto__", "constructor", "prototype"]);
 function record(value: unknown, label: string): Record<string, string> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} must be an object`);
   const result: Record<string,string> = {};
@@ -97,7 +97,7 @@ export async function resolveProject(input: unknown, previous?: ArtifactProject,
   const install = async (name: string, range: string, requestedBy: string): Promise<void> => {
     if (!packageName.test(name)) throw new Error(`unsupported dependency ${name} requested by ${requestedBy}`);
     if (hostPackages[name]) {
-      if (!satisfies(hostPackages[name]!, range)) throw new Error(`${requestedBy} requires ${name}@${range}, but Canvas supplies ${name}@${hostPackages[name]}; choose a compatible package version`);
+      if (!satisfies(hostPackages[name]!, range)) throw new Error(`${requestedBy} requires ${name}@${range}, but Artifact supplies ${name}@${hostPackages[name]}; choose a compatible package version`);
       return;
     }
     const existing = manifests.get(name);

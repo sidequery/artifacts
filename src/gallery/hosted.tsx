@@ -36,7 +36,7 @@ export function LinkSettings({ artifact, onSaved }: { artifact: GalleryArtifact;
   useEffect(() => { setSlug(artifact.slug ?? ""); setAccess(artifact.access ?? "private"); }, [artifact.slug, artifact.access]);
   return <form className="link-settings" onSubmit={async event => {
     event.preventDefault(); setBusy(true); setStatus("");
-    try { await galleryTool(artifact.workspace, "artifact_link", { kind: artifact.kind ?? "canvas", name: artifact.name, slug, access }); await onSaved(); setStatus("Link saved"); }
+    try { await galleryTool(artifact.workspace, "artifact_link", { kind: artifact.kind ?? "artifact", name: artifact.name, slug, access }); await onSaved(); setStatus("Link saved"); }
     catch (error) { setStatus(message(error)); } finally { setBusy(false); }
   }}>
     <label>URL / <input aria-label="URL slug" required value={slug} onChange={event => setSlug(event.target.value)} /></label>
@@ -118,7 +118,7 @@ export function ScriptPanel({ artifact, workspace, version, sourceUrl, onSaved, 
   </div>;
 }
 
-export function CanvasSourcePanel({ artifact, version, sourceUrl, onSaved }: { artifact: GalleryArtifact; version: string; sourceUrl: string; onSaved: () => Promise<void> }) {
+export function ArtifactSourcePanel({ artifact, version, sourceUrl, onSaved }: { artifact: GalleryArtifact; version: string; sourceUrl: string; onSaved: () => Promise<void> }) {
   const [snapshot, setSnapshot] = useState<SourceSnapshot | null>(null);
   const [loadedUrl, setLoadedUrl] = useState("");
   const [projectValid, setProjectValid] = useState(true);
@@ -136,14 +136,14 @@ export function CanvasSourcePanel({ artifact, version, sourceUrl, onSaved }: { a
     if (!loaded || !snapshot) return;
     setBusy(true); setError(""); setStatus("");
     try {
-      await galleryTool(artifact.workspace, historical ? "canvas_restore" : "canvas_write", historical ? { version_id: version } : { name: artifact.name, contents: snapshot.source, server: snapshot.server_source ?? null, project: snapshot.project });
-      await onSaved(); setStatus(historical ? "Revision restored" : "Canvas saved");
+      await galleryTool(artifact.workspace, historical ? "artifact_restore" : "artifact_write", historical ? { version_id: version } : { name: artifact.name, contents: snapshot.source, server: snapshot.server_source ?? null, project: snapshot.project });
+      await onSaved(); setStatus(historical ? "Revision restored" : "Artifact saved");
     } catch (error) { setError(message(error)); } finally { setBusy(false); }
   }
   return <div className="script-panel">
     {error ? <p role="alert" className="error-message">{error}</p> : null}
     {status ? <p role="status">{status}</p> : null}
-    {!loaded ? <p role="status">Loading source…</p> : <ProjectEditor key={loadedUrl} entries={[{ id: "client", label: "Canvas source", source: snapshot.source }, ...(snapshot.server_source === null || snapshot.server_source === undefined ? [] : [{ id: "server", label: "Server source", source: snapshot.server_source }])]} project={snapshot.project} onProjectChange={project => setSnapshot({ ...snapshot, project })} onEntryChange={(id, source) => setSnapshot(id === "server" ? { ...snapshot, server_source: source } : { ...snapshot, source })} readOnly={historical} disabled={busy} onValidityChange={setProjectValid} />}
-    <button type="button" disabled={busy || !loaded || !projectValid} onClick={() => void save()}>{historical ? "Restore revision" : "Save canvas"}</button>
+    {!loaded ? <p role="status">Loading source…</p> : <ProjectEditor key={loadedUrl} entries={[{ id: "client", label: "Artifact source", source: snapshot.source }, ...(snapshot.server_source === null || snapshot.server_source === undefined ? [] : [{ id: "server", label: "Server source", source: snapshot.server_source }])]} project={snapshot.project} onProjectChange={project => setSnapshot({ ...snapshot, project })} onEntryChange={(id, source) => setSnapshot(id === "server" ? { ...snapshot, server_source: source } : { ...snapshot, source })} readOnly={historical} disabled={busy} onValidityChange={setProjectValid} />}
+    <button type="button" disabled={busy || !loaded || !projectValid} onClick={() => void save()}>{historical ? "Restore revision" : "Save artifact"}</button>
   </div>;
 }

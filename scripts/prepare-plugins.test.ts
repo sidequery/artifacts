@@ -7,7 +7,7 @@ import { preparePlugins, validatePlugins } from "./prepare-plugins";
 test("builds server schemas and a public catalog without credentials or handler source", async () => {
   const root = await mkdtemp(join(tmpdir(), "plugin-config-"));
   try {
-    await writeFile(join(root, "canvas.plugins.ts"), `export default [{name:"directory",description:"Records",secrets:["DIRECTORY_TOKEN"],operations:{lookup:{description:"Lookup",inputSchema:{type:"object",properties:{id:{type:"string"}},required:["id"],additionalProperties:false},outputSchema:{type:"string"},handler:()=>"HANDLER_ONLY_SENTINEL"}}}];`);
+    await writeFile(join(root, "artifacts.plugins.ts"), `export default [{name:"directory",description:"Records",secrets:["DIRECTORY_TOKEN"],operations:{lookup:{description:"Lookup",inputSchema:{type:"object",properties:{id:{type:"string"}},required:["id"],additionalProperties:false},outputSchema:{type:"string"},handler:()=>"HANDLER_ONLY_SENTINEL"}}}];`);
     const output = join(root, "dist");
     const prepared = await preparePlugins(root, output);
     expect(prepared.browser).toEqual({ modules: {}, files: {}, paths: {} });
@@ -29,4 +29,17 @@ test("rejects ambiguous plugin config and requires explicit files to exist", asy
   expect(() => validatePlugins([{ ...plugin, name: "react" }])).toThrow("reserved");
   expect(() => validatePlugins([{ ...plugin, browser: undefined }])).toThrow("must provide");
   await expect(preparePlugins(import.meta.dir, "/tmp/unused-plugin-output", "missing-config.ts")).rejects.toThrow("does not exist");
+});
+
+test("legacy deployment plugins remain configured until an Artifacts config replaces them", async () => {
+  const root = await mkdtemp(join(tmpdir(), "plugin-rename-"));
+  try {
+    await writeFile(join(root, "canvas.plugins.ts"), 'export default [{name:"legacy",description:"Existing integration",operations:{read:{description:"Read",inputSchema:{type:"object"},handler:()=>"ok"}}}];');
+    const output = join(root, "dist");
+    await preparePlugins(root, output);
+    expect(await readFile(join(output, "plugin-catalog.json"), "utf8")).toContain('"legacy"');
+    await writeFile(join(root, "artifacts.plugins.ts"), "export default [];");
+    await preparePlugins(root, output);
+    expect(JSON.parse(await readFile(join(output, "plugin-catalog.json"), "utf8"))).toEqual([]);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

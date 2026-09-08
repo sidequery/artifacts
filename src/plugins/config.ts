@@ -16,7 +16,7 @@ export type PluginOperation = {
   handler: (input: any, context: PluginContext) => unknown | Promise<unknown>;
 };
 
-export type CanvasPlugin = {
+export type ArtifactPlugin = {
   /** Also the public browser import, when a browser entry is supplied. */
   name: string;
   description: string;
@@ -30,6 +30,6 @@ export type CanvasPlugin = {
 };
 
 /** Configuration is trusted operator code, evaluated only during build and on the server. */
-export function definePlugins<const T extends readonly CanvasPlugin[]>(plugins: T): T {
+export function definePlugins<const T extends readonly ArtifactPlugin[]>(plugins: T): T {
   return plugins;
 }

@@ -1,26 +1,26 @@
 import { expect, test } from "bun:test";
 import { existsSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { CanvasService } from "./service";
-import { createCanvasServer } from "./serve";
+import { ArtifactService } from "./service";
+import { createArtifactServer } from "./serve";
 import { handleMcpRequest } from "./mcp/local-tools";
-import { VALID_CANVAS, tempDir } from "./test/fixtures";
+import { VALID_ARTIFACT, tempDir } from "./test/fixtures";
 
 function setup() {
   const dir = tempDir();
   const db = join(dir, "history.sqlite");
-  const service = new CanvasService({ cwd: dir, canvasesDir: dir, env: { HERDR_CANVAS_HISTORY_DB: db } });
-  writeFileSync(join(dir, "source.canvas.tsx"), VALID_CANVAS);
+  const service = new ArtifactService({ cwd: dir, artifactsDir: dir, env: { ARTIFACTS_HISTORY_DB: db } });
+  writeFileSync(join(dir, "source.artifact.tsx"), VALID_ARTIFACT);
   return { dir, db, service };
 }
 
 test("remix copies working source with durable provenance and fresh state", () => {
   const { dir, service } = setup();
-  writeFileSync(join(dir, "source.canvas.data.json"), '{"secret":"private"}');
+  writeFileSync(join(dir, "source.artifact.data.json"), '{"secret":"private"}');
   const result = service.remix({ name: "source", new_name: "copy" });
   expect(result.ok).toBe(true);
-  expect(readFileSync(result.path, "utf8")).toBe(VALID_CANVAS);
-  expect(existsSync(join(dir, "copy.canvas.data.json"))).toBe(false);
+  expect(readFileSync(result.path, "utf8")).toBe(VALID_ARTIFACT);
+  expect(existsSync(join(dir, "copy.artifact.data.json"))).toBe(false);
   const version = service.version(result.versionId);
   expect(version.origin).toMatchObject({ source_name: "source", source_version_id: service.history("source")[0]!.version_id });
   expect(version.events).toEqual([]);
@@ -32,9 +32,9 @@ test("archived remix copies selected revision even after source is deleted", () 
   const { dir, service } = setup();
   service.remix({ name: "source", new_name: "first" });
   const versionId = service.history("source")[0]!.version_id;
-  unlinkSync(join(dir, "source.canvas.tsx"));
+  unlinkSync(join(dir, "source.artifact.tsx"));
   const result = service.remix({ version_id: versionId, new_name: "second" });
-  expect(readFileSync(result.path, "utf8")).toBe(VALID_CANVAS);
+  expect(readFileSync(result.path, "utf8")).toBe(VALID_ARTIFACT);
   expect(service.version(result.versionId).origin).toMatchObject({ source_version_id: versionId });
   expect(() => service.remix({ version_id: versionId, new_name: "source" })).toThrow("history");
 });
@@ -47,11 +47,11 @@ test("remix rejects collisions, links, orphan state, traversal and ambiguous sou
   expect(() => service.remix({ name: "../source", new_name: "copy" })).toThrow("slashes");
   expect(() => service.remix({ name: "source", new_name: "../copy" })).toThrow("slashes");
   expect(() => service.remix({ name: "source", new_name: "source" })).toThrow("exists");
-  symlinkSync(join(dir, "missing"), join(dir, "copy.canvas.tsx"));
+  symlinkSync(join(dir, "missing"), join(dir, "copy.artifact.tsx"));
   expect(() => service.remix({ name: "source", new_name: "copy" })).toThrow("exists");
-  symlinkSync(join(dir, "source.canvas.tsx"), join(dir, "link.canvas.tsx"));
+  symlinkSync(join(dir, "source.artifact.tsx"), join(dir, "link.artifact.tsx"));
   expect(() => service.remix({ name: "link", new_name: "new" })).toThrow("symlink");
-  writeFileSync(join(dir, "orphan.canvas.data.json"), '{}');
+  writeFileSync(join(dir, "orphan.artifact.data.json"), '{}');
   expect(() => service.remix({ name: "source", new_name: "orphan" })).toThrow("exists");
   expect(service.history()).toEqual([]);
 });
@@ -66,20 +66,20 @@ test("CLI remixes working and archived sources; local MCP validates the same con
     expect({ code: await child.exited, err }).toEqual({ code: 0, err: "" });
     expect(JSON.parse(out).remixed).toBe(true);
   }
-  const response = await handleMcpRequest({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "canvas_remix", arguments: { name: "source", version_id: "bad", new_name: "mcp-copy" } } }, service);
+  const response = await handleMcpRequest({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "artifact_remix", arguments: { name: "source", version_id: "bad", new_name: "mcp-copy" } } }, service);
   expect(response?.error?.message).toContain("provide name or version_id");
 }, 120_000);
 
 test("gallery remix requires same-origin JSON and creates a distinct artifact", async () => {
   const { dir, db } = setup();
-  const server = await createCanvasServer({ canvasesDir: dir, historyPath: db, gallery: true });
+  const server = await createArtifactServer({ artifactsDir: dir, historyPath: db, gallery: true });
   try {
-    const body = JSON.stringify({ name: "canvas_remix", arguments: { name: "source", new_name: "web-copy" } });
+    const body = JSON.stringify({ name: "artifact_remix", arguments: { name: "source", new_name: "web-copy" } });
     const rejected = await fetch(server.url + "/api/tools", { method: "POST", headers: { "content-type": "application/json", origin: "https://untrusted.example" }, body });
     expect(rejected.status).toBe(403);
     const rebound = await fetch(server.url + "/api/tools", { method: "POST", headers: { "content-type": "application/json", host: "untrusted.example", origin: "http://untrusted.example" }, body });
     expect(rebound.status).toBe(403);
-    expect(existsSync(join(dir, "web-copy.canvas.tsx"))).toBe(false);
+    expect(existsSync(join(dir, "web-copy.artifact.tsx"))).toBe(false);
     const accepted = await fetch(server.url + "/api/tools", { method: "POST", headers: { "content-type": "application/json", origin: server.url }, body });
     expect(accepted.status).toBe(200);
     expect(await accepted.json()).toMatchObject({ ok: true, remixed: true, name: "web-copy" });

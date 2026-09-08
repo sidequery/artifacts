@@ -10,7 +10,7 @@ type RequestBehavior = "accept" | "decline" | "throw";
 
 declare global {
   interface Window {
-    canvasAppHtml: string;
+    artifactAppHtml: string;
     mcpHost?: {
       initialized: boolean;
       messages: unknown[];
@@ -51,7 +51,7 @@ let hostContext: McpUiHostContext = {
 
 const bridge = new AppBridge(
   null,
-  { name: "Canvas browser test host", version: "1.0.0" },
+  { name: "Artifact browser test host", version: "1.0.0" },
   { message: { text: {} }, openLinks: {}, serverTools: {} },
   { hostContext },
 );
@@ -144,4 +144,4 @@ bridge.oninitialized = () => {
 
 applyFrameSize();
 await bridge.connect(new PostMessageTransport(iframe.contentWindow!, iframe.contentWindow!));
-iframe.srcdoc = window.canvasAppHtml;
+iframe.srcdoc = window.artifactAppHtml;

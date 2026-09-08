@@ -1,18 +1,18 @@
-export type { CanvasAction, SetCanvasState } from "./hooks";
+export type { ArtifactAction, SetArtifactState } from "./hooks";
 export { useState, useReducer, useRef, useMemo, useCallback, useEffect } from "react";
-export { useCanvasAction, useCanvasState, useHostTheme } from "./hooks";
-export { canvasFetch, type CanvasHttpRequest, type CanvasHttpResponse } from "./server";
+export { useArtifactAction, useArtifactState, useHostTheme } from "./hooks";
+export { artifactFetch, type ArtifactHttpRequest, type ArtifactHttpResponse } from "./server";
 export { pluginCall, type PluginRequest } from "./plugins";
-export { canvasFiles, MAX_CANVAS_FILE_BYTES, type CanvasFile, type CanvasFileRequest, type CanvasFileResult, type CanvasFileList, type CanvasFileTransfer } from "./files";
+export { artifactFiles, MAX_ARTIFACTS_FILE_BYTES, type ArtifactFile, type ArtifactFileRequest, type ArtifactFileResult, type ArtifactFileList, type ArtifactFileTransfer } from "./files";
 export {
-  canvasPaletteDark,
-  canvasPaletteLight,
-  canvasTypography,
+  artifactPaletteDark,
+  artifactPaletteLight,
+  artifactTypography,
   themeFromKind,
   tokensFromPalette,
-  type CanvasHostTheme,
-  type CanvasPalette,
-  type CanvasTokens,
+  type ArtifactHostTheme,
+  type ArtifactPalette,
+  type ArtifactTokens,
   type Tone,
 } from "./tokens";
 export {
@@ -66,3 +66,10 @@ export {
 } from "./forms";
 
 export { Routes, Route, Outlet, Navigate, NavLink, useNavigate, useParams, useLocation, useSearchParams, useMatch, useResolvedPath, type RouteObject, type NavigateOptions, type To } from "./routing";
+
+// Historical source files and archived projects retain their original SDK names.
+export type { ArtifactAction as CanvasAction, SetArtifactState as SetCanvasState } from "./hooks";
+export { useArtifactAction as useCanvasAction, useArtifactState as useCanvasState } from "./hooks";
+export { artifactFetch as canvasFetch, type ArtifactHttpRequest as CanvasHttpRequest, type ArtifactHttpResponse as CanvasHttpResponse } from "./server";
+export { artifactFiles as canvasFiles, MAX_ARTIFACTS_FILE_BYTES as MAX_CANVAS_FILE_BYTES, type ArtifactFile as CanvasFile, type ArtifactFileRequest as CanvasFileRequest, type ArtifactFileResult as CanvasFileResult, type ArtifactFileList as CanvasFileList, type ArtifactFileTransfer as CanvasFileTransfer } from "./files";
+export { artifactPaletteDark as canvasPaletteDark, artifactPaletteLight as canvasPaletteLight, artifactTypography as canvasTypography, type ArtifactHostTheme as CanvasHostTheme, type ArtifactPalette as CanvasPalette, type ArtifactTokens as CanvasTokens } from "./tokens";

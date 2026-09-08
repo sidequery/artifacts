@@ -1,6 +1,6 @@
 import { afterAll, afterEach, expect, spyOn, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { CanvasExecution } from "./canvas-execution";
+import { ArtifactExecution } from "./artifact-execution";
 
 // Real SQLite for host history; the KV/alarm adapter exposes observable state
 // without requiring a Workers isolate for scheduling state transitions.
@@ -19,7 +19,7 @@ function fixture() {
     deleteAlarm: async () => { alarm = null; },
     transaction: async (callback: (storage: unknown) => Promise<unknown>) => callback(storage),
   };
-  return { execution: new CanvasExecution(storage as unknown as DurableObjectStorage), storage, alarm: () => alarm, db };
+  return { execution: new ArtifactExecution(storage as unknown as DurableObjectStorage), storage, alarm: () => alarm, db };
 }
 const now = spyOn(Date, "now");
 afterEach(() => now.mockReset());
@@ -54,7 +54,7 @@ test("a claimed occurrence survives interruption without being replayed", async 
   const claimed = await execution.claim();
   expect(claimed).not.toBeNull();
   expect(execution.runs()).toMatchObject([{ id: claimed!.run.id, revision: active.version_id, status: "running", trigger: "schedule" }]);
-  const restarted = new CanvasExecution(storage as unknown as DurableObjectStorage);
+  const restarted = new ArtifactExecution(storage as unknown as DurableObjectStorage);
   expect(await restarted.claim()).toBeNull();
   expect(restarted.runs()).toMatchObject([{ id: claimed!.run.id, status: "interrupted" }]);
 });
@@ -93,7 +93,7 @@ test("history records revision, trigger, duration and failures; restart retains 
   const failed = execution.start("version-2", "http");
   execution.finish(failed, 500);
   const uncertain = execution.start("version-3", "manual");
-  const recovered = new CanvasExecution(storage as unknown as DurableObjectStorage);
+  const recovered = new ArtifactExecution(storage as unknown as DurableObjectStorage);
   expect(recovered.runs().find(run => run.id === uncertain.id)).toMatchObject({ status: "interrupted", finished_at: null });
   expect(recovered.runs().find(run => run.id === failed.id)).toMatchObject({ status: "failed", http_status: 500 });
   expect(() => recovered.runs(101)).toThrow();
@@ -105,7 +105,7 @@ test("compiled source and scheduled bodies larger than KV values persist in host
   const source = "x".repeat(200_000), body = btoa("y".repeat(200_000));
   await execution.activate({ ...active, code: source });
   await execution.update({ action: "set", interval_seconds: 3600, request: { ...request, body } });
-  const restarted = new CanvasExecution(storage as unknown as DurableObjectStorage);
+  const restarted = new ArtifactExecution(storage as unknown as DurableObjectStorage);
   expect((await restarted.active())?.code).toBe(source);
   expect((await restarted.get())?.request.body).toBe(body);
 });

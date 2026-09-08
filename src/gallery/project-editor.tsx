@@ -32,7 +32,7 @@ export function ProjectEditor({ entries, project, onProjectChange, onEntryChange
   const locked = readOnly || disabled;
   function addFile() {
     const path = filename.trim();
-    if (!/^[a-zA-Z0-9_./-]+\.(?:[cm]?[jt]sx?|json)$/.test(path) || path.split("/").some(part => !part || part === "." || part === ".." || part === "node_modules") || ["canvas.canvas.tsx", "canvas.canvas.server.ts", "script.ts", "entry.ts", "server-entry.ts", "package.json"].includes(path)) {
+    if (!/^[a-zA-Z0-9_./-]+\.(?:[cm]?[jt]sx?|json)$/.test(path) || path.split("/").some(part => !part || part === "." || part === ".." || part === "node_modules") || ["artifact.artifact.tsx", "artifact.artifact.server.ts", "script.ts", "entry.ts", "server-entry.ts", "package.json"].includes(path)) {
       setFileError("Use a relative .ts, .tsx, .js, or .json helper path, such as lib/helpers.ts."); return;
     }
     if (Object.hasOwn(project.files, path)) { setFileError("That file already exists."); return; }

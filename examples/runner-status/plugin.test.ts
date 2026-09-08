@@ -41,7 +41,7 @@ test("forwards collector authentication only server-side and rejects redirects a
 test("sample compiles to discoverable read-only MCP catalog and validates its empty input", async () => {
   const output = await mkdtemp(join(tmpdir(), "runner-plugin-"));
   try {
-    const built = await preparePlugins(join(import.meta.dir, "../.."), output, "examples/runner-status/canvas.plugins.ts");
+    const built = await preparePlugins(join(import.meta.dir, "../.."), output, "examples/runner-status/artifacts.plugins.ts");
     expect(built.catalog[0]).toMatchObject({ name: "github-runners", operations: [{ name: "getStatus", readOnly: true }] });
     const catalog = await readFile(join(output, "plugin-catalog.json"), "utf8");
     expect(catalog).not.toContain("RUNNER_STATUS_TOKEN");

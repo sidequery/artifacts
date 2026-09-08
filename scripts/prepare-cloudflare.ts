@@ -1,6 +1,6 @@
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
-import { canvasAppHtml } from "../src/mcp/app";
+import { artifactAppHtml } from "../src/mcp/app";
 import { galleryBundle, galleryHtml } from "../src/gallery/server";
 import { authBundle, authPageHtml } from "../src/auth/server";
 import Ajv from "ajv";
@@ -16,7 +16,7 @@ import * as jsx from "react/jsx-runtime";
 import * as jsxDev from "react/jsx-dev-runtime";
 import { preparePlugins } from "./prepare-plugins";
 
-// Ship the lockfile-resolved dependencies with the compiler. Compiling a canvas
+// Ship the lockfile-resolved dependencies with the compiler. Compiling a artifact
 // must never install packages or depend on npm being available at request time.
 const root = join(import.meta.dir, "..");
 const plugins = await preparePlugins(root, join(root, "dist/cloudflare"));
@@ -60,8 +60,8 @@ const runtimeJs = await runtimeBuild.outputs[0]!.text();
 await writeFile(join(dirname(output), "browser-runtime.json"), JSON.stringify({
   js: runtimeJs,
   sharedVersions: Object.fromEntries(await Promise.all(["react", "react-dom", "react-router"].map(async name => [name, JSON.parse(await readFile(join(root, "node_modules", name, "package.json"), "utf8")).version]))),
-  sharedModules: Object.fromEntries(Object.entries({ react: { value: react, key: "react" }, "react-dom": { value: reactDom, key: "reactDom" }, "react-dom/client": { value: reactDomClient, key: "reactDomClient" }, "react-router": { value: reactRouter, key: "reactRouter" }, "react/jsx-runtime": { value: jsx, key: "jsx" }, "react/jsx-dev-runtime": { value: jsxDev, key: "jsxDev" } }).map(([name, {value, key}]) => [name, `export default globalThis.__herdrCanvasRuntime.${key};\n` + Object.keys(value).filter(item => item !== "default" && /^[A-Za-z_$][\w$]*$/.test(item)).map(item => `export const ${item} = globalThis.__herdrCanvasRuntime.${key}.${item};`).join("\n")])),
-  sdkModule: Object.keys(sdk).sort().map(name => `export const ${name} = globalThis.__herdrCanvasRuntime.sdk.${name};`).join("\n"),
+  sharedModules: Object.fromEntries(Object.entries({ react: { value: react, key: "react" }, "react-dom": { value: reactDom, key: "reactDom" }, "react-dom/client": { value: reactDomClient, key: "reactDomClient" }, "react-router": { value: reactRouter, key: "reactRouter" }, "react/jsx-runtime": { value: jsx, key: "jsx" }, "react/jsx-dev-runtime": { value: jsxDev, key: "jsxDev" } }).map(([name, {value, key}]) => [name, `export default globalThis.__artifactsRuntime.${key};\n` + Object.keys(value).filter(item => item !== "default" && /^[A-Za-z_$][\w$]*$/.test(item)).map(item => `export const ${item} = globalThis.__artifactsRuntime.${key}.${item};`).join("\n")])),
+  sdkModule: Object.keys(sdk).sort().map(name => `export const ${name} = globalThis.__artifactsRuntime.sdk.${name};`).join("\n"),
 }));
 const identity = createHash("sha256").update(JSON.stringify(files)).update(runtimeJs)
   .update(JSON.stringify(plugins.browser)).update(JSON.stringify(plugins.catalog))
@@ -69,14 +69,14 @@ const identity = createHash("sha256").update(JSON.stringify(files)).update(runti
   .update(await readFile(join(root, "cloudflare/compiler.ts"), "utf8"))
   .update(await readFile(join(root, "scripts/prepare-cloudflare.ts"), "utf8"))
   .digest("hex");
-await writeFile(join(dirname(output), "identity.json"), JSON.stringify({ runtime: `workerd:canvas-0.1.0:${identity}` }));
+await writeFile(join(dirname(output), "identity.json"), JSON.stringify({ runtime: `workerd:artifact-0.1.0:${identity}` }));
 const assets = join(root, "dist/cloudflare/assets");
 await mkdir(assets, { recursive: true });
 await writeFile(join(assets, "index.html"), galleryHtml());
 await writeFile(join(assets, "gallery.js"), await galleryBundle());
 await writeFile(join(assets, "auth.html"), authPageHtml());
 await writeFile(join(assets, "auth.js"), await authBundle());
-await writeFile(join(dirname(output), "mcp-app.json"), JSON.stringify(await canvasAppHtml()));
+await writeFile(join(dirname(output), "mcp-app.json"), JSON.stringify(await artifactAppHtml()));
 const galleryBridge = await Bun.build({ entrypoints: [join(root, "src/runtime/gallery-request.ts")], target: "browser", format: "iife", minify: true });
 if (!galleryBridge.success) throw new Error(galleryBridge.logs.join("\n"));
 await writeFile(join(dirname(output), "gallery-request.json"), JSON.stringify(await galleryBridge.outputs[0]!.text()));

@@ -3,8 +3,8 @@ import { createRoot } from "react-dom/client";
 import { authClient, signInUrl } from "../auth/client-api";
 import type { GalleryArtifact, GalleryData } from "./types";
 import { ExecutionControls } from "./execution-controls";
-import { CanvasSourcePanel, LinkSettings, ScriptPanel } from "./hosted";
-import { canvasFileTransferUrl } from "../sdk/files";
+import { ArtifactSourcePanel, LinkSettings, ScriptPanel } from "./hosted";
+import { artifactFileTransferUrl } from "../sdk/files";
 import { RemixPanel } from "./remix";
 
 type Scope = "current" | "all";
@@ -49,7 +49,7 @@ const styles = `
   .artifact-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .workspace-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11px; margin-top: 3px; }
   .artifact-detail { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-  .artifact-detail .canvas-stage { flex: 1; }
+  .artifact-detail .artifact-stage { flex: 1; }
   .link-settings, .script-fields { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
   .link-settings { padding: 8px; border-bottom: 1px solid var(--line); }
   .link-settings label { display: flex; align-items: center; gap: 4px; }
@@ -60,16 +60,16 @@ const styles = `
   .script-panel details { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 12px; }
   .script-panel summary { cursor: pointer; }
   .script-panel pre { white-space: pre-wrap; overflow-wrap: anywhere; }
-  .canvas-execution { padding: 8px; border-bottom: 1px solid var(--line); max-height: 45vh; overflow: auto; }
-  .canvas-execution summary { cursor: pointer; }
-  .canvas-execution td, .canvas-execution th { padding: 4px 8px; text-align: left; }
+  .artifact-execution { padding: 8px; border-bottom: 1px solid var(--line); max-height: 45vh; overflow: auto; }
+  .artifact-execution summary { cursor: pointer; }
+  .artifact-execution td, .artifact-execution th { padding: 4px 8px; text-align: left; }
   .muted { color: var(--muted); }
-  .canvas-stage { position: relative; display: flex; min-width: 0; min-height: 0; overflow: hidden; }
+  .artifact-stage { position: relative; display: flex; min-width: 0; min-height: 0; overflow: hidden; }
   .preview-frame { display: block; width: 100%; height: 100%; border: 0; }
   .preview-loading { position: absolute; inset: 0; display: grid; place-items: center; background: var(--page); color: var(--muted); pointer-events: none; }
   .source-code { flex: 1; min-width: 0; margin: 0; padding: 16px; overflow: auto; font: 12px/1.6 "SFMono-Regular", Consolas, monospace; tab-size: 2; }
   .state-message { margin: 0; padding: 12px; color: var(--muted); }
-  .canvas-stage > .state-message { margin: auto; }
+  .artifact-stage > .state-message { margin: auto; }
   .error-message { color: #eeaaaa; }
   .refresh-error { padding: 8px 12px; margin: 0; border-bottom: 1px solid var(--line); }
   @media (hover: hover) and (pointer: fine) {
@@ -108,7 +108,7 @@ function sessionUser(value: unknown): SessionUser | null {
 }
 
 function redirectExpiredSession(response: Response): boolean {
-  if (response.status !== 401 || response.headers.get("X-Canvas-Auth") !== "better-auth") return false;
+  if (response.status !== 401 || response.headers.get("X-Artifact-Auth") !== "better-auth") return false;
   window.location.assign(signInUrl());
   return true;
 }
@@ -213,14 +213,14 @@ function App() {
       const remix = createdRemix.current;
       createdRemix.current = null;
       setSelectedKey((current) => {
-        if (remix) return payload.artifacts.find(artifact => (artifact.kind ?? "canvas") === remix.kind && artifact.name === remix.name && artifact.workspace === remix.workspace)?.key ?? current;
+        if (remix) return payload.artifacts.find(artifact => (artifact.kind ?? "artifact") === remix.kind && artifact.name === remix.name && artifact.workspace === remix.workspace)?.key ?? current;
         if (created) return payload.artifacts.find(artifact => artifact.kind === "script" && artifact.name === created)?.key ?? current;
         if (current && payload.artifacts.some((artifact) => artifact.key === current)) return current;
         return payload.artifacts[0]?.key ?? null;
       });
     } catch (error) {
       if (controller.signal.aborted || request !== galleryRequest.current) return;
-      setGalleryError(error instanceof Error ? error.message : "Could not load the canvas library.");
+      setGalleryError(error instanceof Error ? error.message : "Could not load the artifact library.");
     } finally {
       if (request === galleryRequest.current) setLoading(false);
     }
@@ -240,7 +240,7 @@ function App() {
         const resolved = sessionUser(await response.json());
         if (!controller.signal.aborted) setUser(resolved);
       } catch {
-        // Local Canvas servers do not expose an auth session endpoint.
+        // Local Artifact servers do not expose an auth session endpoint.
       }
     })();
     return () => controller.abort();
@@ -288,19 +288,19 @@ function App() {
     const request = async (event: MessageEvent) => {
       const frame = previewFrame.current;
       if (!frame || event.source !== frame.contentWindow || !selectedArtifact
-        || !["canvas/http-request", "canvas/plugin-request", "canvas/files-request", "canvas/file-download"].includes(event.data?.type) || typeof event.data.id !== "string"
-        || event.data.id.length > 64 || (event.data.type !== "canvas/plugin-request" && typeof event.data.versionId !== "string") || pending.has(event.data.id)) return;
-      const plugin = event.data.type === "canvas/plugin-request";
-      const files = event.data.type === "canvas/files-request";
-      const download = event.data.type === "canvas/file-download";
-      const responseType = plugin ? "canvas/plugin-response" : files ? "canvas/files-response" : download ? "canvas/file-download-response" : "canvas/http-response";
+        || !["artifact/http-request", "artifact/plugin-request", "artifact/files-request", "artifact/file-download"].includes(event.data?.type) || typeof event.data.id !== "string"
+        || event.data.id.length > 64 || (event.data.type !== "artifact/plugin-request" && typeof event.data.versionId !== "string") || pending.has(event.data.id)) return;
+      const plugin = event.data.type === "artifact/plugin-request";
+      const files = event.data.type === "artifact/files-request";
+      const download = event.data.type === "artifact/file-download";
+      const responseType = plugin ? "artifact/plugin-response" : files ? "artifact/files-response" : download ? "artifact/file-download-response" : "artifact/http-response";
       const target = frame.contentWindow!;
       const id = event.data.id;
       try {
-        if (pending.size >= 16) throw new Error("Too many pending canvas requests");
+        if (pending.size >= 16) throw new Error("Too many pending artifact requests");
         pending.add(id);
         if (download) {
-          const url = canvasFileTransferUrl(event.data.url, window.location.origin);
+          const url = artifactFileTransferUrl(event.data.url, window.location.origin);
           const anchor = document.createElement("a");
           anchor.href = url;
           anchor.download = "";
@@ -314,15 +314,15 @@ function App() {
         const params = new URLSearchParams({ workspace: selectedArtifact.workspace });
         const library = new URLSearchParams(window.location.search).get("library");
         if (library) params.set("library", library);
-        const response = await fetch(`${plugin ? "/api/plugins/call" : files ? "/api/canvas/files" : "/api/canvas/request"}?${params}`, {
+        const response = await fetch(`${plugin ? "/api/plugins/call" : files ? "/api/artifact/files" : "/api/artifact/request"}?${params}`, {
           method: "POST", headers: { "content-type": "application/json" },
           // The frame selects its pinned code version, but cannot redirect a
-          // request to another canvas or private/team library.
+          // request to another artifact or private/team library.
           body: JSON.stringify(plugin ? event.data.request : { name: selectedArtifact.name, version_id: event.data.versionId, request: event.data.request }),
         });
         if (redirectExpiredSession(response)) return;
         const result = await response.json() as { response?: unknown; result?: unknown; error?: string };
-        if (!response.ok) throw new Error(result.error ?? `Canvas request failed (${response.status})`);
+        if (!response.ok) throw new Error(result.error ?? `Artifact request failed (${response.status})`);
         target.postMessage({ type: responseType, id, response: result.response, result: result.result }, "*");
       } catch (error) {
         target.postMessage({ type: responseType, id, error: error instanceof Error ? error.message : String(error) }, "*");
@@ -401,7 +401,7 @@ function App() {
       const url = URL.createObjectURL(await response.blob());
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = `${selectedArtifact?.name ?? "canvas"}${selectedArtifact?.kind === "script" ? ".ts" : ".canvas.tsx"}`;
+      anchor.download = `${selectedArtifact?.name ?? "artifact"}${selectedArtifact?.kind === "script" ? ".ts" : ".artifact.tsx"}`;
       anchor.click();
       URL.revokeObjectURL(url);
     } catch (error) {
@@ -413,7 +413,7 @@ function App() {
     <>
       <style>{styles}</style>
       <main className="gallery-app">
-        <div className="toolbar" aria-label="Canvas controls">
+        <div className="toolbar" aria-label="Artifact controls">
           {gallery?.libraryScope ? (
             <select aria-label="Library" value={gallery.libraryScope} onChange={event => {
               const url = new URL(window.location.href);
@@ -427,7 +427,7 @@ function App() {
           <input
             className="search-input"
             type="search"
-            aria-label={gallery?.capabilities?.scripts ? "Search canvases and scripts" : "Search canvases"}
+            aria-label={gallery?.capabilities?.scripts ? "Search artifacts and scripts" : "Search artifacts"}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search"
@@ -450,15 +450,15 @@ function App() {
                   <option key={version.id} value={version.id}>Revision {version.revision} · {formatDate(version.createdAt)}</option>
                 ))}
               </select>
-              {selectedArtifact.kind !== "script" ? <div className="view-control" role="group" aria-label="Canvas view">
-                <button type="button" aria-pressed={tab === "preview"} aria-controls="canvas-panel" onClick={() => setTab("preview")}>Preview</button>
-                <button type="button" aria-pressed={tab === "source"} aria-controls="canvas-panel" onClick={() => setTab("source")}>Source</button>
+              {selectedArtifact.kind !== "script" ? <div className="view-control" role="group" aria-label="Artifact view">
+                <button type="button" aria-pressed={tab === "preview"} aria-controls="artifact-panel" onClick={() => setTab("preview")}>Preview</button>
+                <button type="button" aria-pressed={tab === "source"} aria-controls="artifact-panel" onClick={() => setTab("source")}>Source</button>
               </div> : null}
               <button type="button" onClick={() => setRemixing(true)}>Remix</button>
               <a className="download-link" href={downloadUrl} download onClick={downloadSource}>Download source</a>
             </>
           ) : null}
-          <button type="button" onClick={() => void loadGallery()} disabled={loading} aria-label={loading ? "Refreshing canvases" : "Refresh"}>Refresh</button>
+          <button type="button" onClick={() => void loadGallery()} disabled={loading} aria-label={loading ? "Refreshing artifacts" : "Refresh"}>Refresh</button>
           {user ? (
             <div className="account">
               <span className="account-name" title={user.email}>{user.name}</span>
@@ -471,7 +471,7 @@ function App() {
         {accountError ? <p role="alert" className="refresh-error error-message">{accountError}</p> : null}
 
         <div className="gallery-layout">
-          <aside className="library-panel" aria-label={gallery?.capabilities?.scripts ? "Canvases and scripts" : "Canvases"}>
+          <aside className="library-panel" aria-label={gallery?.capabilities?.scripts ? "Artifacts and scripts" : "Artifacts"}>
             {loading && !gallery ? (
               <p className="state-message" role="status">Loading…</p>
             ) : galleryError && !gallery ? (
@@ -480,7 +480,7 @@ function App() {
                 <button type="button" onClick={() => void loadGallery()}>Try again</button>
               </div>
             ) : filteredArtifacts.length === 0 ? (
-              <p className="state-message">{query ? "No matches" : gallery?.capabilities?.scripts ? "No canvases or scripts" : "No canvases"}</p>
+              <p className="state-message">{query ? "No matches" : gallery?.capabilities?.scripts ? "No artifacts or scripts" : "No artifacts"}</p>
             ) : filteredArtifacts.map((artifact) => (
               <button
                 className="artifact-row"
@@ -498,16 +498,16 @@ function App() {
             ))}
           </aside>
           <div className="artifact-detail">
-          {remixing && !creatingScript && selectedArtifact && resolvedVersion ? <RemixPanel key={selectedArtifact.key + resolvedVersion} artifact={selectedArtifact} version={resolvedVersion} onCancel={() => setRemixing(false)} onSaved={async name => { createdRemix.current = {name,workspace:selectedArtifact.workspace,kind:selectedArtifact.kind ?? "canvas"}; await loadGallery(); setSelectedVersion("working"); setQuery(""); setRemixing(false); }} /> : null}
-          {!creatingScript && selectedArtifact && selectedArtifact.kind !== "script" && gallery?.capabilities?.links ? <div className="canvas-execution"><ExecutionControls key={selectedArtifact.key + "execution"} workspace={selectedArtifact.workspace} name={selectedArtifact.name} kind="canvas" /></div> : null}
+          {remixing && !creatingScript && selectedArtifact && resolvedVersion ? <RemixPanel key={selectedArtifact.key + resolvedVersion} artifact={selectedArtifact} version={resolvedVersion} onCancel={() => setRemixing(false)} onSaved={async name => { createdRemix.current = {name,workspace:selectedArtifact.workspace,kind:selectedArtifact.kind ?? "artifact"}; await loadGallery(); setSelectedVersion("working"); setQuery(""); setRemixing(false); }} /> : null}
+          {!creatingScript && selectedArtifact && selectedArtifact.kind !== "script" && gallery?.capabilities?.links ? <div className="artifact-execution"><ExecutionControls key={selectedArtifact.key + "execution"} workspace={selectedArtifact.workspace} name={selectedArtifact.name} kind="artifact" /></div> : null}
           {!creatingScript && selectedArtifact && gallery?.capabilities?.links ? <LinkSettings key={selectedArtifact.key} artifact={selectedArtifact} onSaved={loadGallery} /> : null}
-          <section id="canvas-panel" className="canvas-stage" aria-label={tab === "preview" ? "Canvas preview" : "Canvas source"}>
+          <section id="artifact-panel" className="artifact-stage" aria-label={tab === "preview" ? "Artifact preview" : "Artifact source"}>
             {creatingScript ? (
               <ScriptPanel key="new-script" workspace={gallery?.workspace ?? "default"} onCancel={() => setCreatingScript(false)} onSaved={async name => { createdScriptName.current = name; await loadGallery(); setCreatingScript(false); setSelectedVersion("working"); setQuery(""); }} />
             ) : selectedArtifact?.kind === "script" ? (
               <ScriptPanel key={`${selectedArtifact.key}:${resolvedVersion}`} artifact={selectedArtifact} workspace={selectedArtifact.workspace} version={resolvedVersion ?? undefined} sourceUrl={resolvedVersion ? artifactUrl("/api/source", selectedArtifact, resolvedVersion) : undefined} onSaved={async () => { setSelectedVersion("working"); await loadGallery(); }} />
             ) : !selectedArtifact ? (
-              <p className="state-message">Select a canvas</p>
+              <p className="state-message">Select an artifact</p>
             ) : !resolvedVersion ? (
               <p className="state-message">No readable version</p>
             ) : tab === "preview" ? (
@@ -524,7 +524,7 @@ function App() {
                 />
               </>
             ) : gallery?.capabilities?.links ? (
-              <CanvasSourcePanel key={`${selectedArtifact.key}:${resolvedVersion}`} artifact={selectedArtifact} version={resolvedVersion} sourceUrl={artifactUrl("/api/source", selectedArtifact, resolvedVersion)} onSaved={async () => { setSelectedVersion("working"); await loadGallery(); }} />
+              <ArtifactSourcePanel key={`${selectedArtifact.key}:${resolvedVersion}`} artifact={selectedArtifact} version={resolvedVersion} sourceUrl={artifactUrl("/api/source", selectedArtifact, resolvedVersion)} onSaved={async () => { setSelectedVersion("working"); await loadGallery(); }} />
             ) : source.status === "ready" ? (
               <pre className="source-code" tabIndex={0} aria-label={`Source of ${selectedArtifact.name}`}><code>{source.text}</code></pre>
             ) : source.status === "error" ? (

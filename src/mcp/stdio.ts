@@ -1,8 +1,8 @@
 import { encodeMessage, parseMessages, type JsonRpcRequest } from "./protocol";
 import { handleMcpRequest } from "./local-tools";
-import { CanvasService } from "../service";
+import { ArtifactService } from "../service";
 
-export async function runMcpServer(service: CanvasService): Promise<void> {
+export async function runMcpServer(service: ArtifactService): Promise<void> {
   let buffer: Buffer = Buffer.alloc(0);
   const stdin = Bun.stdin.stream();
   const reader = stdin.getReader();

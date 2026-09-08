@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef, useCallback, useMatch, useLocation, useNavigate, Link, pluginCall } from "sidequery/canvas";
+import { useState, useEffect, useRef, useCallback, useMatch, useLocation, useNavigate, Link, pluginCall } from "sidequery/artifacts";
 
-// Inline transport types keep this canvas portable as a single file.
+// Inline transport types keep this artifact portable as a single file.
 type Runner = { id: number; name: string; status: string; busy: boolean; labels: { name: string }[] };
 type Run = { id: number; name: string; display_title: string; html_url: string; head_branch: string; head_sha: string; status: string; created_at: string; run_number: number; run_attempt: number };
 type Step = { name: string; number: number; status: string; conclusion: string | null; started_at: string | null };
@@ -9,7 +9,7 @@ type Item = Job & { repo: string; run: Run; eligibleRunnerIds: number[] };
 type RepoData = { jobs: (Job & { repo: string; run: Run })[]; fetchedAt: string; activeRuns: number };
 type Snapshot = { org: string; repos: string[]; runners: Runner[]; jobs: Item[]; sources: { repo: string; fetchedAt: string | null; activeRuns: number; stale: boolean }[]; runnerFetchedAt: string | null; checkedAt: string; errors: string[]; refreshSeconds: number };
 
-// Original microapp styles; this canvas owns its isolated document.
+// Original microapp styles; this artifact owns its isolated document.
 const styles = `:root{color-scheme:dark;--bg:#0d1117;--raised:#161b22;--subtle:#010409;--border:#30363d;--muted:#9198a1;--text:#f0f6fc;--blue:#4493f8;--green:#3fb950;--yellow:#d29922;--red:#f85149}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
