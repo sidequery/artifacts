@@ -48,6 +48,7 @@ test("gallery edits scripts without execution and runs requests only on demand",
     await page.getByLabel("Script response").waitFor();
     expect(calls[1]?.arguments.request).toEqual({ path: "/", method: "POST", headers: [["content-type", "text/plain"]], body: Buffer.from("hello 🌍").toString("base64") });
     expect(await page.getByLabel("Script response").textContent()).toContain("200 OK\ncontent-type: text/plain\n\n<script>alert(1)</script> 🌍");
+    await page.getByRole("button", { name: "Link settings", exact: true }).click();
     await page.getByRole("button", { name: "Save link", exact: true }).click();
     await page.getByRole("status").filter({ hasText: "Slug is already in use" }).waitFor();
     await page.getByRole("button", { name: "New script" }).click();
