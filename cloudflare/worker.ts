@@ -1,3 +1,4 @@
+import { publicOrigin } from "./public-origin";
 import { Hono } from "hono";
 import type { DurableObjectNamespace, Fetcher } from "@cloudflare/workers-types";
 import { ArtifactLibrary } from "./library";
@@ -34,6 +35,7 @@ export type Env = AuthEnvironment & BetterAuthEnvironment & {
   FILE_BACKENDS?: DurableObjectNamespace<ArtifactFiles>;
   ASSETS: Fetcher;
   DEFAULT_WORKSPACE?: string;
+  ARTIFACTS_PUBLIC_ORIGIN?: string;
 };
 
 const app = new Hono<{ Bindings: Env; Variables: { service: CloudArtifactService; libraryScope: "private" | "team"; user: ArtifactUser | null } }>();
@@ -96,7 +98,7 @@ app.use("*", async (c, next) => {
     ? JSON.stringify(["private", "better-auth", user.id])
     : JSON.stringify(["private", c.env.ACCESS_TEAM_DOMAIN ?? "local", identity.subject]);
   c.set("libraryScope", libraryScope);
-  c.set("service", new CloudArtifactService(c.env.LIBRARIES.getByName(libraryKey), workspace, c.env.BACKENDS, libraryKey, { links: c.env.LINKS.getByName("deployment"), scripts: c.env.SCRIPTS.getByName(libraryKey), scriptBackends: c.env.SCRIPT_BACKENDS, origin: url.origin }, { user: identity, env: c.env }, c.env.FILE_BACKENDS ? { backends: c.env.FILE_BACKENDS, origin: url.origin } : undefined));
+  c.set("service", new CloudArtifactService(c.env.LIBRARIES.getByName(libraryKey), workspace, c.env.BACKENDS, libraryKey, { links: c.env.LINKS.getByName("deployment"), scripts: c.env.SCRIPTS.getByName(libraryKey), scriptBackends: c.env.SCRIPT_BACKENDS, origin: url.origin, publicOrigin: publicOrigin(c.req.url, c.env.ARTIFACTS_PUBLIC_ORIGIN) }, { user: identity, env: c.env }, c.env.FILE_BACKENDS ? { backends: c.env.FILE_BACKENDS, origin: publicOrigin(c.req.url, c.env.ARTIFACTS_PUBLIC_ORIGIN) } : undefined));
   // Compilation uses shared isolate resources. Let an admitted operation finish
   // after a client disconnects rather than abandoning its native compiler I/O.
   const operation = next();
@@ -174,7 +176,7 @@ app.get("/gallery/preview", async c => {
   const payload = preview._meta.artifact;
   // Enforce isolation even if somebody opens the preview URL directly instead
   // of through the gallery's sandboxed iframe. Preview state is page-local.
-  c.header("Content-Security-Policy", `sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src ${new URL(c.req.url).origin}/api/artifact/files/transfer/ ${new URL(c.req.url).origin}/api/canvas/files/transfer/; form-action 'none'; base-uri 'none'; frame-ancestors 'self'`);
+  c.header("Content-Security-Policy", `sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src ${publicOrigin(c.req.url, c.env.ARTIFACTS_PUBLIC_ORIGIN)}/api/artifact/files/transfer/ ${publicOrigin(c.req.url, c.env.ARTIFACTS_PUBLIC_ORIGIN)}/api/canvas/files/transfer/; form-action 'none'; base-uri 'none'; frame-ancestors 'self'`);
   return c.html(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sidequery Artifacts preview</title><style>body{margin:0;background:#181818;color:#f0f0f0;font-family:system-ui,sans-serif}#root{padding:24px}</style></head><body><div id="root"></div><script>window.__herdrCanvas=window.__artifacts=${JSON.stringify({ artifactId: payload.name, canvasId: payload.name, state: payload.state, theme: { kind: "dark" }, plugins: payload.plugins, ...(payload.files ? { filesVersionId: payload.versionId } : {}), ...(payload.server ? { serverVersionId: payload.versionId } : {}) }).replaceAll("<", "\\u003c")};${galleryBridge.replace(/<\/script/gi, "<\\/script")}</script><script type="module">${payload.js.replace(/<\/script/gi, "<\\/script")}</script></body></html>`);
 });
 app.get("/", c => c.env.ASSETS.fetch(new Request(new URL("/index.html", c.req.url))));

@@ -115,3 +115,11 @@ automatically.
 
 For bucket-backed production nodes, TLS/authentication boundaries, health checks,
 and graceful rollout guidance, see [celld deployment](celld-deployment.md).
+
+For a trusted reverse-proxy deployment, set the Worker binding
+`ARTIFACTS_PUBLIC_ORIGIN` to its exact external origin (for example,
+`https://artifacts.example`). Generated artifact/script links, file-transfer URLs,
+and preview transfer policies use that origin. Request authentication and Origin
+checks still use the incoming request; forwarded headers do not override identity
+or the configured origin. Configure this binding in the deployment's Worker
+configuration; it is not a host CLI flag. Without it, URLs use the request origin.
