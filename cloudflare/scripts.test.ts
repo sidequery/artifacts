@@ -2,9 +2,9 @@ import {afterAll,beforeAll,expect,test} from "bun:test";
 import {Miniflare, Response as MFResponse} from "miniflare";
 let runtime: Miniflare;
 beforeAll(async()=>{
-  const build=await Bun.build({entrypoints:[new URL("./scripts-test-worker.ts",import.meta.url).pathname],target:"node",format:"esm",external:["cloudflare:workers"]});
+  const build=await Bun.build({entrypoints:[new URL("./scripts-test-worker.ts",import.meta.url).pathname],target:"browser",format:"esm",external:["cloudflare:workers","node:*","fs","fs/promises"]});
   if (!build.success) throw new Error(build.logs.join("\n"));
-  runtime=new Miniflare({cf:false,port:0,workers:[{config:{name:"scripts-test",type:"worker",compatibilityDate:"2026-09-06",compatibilityFlags:["nodejs_compat"],manifest:{mainModule:"test.js",modulesRoot:import.meta.dir,modules:{"test.js":{type:"esm",contents:await build.outputs[0]!.text()}}},env:{SCRIPTS:{type:"durable-object",worker:"scripts-test",exportName:"ScriptLibrary"},SCRIPT_BACKENDS:{type:"durable-object",worker:"scripts-test",exportName:"ScriptBackend"},LOADER:{type:"worker-loader"}},exports:{ScriptLibrary:{type:"durable-object",storage:"sqlite"},ScriptBackend:{type:"durable-object",storage:"sqlite"}}},dev:{outboundService:{type:"fetcher",handler:()=>new MFResponse("upstream success")}}}]});
+  runtime=new Miniflare({unsafeInspectDurableObjects:true,cf:false,port:0,workers:[{config:{name:"scripts-test",type:"worker",compatibilityDate:"2026-09-06",compatibilityFlags:["nodejs_compat"],manifest:{mainModule:"test.js",modulesRoot:import.meta.dir,modules:{"test.js":{type:"esm",contents:await build.outputs[0]!.text()}}},env:{SCRIPTS:{type:"durable-object",worker:"scripts-test",exportName:"ScriptLibrary"},SCRIPT_BACKENDS:{type:"durable-object",worker:"scripts-test",exportName:"ScriptBackend"},LOADER:{type:"worker-loader"}},exports:{ScriptLibrary:{type:"durable-object",storage:"sqlite"},ScriptBackend:{type:"durable-object",storage:"sqlite"}}},dev:{outboundService:{type:"fetcher",handler:()=>new MFResponse("upstream success")}}}]});
   await runtime.ready;
 });
 afterAll(async()=>{await runtime?.dispose();});
@@ -102,4 +102,88 @@ test("remix copies an immutable source revision, never secrets or activation, an
   await expect(call("remix",{workspace:"other",version_id:version.id,new_name:"copy"})).rejects.toThrow("not found");
   await expect(call("remix",{workspace,version_id:version.id,new_name:"copy"},"bob")).rejects.toThrow("not found");
   await expect(call("remix",{workspace,name,version_id:version.id,new_name:"ambiguous"})).rejects.toThrow("not both");
+});
+
+test("project changes invalidate script validation and restore complete module snapshots", async () => {
+  const identity = { workspace: "projects", name: "handler" };
+  const project = { files: { "helper.ts": "export const answer = 1;", "other.ts": "unchanged" }, dependencies: { "lodash-es": "4.17.21" }, lock: { "node_modules/lodash-es/index.js": "export const version = 1;" } };
+  const source = "entry source";
+  const legacy = await call("writeDraft", { ...identity, source });
+  const first = await call("writeDraft", { ...identity, source, project });
+  expect(first.source_hash).not.toBe(legacy.source_hash);
+  expect(first.project).toEqual(project);
+  const history = await call("history", identity);
+  const versionId = history[0].id;
+  expect((await call("writeDraft", { ...identity, source })).project).toEqual(project);
+  expect(await call("history", identity)).toHaveLength(2);
+  const read = await call("readRange", { ...identity, file: "helper.ts" });
+  const edited = await call("editDraft", { ...identity, file: "helper.ts", expected_hash: read.source_hash, edits: [{ old_text: "1", new_text: "2" }] });
+  expect(edited.source).toBe(source);
+  expect(edited.project).toEqual({ ...project, files: { ...project.files, "helper.ts": "export const answer = 2;" } });
+  expect(edited.source_hash).not.toBe(first.source_hash);
+  await expect(call("activate", { ...identity, source_hash: first.source_hash, code: "compiled" })).rejects.toThrow("changed during validation");
+  await expect(call("editDraft", { ...identity, file: "helper.ts", expected_hash: read.source_hash, edits: [{ old_text: "2", new_text: "3" }] })).rejects.toThrow("changed since read");
+  await expect(call("editDraft", { ...identity, file: "helper.ts", edits: [{ old_text: "2", new_text: "3" }, { old_text: "missing", new_text: "x" }] })).rejects.toThrow("no changes written");
+  expect((await call("readRange", identity)).project).toEqual(edited.project);
+  await expect(call("readRange", { ...identity, file: "missing.ts" })).rejects.toThrow("file not found");
+  await expect(call("editDraft", { ...identity, file: "missing.ts", edits: [{ old_text: "x", new_text: "y" }] })).rejects.toThrow("file not found");
+  expect((await call("version", { workspace: identity.workspace, id: versionId })).project).toEqual(project);
+  expect((await call("restore", { workspace: identity.workspace, id: versionId })).project).toEqual(project);
+  const empty = { files: {}, dependencies: {}, lock: {} };
+  expect((await call("writeDraft", { ...identity, source, project: empty })).source_hash).toBe(legacy.source_hash);
+});
+
+test("legacy script tables acquire empty project snapshots without losing drafts or history", async () => {
+  const library = "legacy-project-migration";
+  const identity = { workspace: "legacy", name: "handler" };
+  const written = await call("writeDraft", { ...identity, source: "legacy source" }, library);
+  const history = await call("history", identity, library);
+  const storage = await runtime.unsafeGetDurableObjectStorage("scripts-test", "ScriptLibrary", { name: library });
+  await storage.exec("alter table scripts drop column project");
+  await storage.exec("alter table script_versions drop column project");
+  await runtime.unsafeEvictDurableObject("scripts-test", "ScriptLibrary", { name: library });
+  const empty = { files: {}, dependencies: {}, lock: {} };
+  expect(await call("readRange", identity, library)).toMatchObject({ source: written.source, source_hash: written.source_hash, project: empty });
+  expect(await call("version", { workspace: identity.workspace, id: history[0].id }, library)).toMatchObject({ source: written.source, source_hash: written.source_hash, project: empty });
+});
+
+test("large script projects retain deduplicated chunks across edits and historical restore", async () => {
+  const library = "large-project-chunks";
+  const identity = { workspace: "chunks", name: "large" };
+  const project = { files: { "helper.ts": "export const value = 1;" }, dependencies: { example: "1.0.0" }, lock: { "node_modules/example/index.js": `export const text = "${"😀漢字".repeat(240000)}";` } };
+  expect(new TextEncoder().encode(JSON.stringify(project)).byteLength).toBeGreaterThan(2 * 1024 * 1024);
+  const source = "entry";
+  const original = await call("writeDraft", { ...identity, source, project }, library);
+  expect(original.project).toEqual(project);
+  const history = await call("history", identity, library);
+  const storage = await runtime.unsafeGetDurableObjectStorage("scripts-test", "ScriptLibrary", { name: library });
+  const before = await storage.exec<{n: number; largest: number}>("select count(*) as n,max(length(cast(chunk as blob))) as largest from project_chunks");
+  expect(before[0]!.n).toBeGreaterThan(1);
+  expect(before[0]!.largest).toBeLessThanOrEqual(512 * 1024);
+  expect((await call("writeDraft", { ...identity, source }, library)).project).toEqual(project);
+  const edited = await call("editDraft", { ...identity, file: "helper.ts", edits: [{ old_text: "1", new_text: "2" }] }, library);
+  expect(edited.source_hash).not.toBe(original.source_hash);
+  expect(edited.project.lock).toEqual(project.lock);
+  expect((await call("version", { workspace: identity.workspace, id: history[0].id }, library)).project).toEqual(project);
+  expect((await call("restore", { workspace: identity.workspace, id: history[0].id }, library)).project).toEqual(project);
+  await runtime.unsafeEvictDurableObject("scripts-test", "ScriptLibrary", { name: library });
+  expect((await call("readRange", identity, library)).project).toEqual(project);
+  const after = await storage.exec<{n: number}>("select count(*) as n from project_chunks");
+  expect(after[0]!.n).toBeLessThanOrEqual(before[0]!.n + 1);
+});
+
+test("inline script project snapshots upgrade transparently on edit and restore", async () => {
+  const library = "inline-project-upgrade", identity = { workspace: "upgrade", name: "script" };
+  const project = { files: { "helper.ts": "original" }, dependencies: {}, lock: {} };
+  await call("writeDraft", { ...identity, source: "entry", project }, library);
+  const history = await call("history", identity, library);
+  const storage = await runtime.unsafeGetDurableObjectStorage("scripts-test", "ScriptLibrary", { name: library });
+  await storage.exec("update scripts set project = ?", JSON.stringify(project));
+  await storage.exec("update script_versions set project = ?", JSON.stringify(project));
+  await runtime.unsafeEvictDurableObject("scripts-test", "ScriptLibrary", { name: library });
+  expect((await call("readRange", identity, library)).project).toEqual(project);
+  expect((await call("version", { workspace: identity.workspace, id: history[0].id }, library)).project).toEqual(project);
+  const edited = await call("editDraft", { ...identity, file: "helper.ts", edits: [{ old_text: "original", new_text: "changed" }] }, library);
+  expect(edited.project.files["helper.ts"]).toBe("changed");
+  expect((await call("restore", { workspace: identity.workspace, id: history[0].id }, library)).project).toEqual(project);
 });

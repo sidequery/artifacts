@@ -164,7 +164,8 @@ async function main(): Promise<void> {
     const name = args.positionals[0];
     requireArg(name, "missing canvas name");
     const contents = await readContents(args);
-    printJson(service.write(name, contents));
+    const projectFile = flagString(args.flags, "project");
+    printJson(projectFile ? await service.writeProject(name, contents, JSON.parse(await Bun.file(projectFile).text())) : service.write(name, contents));
     return;
   }
 
@@ -172,7 +173,7 @@ async function main(): Promise<void> {
     const name = args.positionals[0];
     requireArg(name, "missing canvas name");
     const lineFlag = (key: string) => args.flags[key] === undefined ? undefined : Number(args.flags[key] === true ? NaN : args.flags[key]);
-    printJson(service.readRange(name, { start_line: lineFlag("start-line"), end_line: lineFlag("end-line") }));
+    printJson(service.readRange(name, { file: flagString(args.flags, "source-file"), start_line: lineFlag("start-line"), end_line: lineFlag("end-line") }));
     return;
   }
 
@@ -182,7 +183,7 @@ async function main(): Promise<void> {
     const payload: unknown = JSON.parse(await readContents(args));
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("edit input must be an object with edits and optional expected_hash");
     const input = payload as { edits: Parameters<CanvasService["edit"]>[1]; expected_hash?: string };
-    const result = service.edit(name, input.edits, input.expected_hash);
+    const result = service.edit(name, input.edits, input.expected_hash, flagString(args.flags, "source-file"));
     printJson(result);
     if (!result.ok) process.exitCode = 1;
     return;
@@ -283,9 +284,9 @@ function printHelp(): void {
 Usage:
   canvas --version
   canvas list [--dir PATH]
-  canvas write NAME [--file PATH | --stdin]
-  canvas read NAME [--start-line N] [--end-line N]
-  canvas edit NAME [--file PATH | --stdin]
+  canvas write NAME [--file PATH | --stdin] [--project PROJECT_JSON]
+  canvas read NAME [--source-file PATH] [--start-line N] [--end-line N]
+  canvas edit NAME [--source-file PATH] [--file PATH | --stdin]
   canvas typecheck NAME
   canvas compile NAME
   canvas open NAME [--placement split|tab|zoomed|overlay] [--no-open]
@@ -308,11 +309,11 @@ edit accepts JSON: {"edits":[{"old_text":"exact match","new_text":"replacement"}
 Edits run sequentially in memory; every old_text must match exactly once. Invalid batches
 write nothing. Successful batches replace atomically, then typecheck once; diagnostics
 do not roll back applied edits. Results omit source text.
-History keeps raw TSX only. Opening a saved version builds with the installed SDK and uses
+History keeps source and dependency snapshots. Opening a saved version builds with the installed SDK and uses
 isolated UI state. Restore archives the working copy and adds a new revision.
 
-Canvases live in <workspace>/canvases/*.canvas.tsx and may import only from
-"sidequery/canvas". open compiles the artifact and creates a managed Canvas pane
+Canvases live in <workspace>/canvases/*.canvas.tsx and import the SDK from
+"sidequery/canvas", plus declared project helpers and dependencies. open creates a managed Canvas pane
 powered internally by Terminal Browser in app mode.
 `);
 }

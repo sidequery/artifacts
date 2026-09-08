@@ -1,3 +1,5 @@
+import { readLocalProject } from "./localProject";
+import { projectSourceHash, type ArtifactProject } from "../cloudflare/project";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
@@ -31,19 +33,19 @@ export async function createCanvasServer(opts: CreateCanvasServerOptions): Promi
   let galleryJs: Promise<string> | undefined;
   const states = new Map<string, Record<string, unknown>>();
   // Bundles exist only in this server's memory; the archive stores raw TSX.
-  const builds = new Map<string, Promise<{ js: string; runtime: string } | undefined>>();
-  const build = (path: string, source: string, requestedRuntime?: string) => {
+  const builds = new Map<string, Promise<{ js: string; runtime: string; project: ArtifactProject } | undefined>>();
+  const build = (path: string, source: string, requestedRuntime?: string, project: ArtifactProject = readLocalProject(path)) => {
     const runtime = identifyRuntime();
     const runtimeHash = hash(runtime);
-    const key = (requestedRuntime ?? runtimeHash) + ":" + path + ":" + hash(source);
+    const key = (requestedRuntime ?? runtimeHash) + ":" + path + ":" + projectSourceHash(source, project);
     let pending = builds.get(key);
     if (!pending) {
       // A page must never silently execute a different SDK generation than its event.
       if (requestedRuntime && requestedRuntime !== runtimeHash) return Promise.resolve(undefined);
-      pending = compile(path, source).then(result => {
+      pending = compile(path, source, undefined, project).then(result => {
         if (!result.ok || !result.js) { builds.delete(key); return undefined; }
         if (identifyRuntime() !== runtime) { builds.delete(key); throw new Error("Canvas SDK changed during compilation; reload to retry"); }
-        return { js: result.js, runtime };
+        return { js: result.js, runtime, project };
       }).catch(error => { builds.delete(key); throw error; });
       builds.set(key, pending);
       if (builds.size > 16) builds.delete(builds.keys().next().value!);
@@ -126,10 +128,10 @@ export async function createCanvasServer(opts: CreateCanvasServerOptions): Promi
                   ...(url.searchParams.get("download") === "1" ? { "content-disposition": `attachment; filename="canvas.canvas.tsx"; filename*=UTF-8''${encodeURIComponent(canvasName + ".canvas.tsx")}` } : {}),
                 } });
               }
-              const compiled = await build(sourcePath, source);
+              const compiled = await build(sourcePath, source, undefined, version?.project);
               if (!compiled) return new Response("This source does not compile with the installed SDK.", { status: 400 });
               const initialState = version ? (() => { const events = history.events(version.id); const event = events.find(item => item.mode === "live") ?? events[0]; return event ? JSON.parse(event.initial_state) : {}; })() : loadState(sourcePath, states, canvasName);
-              version ??= history.capture({ workspace: canvasesDir, name: canvasName, sourcePath, source, runtime: compiled.runtime });
+              version ??= history.capture({ workspace: canvasesDir, name: canvasName, sourcePath, source, project: compiled.project, runtime: compiled.runtime });
               return versionPage(version, initialState, true, compiled.runtime, compiled.js);
             }
           }
@@ -139,7 +141,7 @@ export async function createCanvasServer(opts: CreateCanvasServerOptions): Promi
             const version = history.version(archived[1], canvasesDir);
             if (!version) return new Response("version not found", { status: 404 });
             const requestedRuntime = archived[2] ? url.searchParams.get("runtime") ?? undefined : undefined;
-            const compiled = await build(version.source_path, version.source, requestedRuntime);
+            const compiled = await build(version.source_path, version.source, requestedRuntime, version.project);
             if (!compiled) return new Response(requestedRuntime ? "page build expired or no longer compiles; reload the page" : "archived source does not compile with the installed SDK", { status: requestedRuntime ? 409 : 400 });
             if (archived[2]) return javascript(compiled.js);
             const events = history.events(version.id);
@@ -184,7 +186,7 @@ export async function createCanvasServer(opts: CreateCanvasServerOptions): Promi
             const source = readFileSync(filePath, "utf8");
             const compiled = await build(filePath, source);
             if (!compiled) return new Response("compile failed", { status: 400 });
-            const version = history.capture({ workspace: canvasesDir, name: canvasId, sourcePath: filePath, source, runtime: compiled.runtime });
+            const version = history.capture({ workspace: canvasesDir, name: canvasId, sourcePath: filePath, source, project: compiled.project, runtime: compiled.runtime });
             if (rest) return javascript(compiled.js);
             return versionPage(version, loadState(filePath, states, canvasId), false, compiled.runtime);
           }

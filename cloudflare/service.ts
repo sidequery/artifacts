@@ -1,3 +1,5 @@
+import browserRuntime from "../dist/cloudflare/browser-runtime.json";
+import { resolveProject, type ArtifactProject } from "./project";
 import type { DurableObjectStub, DurableObjectNamespace } from "@cloudflare/workers-types";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { CanvasLibrary, CanvasEdit, CompiledCanvas } from "./library";
@@ -25,6 +27,7 @@ import type { PluginRequest } from "../src/plugins/types";
 type Snapshot = {
   workspace: string; name: string; path: string; source: string;
   server_source: string | null;
+  project?: ArtifactProject;
   state: Record<string, unknown>; version_id?: string | null; compiled_id?: string | null;
 };
 type Mutation = Snapshot & { ok: boolean; applied?: boolean; changed?: boolean; restored?: boolean; source_hash?: string; edits_applied?: number; versionId?: string; revision?: number };
@@ -66,7 +69,7 @@ export class CloudCanvasService {
         const entries = await Promise.all(canvases.map(async canvas => ({ ...canvas, ...await this.artifacts.linkDetails(this.artifacts.target("canvas", canvas.id)) })));
         return text({ canvases: entries, next_offset: canvases.length === 100 ? offset + 100 : null });
       }
-      case "canvas_read": return text(await this.library.readRange({ workspace: this.workspace, name: args.name as string, part: args.part as "client" | "server" | undefined, start_line: args.start_line as number | undefined, end_line: args.end_line as number | undefined }));
+      case "canvas_read": return text(await this.library.readRange({ workspace: this.workspace, name: args.name as string, file: args.file as string | undefined, part: args.part as "client" | "server" | undefined, start_line: args.start_line as number | undefined, end_line: args.end_line as number | undefined }));
       case "canvas_history": {
         const offset = args.offset as number | undefined ?? 0;
         const versions = await this.library.history({ workspace: this.workspace, name: args.name as string | undefined, offset });
@@ -85,11 +88,13 @@ export class CloudCanvasService {
         const target = this.artifacts.target("canvas", args.name as string);
         if (args.slug !== undefined) await this.artifacts.requireHosted().links.check(target, args.slug as string);
         const generation = await this.hosted?.links.begin(target);
-        return this.mutationResult(await this.library.writeDraft({ workspace: this.workspace, name: args.name as string, source: args.contents as string, server_source: args.server as string | null | undefined }), generation, { ...(args.slug === undefined ? {} : { slug: args.slug as string }), ...(args.access === undefined ? {} : { access: args.access as "private" | "public" }) });
+        const previous = args.project === undefined ? undefined : await this.snapshot({name: args.name as string}).catch(error => { if (error instanceof Error && error.message.includes("canvas not found")) return undefined; throw error; });
+        const project = args.project === undefined ? undefined : await resolveProject(args.project, previous?.project, fetch, browserRuntime.sharedVersions);
+        return this.mutationResult(await this.library.writeDraft({ workspace: this.workspace, name: args.name as string, source: args.contents as string, server_source: args.server as string | null | undefined, project }), generation, { ...(args.slug === undefined ? {} : { slug: args.slug as string }), ...(args.access === undefined ? {} : { access: args.access as "private" | "public" }) });
       }
       case "canvas_edit": {
         const generation = await this.hosted?.links.begin(this.artifacts.target("canvas", args.name as string));
-        return this.mutationResult(await this.library.editDraft({ workspace: this.workspace, name: args.name as string, part: args.part as "client" | "server" | undefined, edits: args.edits as CanvasEdit[], expected_hash: args.expected_hash as string | undefined }), generation);
+        return this.mutationResult(await this.library.editDraft({ workspace: this.workspace, name: args.name as string, file: args.file as string | undefined, part: args.part as "client" | "server" | undefined, edits: args.edits as CanvasEdit[], expected_hash: args.expected_hash as string | undefined }), generation);
       }
       case "canvas_restore": {
         const version = await this.library.version({ workspace: this.workspace, id: args.version_id as string });
@@ -98,7 +103,7 @@ export class CloudCanvasService {
       }
       case "canvas_typecheck": {
         const snapshot = await this.snapshot({ name: args.name as string });
-        const diagnostics = [...typecheckCanvasSource(snapshot.source), ...(snapshot.server_source === null ? [] : typecheckCanvasServerSource(snapshot.server_source))];
+        const diagnostics = [...typecheckCanvasSource(snapshot.source, snapshot.project), ...(snapshot.server_source === null ? [] : typecheckCanvasServerSource(snapshot.server_source, snapshot.project))];
         return text({ path: snapshot.path, check: formatCanvasCheck(diagnostics), diagnostics }, diagnostics.length > 0);
       }
       case "canvas_compile": {
@@ -135,7 +140,7 @@ export class CloudCanvasService {
     if (!compiled.ok || !compiled.js || !compiled.artifact) return { ...base, ok: false, _meta: undefined };
     const { version, event } = await this.library.recordServe({
       workspace: snapshot.workspace, name: snapshot.name, source: snapshot.source,
-      server_source: snapshot.server_source,
+      server_source: snapshot.server_source, project: snapshot.project,
       runtime: compiled.artifact.runtime, compiled_id: compiled.artifact.id, initial_state: snapshot.state, mode: "preview",
       ...(snapshot.version_id ? { version_id: snapshot.version_id } : {}),
     });
@@ -144,7 +149,7 @@ export class CloudCanvasService {
   }
 
   private async mutationResult(mutation: Mutation, generation?: number | null, settings: LinkUpdate = {}): Promise<CallToolResult> {
-    const { source, server_source, state, ...summary } = mutation;
+    const { source, server_source, state, project, ...summary } = mutation;
     const target = this.artifacts.target("canvas", mutation.name);
     if (generation != null) {
       await this.hosted!.links.stage(target, generation, settings);
@@ -181,22 +186,22 @@ export class CloudCanvasService {
     // The exact pair and compiler identity prevent client-only hashes from
     // hiding server edits, and let unchanged writes reuse completed work.
     const saved = await this.library.compiled({ workspace: snapshot.workspace, name: snapshot.name,
-      ...(snapshot.compiled_id ? { id: snapshot.compiled_id } : { source: snapshot.source, server_source: snapshot.server_source, runtime }),
+      ...(snapshot.compiled_id ? { id: snapshot.compiled_id } : { source: snapshot.source, server_source: snapshot.server_source, project: snapshot.project, runtime }),
     });
     if (saved) return { ok: true, js: saved.client_js, diagnostics: [], artifact: saved };
-    const client = await compileCanvasSource(snapshot.source);
+    const client = await compileCanvasSource(snapshot.source, snapshot.project);
     if (!client.ok || !client.js) return client;
-    const server = snapshot.server_source === null ? null : await compileCanvasServerSource(snapshot.server_source);
+    const server = snapshot.server_source === null ? null : await compileCanvasServerSource(snapshot.server_source, snapshot.project);
     if (server && (!server.ok || !server.js)) return { ok: false, diagnostics: server.diagnostics };
     const artifact = await this.library.saveCompiled({ workspace: snapshot.workspace, name: snapshot.name,
-      source: snapshot.source, server_source: snapshot.server_source, runtime, client_js: client.js, server_js: server?.js ?? null,
+      source: snapshot.source, server_source: snapshot.server_source, project: snapshot.project, runtime, client_js: client.js, server_js: server?.js ?? null,
     });
     return { ok: true, js: artifact.client_js, diagnostics: [], artifact };
   }
 
   private async savedCompilation(snapshot: Snapshot): Promise<Compiled> {
     const artifact = snapshot.version_id && !snapshot.compiled_id ? null : await this.library.compiled({ workspace: snapshot.workspace, name: snapshot.name,
-      ...(snapshot.compiled_id ? { id: snapshot.compiled_id } : { source: snapshot.source, server_source: snapshot.server_source }),
+      ...(snapshot.compiled_id ? { id: snapshot.compiled_id } : { source: snapshot.source, server_source: snapshot.server_source, project: snapshot.project }),
     });
     if (artifact) return { ok: true, js: artifact.client_js, diagnostics: [], artifact };
     // Old installations have source/history but no saved bundles. Backfill via

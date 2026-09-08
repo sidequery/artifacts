@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ProjectEditor, editableProject, emptyEditableProject, type EditableProject } from "./project-editor";
 import type { GalleryArtifact } from "./types";
 
 type ToolResult = { error?: string; isError?: boolean; content?: { type: string; text?: string }[]; structuredContent?: unknown };
@@ -44,6 +45,15 @@ export function LinkSettings({ artifact, onSaved }: { artifact: GalleryArtifact;
     <span role="status">{status}</span>
   </form>;
 }
+type SourceSnapshot = { source: string; server_source?: string | null; project: EditableProject };
+async function loadSourceSnapshot(sourceUrl: string, signal: AbortSignal): Promise<SourceSnapshot> {
+  const url = new URL(sourceUrl, window.location.href); url.searchParams.set("format", "json");
+  const response = await fetch(url, { signal });
+  if (!response.ok) throw new Error(`Source request failed (${response.status})`);
+  const value = await response.json() as SourceSnapshot;
+  if (typeof value.source !== "string" || (value.server_source !== undefined && value.server_source !== null && typeof value.server_source !== "string")) throw new Error("Invalid source snapshot.");
+  return { ...value, project: editableProject(value.project) };
+}
 const initialSource = `export default {\n  async fetch(request, env, ctx) {\n    return Response.json({ message: "Hello" });\n  },\n} satisfies ExportedHandler<ScriptEnv>;\n`;
 export function ScriptPanel({ artifact, workspace, version, sourceUrl, onSaved, onCancel }: { artifact?: GalleryArtifact; workspace: string; version?: string; sourceUrl?: string; onSaved: (name: string) => Promise<void>; onCancel?: () => void }) {
   const [name, setName] = useState(artifact?.name ?? "");
@@ -51,6 +61,10 @@ export function ScriptPanel({ artifact, workspace, version, sourceUrl, onSaved, 
   const [access, setAccess] = useState(artifact?.access ?? "private");
   const [contents, setContents] = useState(artifact ? "" : initialSource);
   const [loaded, setLoaded] = useState(!artifact);
+  const [loadedUrl, setLoadedUrl] = useState<string | undefined>(undefined);
+  const [project, setProject] = useState(emptyEditableProject);
+  const [projectValid, setProjectValid] = useState(true);
+  const [projectLoad, setProjectLoad] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
@@ -66,9 +80,10 @@ export function ScriptPanel({ artifact, workspace, version, sourceUrl, onSaved, 
   useEffect(() => {
     if (!sourceUrl) return;
     const controller = new AbortController(); setLoaded(false); setError("");
-    void fetch(sourceUrl, { signal: controller.signal }).then(async response => { if (!response.ok) throw new Error(`Source request failed (${response.status})`); return response.text(); }).then(text => { if (!controller.signal.aborted) { setContents(text); setLoaded(true); } }).catch(error => { if (!controller.signal.aborted) setError(message(error)); });
+    void loadSourceSnapshot(sourceUrl, controller.signal).then(snapshot => { if (!controller.signal.aborted) { setContents(snapshot.source); setProject(snapshot.project); setProjectValid(true); setProjectLoad(value => value + 1); setLoadedUrl(sourceUrl); setLoaded(true); } }).catch(error => { if (!controller.signal.aborted) setError(message(error)); });
     return () => controller.abort();
   }, [sourceUrl]);
+  const sourceReady = loaded && (!artifact || (!!sourceUrl && loadedUrl === sourceUrl));
   async function perform(action: () => Promise<void>) {
     setBusy(true); setError(""); setStatus("");
     try { await action(); } catch (error) { setError(message(error)); } finally { setBusy(false); }
@@ -77,9 +92,9 @@ export function ScriptPanel({ artifact, workspace, version, sourceUrl, onSaved, 
     {!artifact ? <div className="script-fields"><label>Name <input aria-label="Script name" value={name} onChange={event => setName(event.target.value)} /></label><label>URL / <input aria-label="Script slug" value={slug} onChange={event => setSlug(event.target.value)} /></label><select aria-label="Script access" value={access} onChange={event => setAccess(event.target.value as typeof access)}><option value="private">Private</option><option value="public">Public</option></select></div> : null}
     {error ? <p role="alert" className="error-message">{error}</p> : null}
     {status ? <p role="status">{status}</p> : null}
-    <label className="source-editor-label">{historical ? "Revision source" : "Script source"}<textarea className="source-editor" aria-label="Script source" spellCheck={false} readOnly={historical || !loaded} value={contents} onChange={event => setContents(event.target.value)} /></label>
+    <ProjectEditor key={projectLoad} entries={[{ id: "script", label: "Script source", source: contents }]} project={project} onProjectChange={setProject} onEntryChange={(_, source) => setContents(source)} readOnly={historical} disabled={!sourceReady || busy} onValidityChange={setProjectValid} />
     <div className="script-fields">
-      {historical ? <button disabled={busy || !loaded} onClick={() => void perform(async () => { await galleryTool(workspace, "script_restore", { name, version_id: version }); await onSaved(name); setStatus("Revision restored"); })}>Restore revision</button> : <button disabled={busy || !loaded || !name.trim()} onClick={() => void perform(async () => { await galleryTool(workspace, "script_write", { name, contents, ...(!artifact ? { ...(slug ? { slug } : {}), access } : {}) }); await onSaved(name); setStatus("Script saved"); })}>Save script</button>}
+      {historical ? <button disabled={busy || !sourceReady} onClick={() => void perform(async () => { await galleryTool(workspace, "script_restore", { name, version_id: version }); await onSaved(name); setStatus("Revision restored"); })}>Restore revision</button> : <button disabled={busy || !sourceReady || !projectValid || !name.trim()} onClick={() => void perform(async () => { await galleryTool(workspace, "script_write", { name, contents, project, ...(!artifact ? { ...(slug ? { slug } : {}), access } : {}) }); await onSaved(name); setStatus("Script saved"); })}>Save script</button>}
       {onCancel ? <button onClick={onCancel} disabled={busy}>Cancel</button> : null}
     </div>
     {artifact ? <>
@@ -98,5 +113,35 @@ export function ScriptPanel({ artifact, workspace, version, sourceUrl, onSaved, 
       <details><summary>Logs</summary><button disabled={busy} onClick={() => void perform(async () => setLogs(show(await galleryTool(workspace, "script_logs", { name }))))}>Load logs</button><pre aria-label="Script logs">{logs}</pre></details>
       <details><summary>Secrets</summary><form onSubmit={event => { event.preventDefault(); void perform(async () => { await galleryTool(workspace, "script_secrets", { name, secrets: { [secretName]: secretValue } }); setSecretValue(""); setStatus("Secret saved"); }); }}><div className="script-fields"><input aria-label="Secret name" placeholder="Name" required value={secretName} onChange={event => setSecretName(event.target.value)} /><input aria-label="Secret value" placeholder="Value" type="password" autoComplete="new-password" value={secretValue} onChange={event => setSecretValue(event.target.value)} /><button disabled={busy}>Save secret</button><button type="button" disabled={busy || !secretName} onClick={() => void perform(async () => { await galleryTool(workspace, "script_secrets", { name, secrets: { [secretName]: null } }); setSecretValue(""); setStatus("Secret removed"); })}>Remove secret</button></div></form></details>
     </> : null}
+  </div>;
+}
+
+export function CanvasSourcePanel({ artifact, version, sourceUrl, onSaved }: { artifact: GalleryArtifact; version: string; sourceUrl: string; onSaved: () => Promise<void> }) {
+  const [snapshot, setSnapshot] = useState<SourceSnapshot | null>(null);
+  const [loadedUrl, setLoadedUrl] = useState("");
+  const [projectValid, setProjectValid] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [status, setStatus] = useState("");
+  const historical = version !== "working";
+  useEffect(() => {
+    const controller = new AbortController(); setLoadedUrl(""); setSnapshot(null); setError(""); setStatus(""); setProjectValid(true);
+    void loadSourceSnapshot(sourceUrl, controller.signal).then(value => { if (!controller.signal.aborted) { setSnapshot(value); setLoadedUrl(sourceUrl); } }).catch(error => { if (!controller.signal.aborted) setError(message(error)); });
+    return () => controller.abort();
+  }, [sourceUrl]);
+  const loaded = snapshot !== null && loadedUrl === sourceUrl;
+  async function save() {
+    if (!loaded || !snapshot) return;
+    setBusy(true); setError(""); setStatus("");
+    try {
+      await galleryTool(artifact.workspace, historical ? "canvas_restore" : "canvas_write", historical ? { version_id: version } : { name: artifact.name, contents: snapshot.source, server: snapshot.server_source ?? null, project: snapshot.project });
+      await onSaved(); setStatus(historical ? "Revision restored" : "Canvas saved");
+    } catch (error) { setError(message(error)); } finally { setBusy(false); }
+  }
+  return <div className="script-panel">
+    {error ? <p role="alert" className="error-message">{error}</p> : null}
+    {status ? <p role="status">{status}</p> : null}
+    {!loaded ? <p role="status">Loading source…</p> : <ProjectEditor key={loadedUrl} entries={[{ id: "client", label: "Canvas source", source: snapshot.source }, ...(snapshot.server_source === null || snapshot.server_source === undefined ? [] : [{ id: "server", label: "Server source", source: snapshot.server_source }])]} project={snapshot.project} onProjectChange={project => setSnapshot({ ...snapshot, project })} onEntryChange={(id, source) => setSnapshot(id === "server" ? { ...snapshot, server_source: source } : { ...snapshot, source })} readOnly={historical} disabled={busy} onValidityChange={setProjectValid} />}
+    <button type="button" disabled={busy || !loaded || !projectValid} onClick={() => void save()}>{historical ? "Restore revision" : "Save canvas"}</button>
   </div>;
 }

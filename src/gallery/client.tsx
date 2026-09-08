@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { authClient, signInUrl } from "../auth/client-api";
 import type { GalleryArtifact, GalleryData } from "./types";
-import { LinkSettings, ScriptPanel } from "./hosted";
+import { CanvasSourcePanel, LinkSettings, ScriptPanel } from "./hosted";
 import { canvasFileTransferUrl } from "../sdk/files";
 import { RemixPanel } from "./remix";
 
@@ -518,6 +518,8 @@ function App() {
                   onLoad={() => setPreviewLoading(false)}
                 />
               </>
+            ) : gallery?.capabilities?.links ? (
+              <CanvasSourcePanel key={`${selectedArtifact.key}:${resolvedVersion}`} artifact={selectedArtifact} version={resolvedVersion} sourceUrl={artifactUrl("/api/source", selectedArtifact, resolvedVersion)} onSaved={async () => { setSelectedVersion("working"); await loadGallery(); }} />
             ) : source.status === "ready" ? (
               <pre className="source-code" tabIndex={0} aria-label={`Source of ${selectedArtifact.name}`}><code>{source.text}</code></pre>
             ) : source.status === "error" ? (

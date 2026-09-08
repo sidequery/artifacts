@@ -10,7 +10,7 @@ export const MCP_TOOLS = [
   {
     name: "canvas_read",
     description: "Read working raw TSX by inclusive 1-based line range (default 200 lines). Returns exact source with line endings, total_lines, next_line and a full-file source_hash for guarded edits. Rejects symlinks and names with slashes.",
-    inputSchema: { type: "object", properties: { name: { type: "string" }, start_line: { type: "integer", minimum: 1 }, end_line: { type: "integer", minimum: 1 } }, required: ["name"], additionalProperties: false },
+    inputSchema: { type: "object", properties: { name: { type: "string" }, file: { type: "string", description: "Optional existing project helper path." }, start_line: { type: "integer", minimum: 1 }, end_line: { type: "integer", minimum: 1 } }, required: ["name"], additionalProperties: false },
   },
   {
     name: "canvas_edit",
@@ -20,6 +20,7 @@ export const MCP_TOOLS = [
       type: "object",
       properties: {
         name: { type: "string" },
+        file: { type: "string", description: "Optional existing project helper path. Omit to edit the canvas entrypoint." },
         edits: { type: "array", minItems: 1, items: { type: "object", properties: { old_text: { type: "string", minLength: 1 }, new_text: { type: "string" } }, required: ["old_text", "new_text"], additionalProperties: false } },
         expected_hash: { type: "string", pattern: "^[a-f0-9]{64}$" },
       },
@@ -63,6 +64,7 @@ export const MCP_TOOLS = [
       type: "object",
       properties: {
         name: { type: "string", description: "Canvas name, e.g. billing-review or billing-review.canvas.tsx" },
+        project: { type: "object", properties: { files: { type: "object", additionalProperties: { type: "string" } }, dependencies: { type: "object", additionalProperties: { type: "string" } } }, additionalProperties: false, description: "Helper modules by relative path and bun packages pinned to exact versions. Omit to preserve existing project. Resolved package snapshot is retained for replay." },
         contents: { type: "string", description: "Full .canvas.tsx source" },
         open: { type: "boolean", description: "Legacy flag; successful writes now always show the canvas inline." },
         target: { type: "string", enum: ["inline", "herdr"], default: "inline", description: "Use herdr only to explicitly open a terminal pane as well." },

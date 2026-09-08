@@ -318,12 +318,14 @@ test("constructor migrates legacy draft and version tables without losing client
   await storage.exec("alter table drafts drop column server_source");
   await storage.exec("alter table versions drop column server_source");
   await storage.exec("alter table versions drop column compiled_id");
+  await storage.exec("alter table drafts drop column project");
+  await storage.exec("alter table versions drop column project");
   await runtime.unsafeEvictDurableObject("canvas-library-test", "CanvasLibrary", { name: library });
 
   const draft = await call<{ source: string; server_source: string | null }>("preview", { workspace: "legacy", name: "overview" }, library);
   const version = await call<{ source: string; server_source: string | null }>("version", { workspace: "legacy", id: served.version.id }, library);
-  expect(draft).toMatchObject({ source, server_source: null });
-  expect(version).toMatchObject({ source, server_source: null });
+  expect(draft).toMatchObject({ source, server_source: null, project: { files: {}, dependencies: {}, lock: {} } });
+  expect(version).toMatchObject({ source, server_source: null, project: { files: {}, dependencies: {}, lock: {} } });
   const draftColumns = await storage.exec<{ name: string }>("pragma table_info(drafts)");
   const versionColumns = await storage.exec<{ name: string }>("pragma table_info(versions)");
   expect(draftColumns.map(column => column.name)).toContain("server_source");
@@ -424,4 +426,112 @@ test("remix captures source pairs and provenance with fresh state and rejects co
   await fails("remix",{workspace,name,version_id:served.version.id,new_name:"ambiguous",runtime:"test"},"not both");
   await fails("remix",{workspace:"other",version_id:served.version.id,new_name:"foreign",runtime:"test"},"not found");
   await fails("remix",{workspace,version_id:served.version.id,new_name:"foreign",runtime:"test"},"not found","bob");
+});
+
+test("projects persist through targeted edits, immutable versions, preview, and restore", async () => {
+  const identity = { workspace: "projects", name: "modules" };
+  const project = { files: { "helper.ts": "export const answer = 1;", "other.ts": "unchanged" }, dependencies: { "lodash-es": "4.17.21" }, lock: { "node_modules/lodash-es/index.js": "export const version = 1;" } };
+  const source = "client source\n";
+  const written = await call<any>("writeDraft", { ...identity, source, server_source: "server", project });
+  expect(written.project).toEqual(project);
+  const omitted = await call<any>("writeDraft", { ...identity, source });
+  expect(omitted.project).toEqual(project);
+  const serve = { ...identity, source, server_source: "server", project, runtime: "sdk", initial_state: {}, mode: "live" };
+  const first = await call<any>("recordServe", serve);
+  expect((await call<any>("recordServe", serve)).version.id).toBe(first.version.id);
+  const read = await call<any>("readRange", { ...identity, file: "helper.ts" });
+  expect(read.source).toBe(project.files["helper.ts"]);
+  const edited = await call<any>("editDraft", { ...identity, file: "helper.ts", expected_hash: read.source_hash, edits: [{ old_text: "1", new_text: "2" }] });
+  expect(edited.source).toBe(source);
+  expect(edited.server_source).toBe("server");
+  expect(edited.project).toEqual({ ...project, files: { ...project.files, "helper.ts": "export const answer = 2;" } });
+  await fails("editDraft", { ...identity, file: "helper.ts", expected_hash: read.source_hash, edits: [{ old_text: "2", new_text: "3" }] }, "changed since read");
+  await fails("editDraft", { ...identity, file: "helper.ts", edits: [{ old_text: "2", new_text: "3" }, { old_text: "missing", new_text: "x" }] }, "no changes written");
+  await fails("readRange", { ...identity, file: "missing.ts" }, "file not found");
+  await fails("editDraft", { ...identity, file: "missing.ts", edits: [{ old_text: "x", new_text: "y" }] }, "file not found");
+  expect((await call<any>("preview", identity)).project).toEqual(edited.project);
+  const newer = await call<any>("recordServe", { ...serve, project: edited.project });
+  expect(newer.version.revision).toBe(2);
+  expect(newer.version.source_hash).toBe(first.version.source_hash);
+  expect((await call<any>("version", { workspace: identity.workspace, id: first.version.id })).project).toEqual(project);
+  await fails("recordServe", { ...serve, project: edited.project, version_id: first.version.id }, "does not match");
+  expect((await call<any>("preview", { workspace: identity.workspace, version_id: first.version.id })).project).toEqual(project);
+  const restored = await call<any>("restore", { workspace: identity.workspace, id: first.version.id, runtime: "sdk" });
+  expect(restored.project).toEqual(project);
+  const empty = { files: {}, dependencies: {}, lock: {} };
+  expect((await call<any>("writeDraft", { ...identity, source, project: empty })).project).toEqual(empty);
+});
+
+test("large project snapshots round-trip through chunked drafts, edits, history, and restore", async () => {
+  const library = "large-project-chunks";
+  const identity = { workspace: "chunks", name: "large" };
+  const project = { files: { "helper.ts": "export const value = 1;" }, dependencies: { example: "1.0.0" }, lock: { "node_modules/example/index.js": `export const text = "${"😀漢字".repeat(240000)}";` } };
+  expect(new TextEncoder().encode(JSON.stringify(project)).byteLength).toBeGreaterThan(2 * 1024 * 1024);
+  const source = "client\n";
+  expect((await call<any>("writeDraft", { ...identity, source, project }, library)).project).toEqual(project);
+  const served = await call<any>("recordServe", { ...identity, source, project, runtime: "sdk", mode: "live", initial_state: {} }, library);
+  const storage = await runtime.unsafeGetDurableObjectStorage("canvas-library-test", "CanvasLibrary", { name: library });
+  const before = await storage.exec<{n: number; largest: number}>("select count(*) as n,max(length(cast(chunk as blob))) as largest from project_chunks");
+  expect(before[0]!.n).toBeGreaterThan(1);
+  expect(before[0]!.largest).toBeLessThanOrEqual(512 * 1024);
+  await call("writeDraft", { ...identity, source }, library);
+  const edited = await call<any>("editDraft", { ...identity, file: "helper.ts", edits: [{ old_text: "1", new_text: "2" }] }, library);
+  expect(edited.project.lock).toEqual(project.lock);
+  expect((await call<any>("readRange", identity, library)).project.files["helper.ts"]).toContain("2");
+  expect((await call<any>("version", { workspace: identity.workspace, id: served.version.id }, library)).project).toEqual(project);
+  expect((await call<any>("restore", { workspace: identity.workspace, id: served.version.id, runtime: "sdk" }, library)).project).toEqual(project);
+  await runtime.unsafeEvictDurableObject("canvas-library-test", "CanvasLibrary", { name: library });
+  expect((await call<any>("preview", identity, library)).project).toEqual(project);
+  const after = await storage.exec<{n: number}>("select count(*) as n from project_chunks");
+  expect(after[0]!.n).toBeLessThanOrEqual(before[0]!.n + 1);
+});
+
+test("inline project snapshots remain readable after upgrading to chunk storage", async () => {
+  const library = "inline-project-upgrade", identity = { workspace: "upgrade", name: "canvas" };
+  const project = { files: { "helper.ts": "original" }, dependencies: {}, lock: {} };
+  await call("writeDraft", { ...identity, source: "client", project }, library);
+  const served = await call<any>("recordServe", { ...identity, source: "client", project, runtime: "sdk", mode: "live", initial_state: {} }, library);
+  const storage = await runtime.unsafeGetDurableObjectStorage("canvas-library-test", "CanvasLibrary", { name: library });
+  await storage.exec("update drafts set project = ?", JSON.stringify(project));
+  await storage.exec("update versions set project = ?", JSON.stringify(project));
+  await runtime.unsafeEvictDurableObject("canvas-library-test", "CanvasLibrary", { name: library });
+  expect((await call<any>("preview", identity, library)).project).toEqual(project);
+  expect((await call<any>("version", { workspace: identity.workspace, id: served.version.id }, library)).project).toEqual(project);
+  const edited = await call<any>("editDraft", { ...identity, file: "helper.ts", edits: [{ old_text: "original", new_text: "changed" }] }, library);
+  expect(edited.project.files["helper.ts"]).toBe("changed");
+  expect((await call<any>("restore", { workspace: identity.workspace, id: served.version.id, runtime: "sdk" }, library)).project).toEqual(project);
+});
+
+test("compiled identity includes normalized project files, dependencies and lock without changing legacy bundles", async () => {
+  const library = "compiled-projects", identity = { workspace: "projects", name: "compiled" };
+  const input = { ...identity, source: "same source\n", server_source: null, runtime: "sdk", client_js: "original", server_js: null };
+  const empty = { files: {}, dependencies: {}, lock: {} };
+  const legacy = await call<CompiledCanvas>("saveCompiled", input, library);
+  expect(legacy.id).toBe(createHash("sha256").update(JSON.stringify([input.source, null, input.runtime])).digest("hex"));
+  const storage = await runtime.unsafeGetDurableObjectStorage("canvas-library-test", "CanvasLibrary", { name: library });
+  await storage.exec("alter table compiled_canvases drop column project_hash");
+  await runtime.unsafeEvictDurableObject("canvas-library-test", "CanvasLibrary", { name: library });
+  expect(await call("compiled", { ...input, project: empty }, library)).toEqual(legacy);
+  const project = { files: { "b.ts": "b", "a.ts": "a" }, dependencies: { example: "1.0.0" }, lock: { "node_modules/example/index.js": "one" } };
+  expect(await call("compiled", { ...input, project }, library)).toBeNull();
+  const original = await call<CompiledCanvas>("saveCompiled", { ...input, project, client_js: "project original" }, library);
+  expect(await call("compiled", { ...input, project: { ...project, files: { "a.ts": "a", "b.ts": "b" } } }, library)).toEqual(original);
+  const serve = { ...input, project, compiled_id: original.id, mode: "live", initial_state: {} };
+  const archived = await call<VersionResult>("recordServe", serve, library);
+  for (const changed of [
+    { ...project, files: { ...project.files, "a.ts": "changed" } },
+    { ...project, dependencies: { example: "2.0.0" } },
+    { ...project, lock: { "node_modules/example/index.js": "two" } },
+  ]) {
+    expect(await call("compiled", { ...input, project: changed }, library)).toBeNull();
+    const compiled = await call<CompiledCanvas>("saveCompiled", { ...input, project: changed, client_js: "changed" }, library);
+    expect(compiled.id).not.toBe(original.id);
+    await fails("recordServe", { ...serve, project: changed }, "does not match", library);
+    await fails("attachCompiled", { ...identity, version_id: archived.version.id, compiled_id: compiled.id }, "does not match", library);
+    const next = await call<VersionResult>("recordServe", { ...serve, project: changed, compiled_id: compiled.id }, library);
+    expect(next.version.id).not.toBe(archived.version.id);
+  }
+  expect(await call("preview", { workspace: identity.workspace, version_id: archived.version.id }, library)).toMatchObject({ project, compiled_id: original.id });
+  expect(await call("compiled", { ...identity, id: original.id }, library)).toEqual(original);
+  expect(await call("compiled", { ...identity, id: original.id, project: empty }, library)).toBeNull();
 });

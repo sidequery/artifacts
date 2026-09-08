@@ -16,7 +16,7 @@ Read this guide before your first canvas_write in the conversation. Reuse it for
 
 ## Source and imports
 
-Submit a complete TSX module with a default-exported React component. Use a kebab-case canvas name without slashes. Import from "sidequery/canvas" ("herdr/canvas" and "cursor/canvas" are compatibility aliases). Hosted deployments may also expose browser packages listed by plugins_list. Do not import react, unlisted packages, relative files, or use dynamic imports or require.
+Submit a complete TSX entrypoint with a default-exported React component. Use a kebab-case canvas name without slashes. Import the SDK from "sidequery/canvas" ("herdr/canvas" and "cursor/canvas" are compatibility aliases). Add relative helper modules with canvas_write.project.files and exact package versions with project.dependencies. Omit project to preserve it; when supplied, files and dependencies replace the existing declarations. Dependency source is integrity-verified and archived for offline replay; project.lock is read-only. Use canvas_read/canvas_edit with file to select a helper. Hosted deployments may also expose browser packages listed by plugins_list. Browser React packages share the host runtime. Dynamic imports and require remain unsupported in authored canvas modules.
 
 These are the installed SDK's runtime exports:
 ${CANVAS_GUIDE_EXPORTS.join(", ")}

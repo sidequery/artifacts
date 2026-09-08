@@ -236,7 +236,7 @@ test("a prebundled third-party Hono handler compiles and serves through the scri
 
   const host = await Bun.build({
     entrypoints: [new URL("./scripts-test-worker.ts", import.meta.url).pathname],
-    target: "node", format: "esm", external: ["cloudflare:workers"],
+    target: "browser", format: "esm", external: ["cloudflare:workers", "node:*", "fs", "fs/promises"],
   });
   if (!host.success) throw new Error(host.logs.join("\n"));
   const execution = new Miniflare({
@@ -319,3 +319,50 @@ export default function Canvas() { return <PluginCounter {...label} />; }`;
   } finally { await browser.close(); }
   expect(outbound).toEqual([]);
 }, 60000);
+
+async function callProject(source: string, project: object, operation = "compile"): Promise<Result> {
+  const response = await runtime.dispatchFetch(`http://localhost/${operation}`, { method: "POST", headers: {"content-type":"application/json"}, body: JSON.stringify({source,project}) });
+  expect(response.status).toBe(200);
+  return response.json() as Promise<Result>;
+}
+test("compiles archived multi-file projects and typed packages without network", async () => {
+  const project = {files:{"lib/greeting.ts":"export const greeting: string = 'project-hello';"},dependencies:{"tiny-example":"1.0.0"},lock:{
+    "node_modules/tiny-example/package.json":JSON.stringify({name:"tiny-example",version:"1.0.0",main:"index.js",types:"index.d.ts"}),
+    "node_modules/tiny-example/index.js":"export const answer = 42;",
+    "node_modules/tiny-example/index.d.ts":"export const answer: number;",
+  }};
+  const source = 'import {greeting} from "./lib/greeting"; import {answer} from "tiny-example"; export default function Canvas(){return <div>{greeting} {answer}</div>}';
+  const result=await callProject(source,project);
+  expect(result.diagnostics).toEqual([]); expect(result.ok).toBe(true); expect(result.js).toContain("project-hello");
+  const script=await callProject('import {greeting} from "./lib/greeting"; import {answer} from "tiny-example"; export default {fetch(){return new Response(greeting+answer)}}',project,"compile-script");
+  expect(script.diagnostics).toEqual([]); expect(script.ok).toBe(true);
+  const bad=await callProject(source,{...project,files:{"lib/greeting.ts":"export const greeting: number = 'bad';"}});
+  expect(bad.ok).toBe(false); expect(bad.diagnostics.some(item=>item.file?.includes("greeting.ts"))).toBe(true);
+  const separateServer=await callProject(source,{...project,files:{...project.files,"server-only.ts":"export const load = () => fetch('https://example.com');"}});
+  expect(separateServer.ok).toBe(true);
+  const transitiveUnsafe=await callProject(source,{...project,files:{"lib/greeting.ts":"export {greeting} from './nested';","lib/nested.ts":"export const greeting = fetch('https://example.com');"}});
+  expect(transitiveUnsafe.ok).toBe(false); expect(transitiveUnsafe.diagnostics.some(item=>item.file === "lib/nested.ts")).toBe(true);
+  const unsafe=await callProject(source,{...project,files:{"lib/greeting.ts":"export const greeting = fetch('https://example.com');"}});
+  expect(unsafe.ok).toBe(false); expect(unsafe.diagnostics.some(item=>item.message.includes("fetch()"))).toBe(true);
+  expect(outbound).toEqual([]);
+},60000);
+
+test("package components use the host React hook runtime",async()=>{
+ const result=await callProject('import {Counter} from "counter-package"; export default function Canvas(){return <Counter/>}',{dependencies:{"counter-package":"1.0.0"},lock:{
+   "node_modules/counter-package/package.json":JSON.stringify({name:"counter-package",version:"1.0.0",main:"index.js",types:"index.d.ts"}),
+   "node_modules/counter-package/index.js":'import {useState,createElement} from "react"; export function Counter(){const [n,setN]=useState(0); return createElement("button",{onClick:()=>setN(n+1)},"Package count "+n)}',
+   "node_modules/counter-package/index.d.ts":'export function Counter(): import("react").ReactElement;',
+ }});
+ expect(result.diagnostics).toEqual([]); expect(result.ok).toBe(true);
+ const browser=await chromium.launch({headless:true});
+ try {const page=await browser.newPage();await page.setContent('<div id="root"></div>');await page.addScriptTag({type:"module",content:result.js!}); await page.getByRole("button",{name:"Package count 0"}).click();await page.getByRole("button",{name:"Package count 1"}).waitFor();}finally{await browser.close();}
+ expect(outbound).toEqual([]);
+},60000);
+
+test.skipIf(process.env.CANVAS_PACKAGE_INTEGRATION !== "1")("compiles an integrity-verified Hono dependency snapshot without compiler network",async()=>{
+  const {resolveProject}=await import("./project");
+  const project=await resolveProject({dependencies:{hono:"4.13.7"},files:{"lib/message.ts":"export const message = 'hello-locked-hono';"}});
+  const result=await callProject('import {Hono} from "hono"; import {message} from "./lib/message"; const app=new Hono(); app.get("/",c=>c.text(message)); export default app;',project,"compile-script");
+  expect(result.diagnostics).toEqual([]); expect(result.ok).toBe(true); expect(result.js).toContain("hello-locked-hono");
+  expect(outbound).toEqual([]);
+},120000);

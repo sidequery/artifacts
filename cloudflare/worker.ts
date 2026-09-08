@@ -153,11 +153,13 @@ app.post("/api/tools", async c => {
 app.get("/api/source", async c => {
   if (c.req.query("kind") === "script") {
     const source = await c.get("service").scriptReadSource({ name: c.req.query("name"), version_id: c.req.query("version") });
+    if (c.req.query("format") === "json") return c.json(source);
     c.header("Content-Type", "text/plain; charset=utf-8");
     if (c.req.query("download") === "1") c.header("Content-Disposition", 'attachment; filename="script.ts"');
     return c.body(source.source);
   }
   const snapshot = await c.get("service").snapshot({ name: c.req.query("name"), version_id: c.req.query("version") });
+  if (c.req.query("format") === "json") return c.json(snapshot);
   c.header("Content-Type", "text/plain; charset=utf-8");
   if (c.req.query("download") === "1") c.header("Content-Disposition", `attachment; filename="canvas.canvas.tsx"; filename*=UTF-8''${encodeURIComponent(snapshot.name + ".canvas.tsx")}`);
   return c.body(snapshot.source);

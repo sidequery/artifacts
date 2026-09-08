@@ -1,20 +1,26 @@
+import { readLocalProject, materializeProject, projectDiagnostics } from "./localProject";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
 
-import { sandboxToDiagnostics, type Diagnostic } from "./diagnostics";
+import { type Diagnostic } from "./diagnostics";
 import { PLUGIN_ROOT, SDK_ENTRY } from "./paths";
-import { scanCanvasSource } from "./sandbox";
 import { relative, resolve } from "node:path";
 import { loadBrowserPlugins } from "./plugins/browser";
 import type { BrowserPlugins } from "./plugins/types";
 
 export function typecheckCanvas(canvasPath: string, plugins: BrowserPlugins = loadBrowserPlugins()): Diagnostic[] {
   const source = readFileSync(canvasPath, "utf8");
-  const violations = scanCanvasSource(source, Object.keys(plugins.paths));
+  const project = readLocalProject(canvasPath);
+  const violations = projectDiagnostics(canvasPath, source, project, Object.keys(plugins.paths));
   if (violations.length > 0) {
-    return sandboxToDiagnostics(canvasPath, violations);
+    return violations;
   }
 
+  const snapshot = materializeProject(source, project);
+  try { return checkSnapshot(snapshot.path, plugins).map(item => ({ ...item, file: item.file === snapshot.path ? canvasPath : item.file?.replace(snapshot.directory + "/", "") })); } finally { snapshot.dispose(); }
+}
+
+function checkSnapshot(canvasPath: string, plugins: BrowserPlugins): Diagnostic[] {
   const compilerOptions: ts.CompilerOptions = {
     target: ts.ScriptTarget.ES2022,
     module: ts.ModuleKind.ESNext,

@@ -1,3 +1,4 @@
+import { resolveProject } from "./project";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { createHash } from "node:crypto";
 import type { CanvasEdit } from "./library";
@@ -36,13 +37,15 @@ export class CloudScriptService {
         return text({ scripts: entries, next_offset: entries.length === 100 ? offset + 100 : null });
       }
       case "script_read": {
-        if (!args.version_id) return text(await scripts.readRange({ ...input, start_line: args.start_line as number | undefined, end_line: args.end_line as number | undefined }));
+        if (!args.version_id) return text(await scripts.readRange({ ...input, file: args.file as string | undefined, start_line: args.start_line as number | undefined, end_line: args.end_line as number | undefined }));
         const version = await this.readSource({ name, version_id: args.version_id as string });
-        const lines = version.source.match(/[^\n]*\n|[^\n]+$/g) ?? [""];
+        const selected = args.file === undefined ? version.source : Object.hasOwn(version.project.files, args.file as string) ? version.project.files[args.file as string] : undefined;
+        if (selected === undefined) throw new Error("project file not found");
+        const lines = selected.match(/[^\n]*\n|[^\n]+$/g) ?? [""];
         const start = args.start_line as number | undefined ?? 1, end = args.end_line as number | undefined ?? start + 199;
         if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 1 || end < start || start > lines.length) throw new Error("invalid line range");
         const actualEnd = Math.min(end, lines.length);
-        return text({ ...version, source: lines.slice(start - 1, actualEnd).join(""), start_line: start, end_line: actualEnd, total_lines: lines.length, next_line: actualEnd < lines.length ? actualEnd + 1 : null });
+        return text({ ...version, ...(args.file === undefined ? {} : { file: args.file, path: args.file, source_hash: createHash("sha256").update(selected).digest("hex") }), source: lines.slice(start - 1, actualEnd).join(""), start_line: start, end_line: actualEnd, total_lines: lines.length, next_line: actualEnd < lines.length ? actualEnd + 1 : null });
       }
       case "script_history": {
         const versions = await scripts.history({ workspace: this.artifacts.workspace, name, offset });
@@ -86,12 +89,14 @@ export class CloudScriptService {
           if (version.name !== target.name) throw new Error("Version does not belong to this script");
         }
         const destination = {...input,name:target.name};
-        const mutation = tool === "script_remix" ? await scripts.remix({workspace:this.artifacts.workspace,name:args.name as string | undefined,version_id:args.version_id as string | undefined,new_name:args.new_name as string}) : tool === "script_write" ? await scripts.writeDraft({ ...input, source: args.contents as string })
-          : tool === "script_edit" ? await scripts.editDraft({ ...input, edits: args.edits as CanvasEdit[], expected_hash: args.expected_hash as string | undefined })
+        const previous = tool === "script_write" && args.project !== undefined ? await scripts.readRange(input).catch(error => { if (error instanceof Error && error.message.includes("script not found")) return undefined; throw error; }) : undefined;
+        const project = tool === "script_write" && args.project !== undefined ? await resolveProject(args.project, previous?.project) : undefined;
+        const mutation = tool === "script_remix" ? await scripts.remix({workspace:this.artifacts.workspace,name:args.name as string | undefined,version_id:args.version_id as string | undefined,new_name:args.new_name as string}) : tool === "script_write" ? await scripts.writeDraft({ ...input, source: args.contents as string, project })
+          : tool === "script_edit" ? await scripts.editDraft({ ...input, file: args.file as string | undefined, edits: args.edits as CanvasEdit[], expected_hash: args.expected_hash as string | undefined })
           : await scripts.restore({ workspace: this.artifacts.workspace, id: args.version_id as string });
         generation ??= await hosted.links.begin(target);
         await hosted.links.stage(target, generation, settings);
-        const compiled = await compileScriptSource(mutation.source);
+        const compiled = await compileScriptSource(mutation.source, mutation.project);
         if (compiled.ok && compiled.js) {
           const secrets = await scripts.executionSecrets(destination);
           const backend = hosted.scriptBackends.getByName(JSON.stringify([this.artifacts.libraryKey, this.artifacts.workspace, target.name]));
@@ -101,12 +106,12 @@ export class CloudScriptService {
               const activated = await scripts.activate({ ...destination, source_hash: mutation.source_hash, code: compiled.js });
               const link = await hosted.links.commit(target, generation, { ...settings, script_hash: activated.hash });
               if (!link) {
-                const { source, ...summary } = mutation;
+                const { source, project: snapshotProject, ...summary } = mutation;
                 const superseded = { ...summary, ...await this.artifacts.linkDetails(target), applied: true, ok: false, superseded: true, error: "A newer update superseded this URL activation" };
                 return { ...text(superseded, true), structuredContent: superseded };
               }
             } catch (error) {
-              const { source, ...summary } = mutation;
+              const { source, project: snapshotProject, ...summary } = mutation;
               const message = error instanceof Error ? error.message : "Script URL activation failed";
               const failed = { ...summary, ...await this.artifacts.linkDetails(target), applied: true, ok: false, ...(message.includes("changed during validation") ? { superseded: true } : {}), error: message };
               return { ...text(failed, true), structuredContent: failed };
@@ -116,7 +121,7 @@ export class CloudScriptService {
             compiled.diagnostics.push({ severity: "error", message: "Script module could not initialize" });
           }
         }
-        const { source, ...summary } = mutation;
+        const { source, project: snapshotProject, ...summary } = mutation;
         const payload = { ...summary, ...await this.artifacts.linkDetails(target), applied: true, ok: compiled.ok, check: formatCanvasCheck(compiled.diagnostics), diagnostics: compiled.diagnostics };
         return { ...text(payload, !compiled.ok), structuredContent: payload };
       }
