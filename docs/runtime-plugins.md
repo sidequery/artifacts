@@ -72,3 +72,7 @@ Hosted gallery previews, authenticated private standalone canvases and hosted MC
 Inputs and outputs are JSON, limited to 256 KiB. Inputs are validated against `inputSchema`; `outputSchema` is optional. Calls time out after 30 seconds, and handlers receive an abort signal. Cancellation stops waiting in the browser; it does not roll back server work. Handlers should respect the signal and provide their own idempotency where needed. Server exceptions return generic errors without provider details or secrets.
 
 Plugins follow normal deployment upgrades. There is no per-canvas plugin version or retained historical runtime: saved canvases use the deployment's current plugin packages. Keep APIs compatible when upgrading. This foundation does not manage provider OAuth, install packages at runtime, add artifact permission manifests or implement routing.
+
+## Complete example
+
+The [runner-status example](../examples/runner-status/README.md) adapts an existing GitHub Actions microapp into a private routed canvas and a read-only MCP operation. It includes a shared hosted collector, explicit caller authorization, persisted snapshots, setup instructions and credential-free tests.

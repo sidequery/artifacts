@@ -93,10 +93,10 @@
   "scripts": {
     "canvas": "bun run src/cli.ts",
     "mcp": "bun run src/cli.ts mcp",
-    "test": "bun test src scripts/prepare-plugins.test.ts --timeout 30000",
+    "test": "bun test src scripts/prepare-plugins.test.ts examples/runner-status --timeout 30000",
     "test:e2e": "bun test e2e/herdr.e2e.test.ts",
-    "test:mcp-ui": "bun test e2e/mcp-app.test.ts e2e/gallery-scripts.test.ts e2e/browser-plugins.test.ts e2e/plugin-bridge.test.ts e2e/routing.test.ts --timeout 30000",
-    "typecheck": "tsc --noEmit",
+    "test:mcp-ui": "bun test e2e/mcp-app.test.ts e2e/gallery-scripts.test.ts e2e/browser-plugins.test.ts e2e/plugin-bridge.test.ts e2e/routing.test.ts e2e/runner-status.test.ts --timeout 30000",
+    "typecheck": "tsc --noEmit && tsc -p examples/runner-status/tsconfig.json --noEmit && tsc -p examples/runner-status/tsconfig.local.json --noEmit && tsc -p examples/runner-status/tsconfig.worker.json --noEmit",
     "dev:cloudflare": "wrangler dev --local --var ENVIRONMENT:local",
     "prepare:celld": "bun run scripts/prepare-celld.ts",
     "build:package": "bun run scripts/build-package.ts",
@@ -110,7 +110,8 @@
     "test:cloudflare": "bun run build:cloudflare-compiler && bun run build:cloudflare && bun test cloudflare --timeout 60000",
     "test:celld": "bun run build:cloudflare && bun run prepare:celld && CELLD_INTEGRATION=1 CELLD_AUTH_INTEGRATION=1 bun test cloudflare/celld.test.ts cloudflare/auth-flow.test.ts --timeout 180000",
     "deploy:cloudflare": "wrangler deploy",
-    "seed:cloudflare": "bun run scripts/seed-cloudflare.ts"
+    "seed:cloudflare": "bun run scripts/seed-cloudflare.ts",
+    "example:runner-status": "bun run examples/runner-status/local.ts"
   },
   "dependencies": {
     "@better-auth/oauth-provider": "1.7.3",
