@@ -341,6 +341,53 @@ test("standard MCP registration infers native redirects without relaxing Better 
   }
 });
 
+test("script transports preserve binary HTTP bodies and headers while bounding MCP responses", async () => {
+  const context = await newBrowserContext();
+  try {
+    const client = await connect(await authorize(context, "Alice"));
+    const name = "transport-script";
+    const written = await client.callTool({ name: "script_write", arguments: { name, slug: name, contents: `export default { fetch(request: Request) {
+      if (new URL(request.url).pathname.endsWith("/large")) return new Response(new Uint8Array(300 * 1024).fill(173));
+      if (new URL(request.url).pathname.endsWith("/empty")) return new Response(null, {status: 204});
+      return new Response(request.body, {status: 202, headers: {
+        "content-type": "application/octet-stream", "x-method": request.method, "x-url": request.url,
+        "x-script-header": request.headers.get("x-artifact-internal-script") ?? "absent",
+        "x-run-header": request.headers.get("x-artifact-internal-run") ?? "absent",
+        "x-cookie": request.headers.has("cookie") ? "present" : "absent",
+        "x-auth": request.headers.has("authorization") ? "present" : "absent",
+      }});
+    }}` } });
+    expect(written.isError, JSON.stringify(written.content)).not.toBe(true);
+    const bytes = Buffer.from([0, 128, 255, 13, 10, 65]);
+    const headers = {"x-artifact-internal-script": "caller-script", "x-artifact-internal-run": "caller-run"};
+    const direct = await context.request.post(`${origin}/${name}/echo?one=two`, {data: bytes, headers: {...headers, Authorization: "private-caller"}});
+    expect(direct.status(), await direct.text()).toBe(202);
+    expect(await direct.body()).toEqual(bytes);
+    expect(direct.headers()).toMatchObject({"x-method": "POST", "x-url": `${origin}/${name}/echo?one=two`, "x-script-header": "caller-script", "x-run-header": "caller-run", "x-cookie": "absent", "x-auth": "absent"});
+    const run = await client.callTool({name: "script_run", arguments: {name, request: {path: "/echo?one=two", method: "PATCH", headers: Object.entries(headers), body: bytes.toString("base64")}}});
+    expect(run.isError, JSON.stringify(run.content)).not.toBe(true);
+    const response = (run.structuredContent as any).response;
+    expect(response.status).toBe(202);
+    expect(Buffer.from(response.body, "base64")).toEqual(bytes);
+    expect(Object.fromEntries(response.headers)).toMatchObject({"x-method": "PATCH", "x-url": `${origin}/echo?one=two`, "x-script-header": "caller-script", "x-run-header": "caller-run"});
+    const large = await context.request.get(`${origin}/${name}/large`);
+    expect(large.status()).toBe(200);
+    expect(await large.body()).toEqual(Buffer.alloc(300 * 1024, 173));
+    const bounded = await client.callTool({name: "script_run", arguments: {name, request: {path: "/large"}}});
+    expect(bounded.isError).toBe(true);
+    expect(JSON.stringify(bounded.content)).toContain("MCP limit of 256 KiB");
+    const empty = await client.callTool({name: "script_run", arguments: {name, request: {path: "/empty"}}});
+    expect((empty.structuredContent as any).response.status).toBe(204);
+    expect((empty.structuredContent as any).response).not.toHaveProperty("body");
+    const remixed = await client.callTool({name: "script_remix", arguments: {name, new_name: "transport-remix"}});
+    expect(remixed.isError, JSON.stringify(remixed.content)).not.toBe(true);
+    const beforeEdit = payload(await client.callTool({name: "script_read", arguments: {name: "transport-remix"}}));
+    const failedEdit = await client.callTool({name: "script_edit", arguments: {name: "transport-remix", edits: [{old_text: "status: 202", new_text: "status: 203"}, {old_text: "missing text", new_text: "unreachable"}]}});
+    expect(failedEdit.isError).toBe(true);
+    expect(payload(await client.callTool({name: "script_read", arguments: {name: "transport-remix"}})).source).toBe(beforeEdit.source);
+  } finally { await context.close(); }
+}, 90000);
+
 test("ownership transfer preserves live resources and revokes former library access across HTTP and MCP", async () => {
   const aliceContext = await newBrowserContext(), bobContext = await newBrowserContext();
   try {
@@ -362,7 +409,9 @@ test("ownership transfer preserves live resources and revokes former library acc
     const scriptVersion = payload(await tool(alice, "script_history", { name: script })).versions[0].id;
     await tool(alice, "script_secrets", { name: script, secrets: { TOKEN: "transfer-retained" } });
     expect(decode(await tool(alice, "artifact_request", { name: artifact, request: { path: "/counter", method: "POST" } })).value).toBe(1);
-    expect(decode(await tool(alice, "script_run", { name: script, request: { path: "/", method: "POST" } }))).toEqual({ count: 1, secret: "transfer-retained" });
+    const firstRun = await tool(alice, "script_run", { name: script, request: { path: "/", method: "POST" } });
+    expect((firstRun.structuredContent as any).response.status, JSON.stringify(await tool(alice, "script_logs", { name: script }))).toBe(200);
+    expect(decode(firstRun)).toEqual({ count: 1, secret: "transfer-retained" });
     for (const [kind, name] of [["artifact", artifact], ["script", script]]) {
       await tool(alice, `${kind}_schedule`, { name, action: "set", interval_seconds: 3600, request: { path: kind === "artifact" ? "/counter" : "/", method: "POST" } });
       await tool(alice, `${kind}_schedule`, { name, action: "pause" });

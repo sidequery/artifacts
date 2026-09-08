@@ -7,9 +7,7 @@ import type { ArtifactService } from "./artifact-service";
 import type { LinkUpdate } from "./links";
 import type { ArtifactHttpRequest } from "../src/httpTypes";
 import { formatArtifactCheck } from "../src/diagnostics";
-import { nativeRequest } from "./backend";
 import { compileScriptSource } from "./compiler";
-import { scriptResponse } from "./script-service-http";
 import { HOSTED_SCRIPT_GUIDE } from "./script-guide";
 
 export class CloudScriptService {
@@ -75,10 +73,7 @@ export class CloudScriptService {
         const link = await hosted.links.find(this.artifacts.target("script", name));
         if (!link?.script_hash) throw new Error("Script has no validated URL revision");
         const active = await scripts.active({ ...input, hash: link.script_hash });
-        const incoming = nativeRequest(args.request as ArtifactHttpRequest);
-        const request = new Request(new URL(new URL(incoming.url).pathname + new URL(incoming.url).search, hosted.origin), incoming);
-        const response = await hosted.scriptBackends.getByName(JSON.stringify([this.artifacts.libraryKey, this.artifacts.workspace, this.artifacts.target("script", name).name])).request({ ...active, request, trigger: "manual" });
-        const envelope = await scriptResponse(response, incoming.method);
+        const envelope = await hosted.scriptBackends.getByName(JSON.stringify([this.artifacts.libraryKey, this.artifacts.workspace, this.artifacts.target("script", name).name])).request({ ...active, request: args.request as ArtifactHttpRequest, origin: hosted.origin, trigger: "manual" });
         return { ...text({ status: envelope.status, ...(link ? { url: `${hosted.publicOrigin ?? hosted.origin}/${link.slug}` } : {}) }), structuredContent: { response: envelope } };
       }
       case "script_remix": case "script_write": case "script_edit": case "script_restore": {

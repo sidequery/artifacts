@@ -49,19 +49,18 @@ export class ScriptLibrary extends DurableObject<unknown> {
     if (!row) throw new Error("script not found");
     return row;
   }
+  // The caller owns the transaction; celld does not support nested transactions.
   private save(input: {workspace: string; name: string; source: string; project?: ArtifactProject}, reason: string, restoredFrom: string | null = null) {
     const {workspace,name} = key(input), code = source(input.source), updated_at = new Date().toISOString();
-    return this.ctx.storage.transactionSync(() => {
-      const current = this.sql.exec<Row>("select * from scripts where workspace=? and name=?",workspace,name).toArray()[0];
-      const project = input.project === undefined ? (current ? this.projectStorage.read(current.project) : emptyProject()) : normalizeProject(input.project);
-      const source_hash = projectSourceHash(code, project);
-      this.sql.exec(`insert into scripts(workspace,name,source,source_hash,updated_at,project) values(?,?,?,?,?,?) on conflict(workspace,name) do update set source=excluded.source,source_hash=excluded.source_hash,updated_at=excluded.updated_at,project=excluded.project`,workspace,name,code,source_hash,updated_at,this.projectStorage.encode(project));
-      const previous = this.sql.exec<{revision: number; source_hash: string}>("select revision,source_hash from script_versions where workspace=? and name=? order by revision desc limit 1",workspace,name).toArray()[0];
-      if (previous?.source_hash !== source_hash || reason === "restore") this.sql.exec("insert into script_versions(id,workspace,name,revision,source,source_hash,created_at,reason,restored_from,project) values(?,?,?,?,?,?,?,?,?,?)",crypto.randomUUID(),workspace,name,(previous?.revision ?? 0)+1,code,source_hash,updated_at,reason,restoredFrom,this.projectStorage.encode(project));
-      return {ok:true,workspace,name,path:`${workspace}/${name}.script.ts`,source:code,project,source_hash,updated_at};
-    });
+    const current = this.sql.exec<Row>("select * from scripts where workspace=? and name=?",workspace,name).toArray()[0];
+    const project = input.project === undefined ? (current ? this.projectStorage.read(current.project) : emptyProject()) : normalizeProject(input.project);
+    const source_hash = projectSourceHash(code, project);
+    this.sql.exec(`insert into scripts(workspace,name,source,source_hash,updated_at,project) values(?,?,?,?,?,?) on conflict(workspace,name) do update set source=excluded.source,source_hash=excluded.source_hash,updated_at=excluded.updated_at,project=excluded.project`,workspace,name,code,source_hash,updated_at,this.projectStorage.encode(project));
+    const previous = this.sql.exec<{revision: number; source_hash: string}>("select revision,source_hash from script_versions where workspace=? and name=? order by revision desc limit 1",workspace,name).toArray()[0];
+    if (previous?.source_hash !== source_hash || reason === "restore") this.sql.exec("insert into script_versions(id,workspace,name,revision,source,source_hash,created_at,reason,restored_from,project) values(?,?,?,?,?,?,?,?,?,?)",crypto.randomUUID(),workspace,name,(previous?.revision ?? 0)+1,code,source_hash,updated_at,reason,restoredFrom,this.projectStorage.encode(project));
+    return {ok:true,workspace,name,path:`${workspace}/${name}.script.ts`,source:code,project,source_hash,updated_at};
   }
-  writeDraft(input: {workspace: string; name: string; source: string; project?: ArtifactProject}) { return this.save(input,"edit"); }
+  writeDraft(input: {workspace: string; name: string; source: string; project?: ArtifactProject}) { return this.ctx.storage.transactionSync(() => this.save(input,"edit")); }
   remix(input: {workspace: string; name?: string; version_id?: string; new_name: string}) {
     const {workspace,name} = key({workspace:input.workspace,name:input.new_name});
     if (Boolean(input.name) === Boolean(input.version_id)) throw new Error("provide name or version_id, but not both");
@@ -161,7 +160,9 @@ export class ScriptLibrary extends DurableObject<unknown> {
     return {...row,project:this.projectStorage.read(row.project),origin:this.sql.exec<{source_name: string;source_version_id: string}>("select source_name,source_version_id from script_remix_origins where workspace=? and name=?",workspace,row.name).toArray()[0] ?? null};
   }
   restore(input: {workspace: string; id: string}) {
-    const version=this.version(input);
-    return {...this.save(version,"restore",version.id),restored:true};
+    return this.ctx.storage.transactionSync(() => {
+      const version=this.version(input);
+      return {...this.save(version,"restore",version.id),restored:true};
+    });
   }
 }
