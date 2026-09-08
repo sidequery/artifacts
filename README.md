@@ -222,6 +222,13 @@ custom Worker bindings are not provided. The local Bun CLI, stdio MCP server and
 gallery do not execute canvas servers, so `canvasFetch` reports that server
 requests are unavailable there.
 
+Hosted canvases and the managed local celld server also provide **per-canvas
+files** through `canvasFiles.upload`, `list`, `read`, `download`, and `delete`.
+Files use native R2, remain live across source edits, and need no server code.
+Uploads support up to 25 MiB; binary transfers bypass the 256 KiB request bridge.
+Public canvas links expose files read-only. See [file storage and deployment](docs/files.md)
+and [the file canvas example](examples/files.canvas.tsx).
+
 Hosted deployments choose `AUTH_MODE=access` for the existing Cloudflare Access
 setup or `AUTH_MODE=better-auth` for provider-configurable sign-in. Better Auth
 runs inside the Canvas Worker with a deployment-owned D1 database; it does not

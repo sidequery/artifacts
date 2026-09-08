@@ -67,9 +67,10 @@ async function startCelld(compiler = esbuild) {
   });
   void capture(processHandle.stdout);
   void capture(processHandle.stderr);
+  const child = processHandle;
   const deadline = Date.now() + 45_000;
   while (Date.now() < deadline) {
-    if (await Promise.race([processHandle.exited.then(() => true), Bun.sleep(100).then(() => false)])) {
+    if (await Promise.race([child.exited.then(() => true), Bun.sleep(100).then(() => false)])) {
       throw new Error(`celld exited before readiness:\n${processLogs}`);
     }
     try {
@@ -97,6 +98,8 @@ async function withClient<T>(run: (client: Client) => Promise<T>) {
   try {
     await client.connect(new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp`)));
     return await run(client);
+  } catch (error) {
+    throw new Error(`${String(error)}\n${processLogs}`);
   } finally {
     await client.close();
   }
@@ -242,3 +245,35 @@ celldTest("saved canvas bundles serve after restart with native compilation disa
     }
   } finally { await rm(marker, { force: true }); }
 }, 180_000);
+
+celldTest("per-canvas R2 files persist across celld restart and use native binary transfers", async () => {
+  let fileId = "";
+  const bytes = Buffer.alloc(2 * 1024 * 1024, 239);
+  const files = async (client: Client, name: string, request: Record<string, unknown>) => {
+    const response = await client.callTool({ name: "canvas_files", arguments: { name, request } });
+    expect(response.isError, JSON.stringify(response.content)).not.toBe(true);
+    return (response.structuredContent as { result: any }).result;
+  };
+  await withClient(async client => {
+    for (const name of ["stored-files", "separate-files"]) {
+      const result = await client.callTool({ name: "canvas_write", arguments: { name, contents: clientSource } });
+      expect(result.isError, JSON.stringify(result.content)).not.toBe(true);
+    }
+    const grant = await files(client, "stored-files", { operation: "upload", name: "persistent.bin", size: bytes.length, type: "application/octet-stream" });
+    fileId = grant.file.id;
+    const uploaded = await fetch(grant.url, { method: "PUT", body: bytes });
+    expect(uploaded.status, await uploaded.text()).toBe(201);
+    expect((await files(client, "separate-files", { operation: "list" })).files).toEqual([]);
+    expect((await files(client, "stored-files", { operation: "list" })).files[0]).toMatchObject({ id: fileId, size: bytes.length, name: "persistent.bin" });
+  });
+  await stopCelld();
+  await startCelld();
+  await withClient(async client => {
+    const grant = await files(client, "stored-files", { operation: "download", id: fileId });
+    const response = await fetch(grant.url);
+    expect(response.status).toBe(200);
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(bytes);
+    expect((await files(client, "stored-files", { operation: "delete", id: fileId })).deleted).toBe(true);
+    expect((await files(client, "stored-files", { operation: "list" })).files).toEqual([]);
+  });
+}, 90_000);

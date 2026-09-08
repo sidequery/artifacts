@@ -6,6 +6,7 @@ export const CANVAS_GUIDE_EXPORTS = [
   "Pill", "Row", "Select", "Spacer", "Stack", "Stat", "Table", "Text", "TextArea",
   "TextInput", "Toggle", "canvasFetch", "pluginCall", "Routes", "Route", "Outlet", "Navigate", "NavLink", "useNavigate", "useParams", "useLocation", "useSearchParams", "useMatch", "useResolvedPath", "canvasPaletteDark", "canvasPaletteLight", "canvasTypography",
   "mergeStyle", "themeFromKind", "tokensFromPalette", "useCanvasAction", "useCanvasState", "useState", "useReducer", "useRef", "useMemo", "useCallback", "useEffect", "useHostTheme",
+  "canvasFiles", "MAX_CANVAS_FILE_BYTES",
 ];
 
 export function canvasGuide() {
@@ -52,6 +53,12 @@ Database identity is library + workspace + canvas name: private libraries isolat
 Direct HTTP requests to /slug/api and /slug/api/* reach the active canvas backend with the /api path and query preserved. Unknown API routes never fall back to page HTML; a canvas without a backend returns JSON 404. Existing body limits and access rules apply.
 
 Implement fetch(request: Request) on CanvasServer and return a Response; browser code calls it with canvasFetch. SQLite stores durable application data; useState and useCanvasState hold UI state. Agents can also invoke the hosted canvas_request tool with name or version_id and a request envelope (path, method, headers, base64 body).
+
+## Persistent files
+
+Hosted canvases and the managed local celld server expose canvasFiles from sidequery/canvas; no server code is required. canvasFiles.upload(file: File | Blob, {name?, signal?}?) returns {id,name,size,type,uploaded}; maximum 25 MiB. canvasFiles.list({cursor?}?) returns {files,cursor?} with at most 100 files. canvasFiles.read(id, {signal?}?) returns a Blob for parsing; canvasFiles.download(id) asks the host to start a download; canvasFiles.delete(id) removes it. Catch errors and show them in the UI. Use an input type="file" to select uploads. Filenames are display metadata; use opaque file IDs for subsequent operations.
+
+Files use the same library + workspace + canvas identity as the database and stay live across source edits, archived previews and restores. Uploads create distinct files even when names match. Public standalone canvases expose their files for reading but cannot upload/delete through the public URL. Plain file-based previews have no file storage. Transfer URLs expire after five minutes; bytes bypass the small JSON bridge. Agents use canvas_files for listing or allocating transfers, then ordinary HTTP PUT/GET for bytes. Never put file bytes or bearer transfer URLs into canvas source.
 
 ## Common components and props
 

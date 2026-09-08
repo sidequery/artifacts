@@ -2,6 +2,7 @@ import { App, type McpUiHostContext } from "@modelcontextprotocol/ext-apps";
 import type { CanvasAppPayload } from "../mcp/app";
 import type { CanvasAction, HostBridge } from "../sdk/hooks";
 import type { CanvasHttpRequest, CanvasHttpResponse } from "../sdk/server";
+import { canvasFileTransferUrl } from "../sdk/files";
 
 // Measure intrinsic content rather than the iframe's document height, so views
 // can grow and shrink even when the host clamps or ignores a resize request.
@@ -150,6 +151,18 @@ app.ontoolresult = result => {
   }
   const bridge: HostBridge = { canvasId: canvas.name, state: canvas.state, onAction: value => { void action(value); } };
   if (canvas.server === true) bridge.onRequest = request => serverRequest(canvas, request);
+  if (canvas.files === true) {
+    bridge.onFileRequest = async request => {
+      const result = await app.callServerTool({ name: "canvas_files", arguments: { version_id: canvas.versionId, request } });
+      if (result.isError) throw new Error(result.content?.filter(item => item.type === "text").map(item => item.text).join("\n") || "Canvas file request failed");
+      if (!result.structuredContent || !Object.hasOwn(result.structuredContent, "result")) throw new Error("Canvas file result was missing");
+      return result.structuredContent.result;
+    };
+    bridge.onFileDownload = async url => {
+      const result = await app.openLink({ url: canvasFileTransferUrl(url) });
+      if (result.isError) throw new Error("The chat host declined the file download.");
+    };
+  }
   if (canvas.plugins === true) bridge.onPluginCall = async request => {
     const result = await app.callServerTool({ name: "canvas_plugin_call", arguments: { ...request } });
     if (result.isError) throw new Error(result.content?.filter(item => item.type === "text").map(item => item.text).join("\n") || "Plugin call failed");

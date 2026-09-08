@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { authClient, signInUrl } from "../auth/client-api";
 import type { GalleryArtifact, GalleryData } from "./types";
 import { LinkSettings, ScriptPanel } from "./hosted";
+import { canvasFileTransferUrl } from "../sdk/files";
 
 type Scope = "current" | "all";
 type DetailTab = "preview" | "source";
@@ -277,19 +278,33 @@ function App() {
     const request = async (event: MessageEvent) => {
       const frame = previewFrame.current;
       if (!frame || event.source !== frame.contentWindow || !selectedArtifact
-        || !["canvas/http-request", "canvas/plugin-request"].includes(event.data?.type) || typeof event.data.id !== "string"
-        || event.data.id.length > 64 || (event.data.type === "canvas/http-request" && typeof event.data.versionId !== "string") || pending.has(event.data.id)) return;
+        || !["canvas/http-request", "canvas/plugin-request", "canvas/files-request", "canvas/file-download"].includes(event.data?.type) || typeof event.data.id !== "string"
+        || event.data.id.length > 64 || (event.data.type !== "canvas/plugin-request" && typeof event.data.versionId !== "string") || pending.has(event.data.id)) return;
       const plugin = event.data.type === "canvas/plugin-request";
-      const responseType = plugin ? "canvas/plugin-response" : "canvas/http-response";
+      const files = event.data.type === "canvas/files-request";
+      const download = event.data.type === "canvas/file-download";
+      const responseType = plugin ? "canvas/plugin-response" : files ? "canvas/files-response" : download ? "canvas/file-download-response" : "canvas/http-response";
       const target = frame.contentWindow!;
       const id = event.data.id;
       try {
         if (pending.size >= 16) throw new Error("Too many pending canvas requests");
         pending.add(id);
+        if (download) {
+          const url = canvasFileTransferUrl(event.data.url, window.location.origin);
+          const anchor = document.createElement("a");
+          anchor.href = url;
+          anchor.download = "";
+          anchor.rel = "noopener";
+          document.body.append(anchor);
+          anchor.click();
+          anchor.remove();
+          target.postMessage({ type: responseType, id, result: null }, "*");
+          return;
+        }
         const params = new URLSearchParams({ workspace: selectedArtifact.workspace });
         const library = new URLSearchParams(window.location.search).get("library");
         if (library) params.set("library", library);
-        const response = await fetch(`${plugin ? "/api/plugins/call" : "/api/canvas/request"}?${params}`, {
+        const response = await fetch(`${plugin ? "/api/plugins/call" : files ? "/api/canvas/files" : "/api/canvas/request"}?${params}`, {
           method: "POST", headers: { "content-type": "application/json" },
           // The frame selects its pinned code version, but cannot redirect a
           // request to another canvas or private/team library.

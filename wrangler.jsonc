@@ -47,6 +47,10 @@
       {
         "name": "SCRIPT_BACKENDS",
         "class_name": "ScriptBackend"
+      },
+      {
+        "name": "FILE_BACKENDS",
+        "class_name": "CanvasFiles"
       }
     ]
   },
@@ -70,7 +74,14 @@
         "ScriptLibrary",
         "ScriptBackend"
       ]
+    },
+    {
+      "tag": "v4",
+      "new_sqlite_classes": ["CanvasFiles"]
     }
+  ],
+  "r2_buckets": [
+    { "binding": "FILES", "bucket_name": "canvas-files" }
   ],
   "vars": {
     "ENVIRONMENT": "production",

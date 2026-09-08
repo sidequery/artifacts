@@ -9,6 +9,8 @@ import { authenticateBetterAuth, getCanvasAuth, CanvasAuthConfigurationError, ty
 import { handleCloudMcp } from "./mcp";
 import { readRequestText } from "./http";
 import { CanvasBackend } from "./backend";
+import { CanvasFiles, CanvasFileError, TRANSFER_PATH } from "./files";
+import type { CanvasFileRequest } from "../src/sdk/files";
 import { canvas_request as validateRequest } from "../dist/cloudflare/tool-validators.js";
 import type { CanvasHttpRequest } from "../src/httpTypes";
 import { PluginError, PLUGIN_JSON_LIMIT } from "./plugins";
@@ -20,13 +22,14 @@ import { ScriptLibrary } from "./scripts";
 import { ScriptBackend } from "./script-backend";
 import { artifactRoute } from "./artifact-routes";
 import * as toolValidators from "../dist/cloudflare/tool-validators.js";
-export { CanvasLibrary, CanvasBackend, ArtifactLinks, ScriptLibrary, ScriptBackend };
+export { CanvasLibrary, CanvasBackend, CanvasFiles, ArtifactLinks, ScriptLibrary, ScriptBackend };
 export type Env = AuthEnvironment & BetterAuthEnvironment & {
   LIBRARIES: DurableObjectNamespace<CanvasLibrary>;
   BACKENDS: DurableObjectNamespace<CanvasBackend>;
   LINKS: DurableObjectNamespace<ArtifactLinks>;
   SCRIPTS: DurableObjectNamespace<ScriptLibrary>;
   SCRIPT_BACKENDS: DurableObjectNamespace<ScriptBackend>;
+  FILE_BACKENDS?: DurableObjectNamespace<CanvasFiles>;
   ASSETS: Fetcher;
   DEFAULT_WORKSPACE?: string;
 };
@@ -56,6 +59,15 @@ app.all("/api/auth/*", async c => c.env.AUTH_MODE === "better-auth"
   ? (await getCanvasAuth(c.env)).handler(c.req.raw) : c.notFound());
 app.all("/.well-known/*", async c => c.env.AUTH_MODE === "better-auth"
   ? (await getCanvasAuth(c.env)).handler(c.req.raw) : c.notFound());
+// Only bearer transfer URLs bypass login. A grant fixes the canvas, file,
+// method, size and expiry; management cookies confer no transfer authority.
+app.all("/api/canvas/files/transfer/:object/:token", async c => {
+  const match = new URL(c.req.url).pathname.match(TRANSFER_PATH);
+  if (!match || !c.env.FILE_BACKENDS) return c.notFound();
+  let id;
+  try { id = c.env.FILE_BACKENDS.idFromString(match[1]!); } catch { return c.notFound(); }
+  return c.env.FILE_BACKENDS.get(id).fetch(c.req.raw);
+});
 app.use("*", async (c, next) => {
   const artifactOperation = artifactRoute(c.req.raw, c.env);
   c.executionCtx.waitUntil(artifactOperation);
@@ -82,7 +94,7 @@ app.use("*", async (c, next) => {
     ? JSON.stringify(["private", "better-auth", user.id])
     : JSON.stringify(["private", c.env.ACCESS_TEAM_DOMAIN ?? "local", identity.subject]);
   c.set("libraryScope", libraryScope);
-  c.set("service", new CloudCanvasService(c.env.LIBRARIES.getByName(libraryKey), workspace, c.env.BACKENDS, libraryKey, { links: c.env.LINKS.getByName("deployment"), scripts: c.env.SCRIPTS.getByName(libraryKey), scriptBackends: c.env.SCRIPT_BACKENDS, origin: url.origin }, { user: identity, env: c.env }));
+  c.set("service", new CloudCanvasService(c.env.LIBRARIES.getByName(libraryKey), workspace, c.env.BACKENDS, libraryKey, { links: c.env.LINKS.getByName("deployment"), scripts: c.env.SCRIPTS.getByName(libraryKey), scriptBackends: c.env.SCRIPT_BACKENDS, origin: url.origin }, { user: identity, env: c.env }, c.env.FILE_BACKENDS ? { backends: c.env.FILE_BACKENDS, origin: url.origin } : undefined));
   // Compilation uses shared isolate resources. Let an admitted operation finish
   // after a client disconnects rather than abandoning its native compiler I/O.
   const operation = next();
@@ -121,6 +133,14 @@ app.post("/api/canvas/request", async c => {
   const args = input as { name?: string; version_id?: string; request: CanvasHttpRequest };
   return c.json({ response: await c.get("service").request({ name: args.name, version_id: args.version_id }, args.request) });
 });
+app.post("/api/canvas/files", async c => {
+  let input: unknown;
+  try { input = JSON.parse(await readRequestText(c.req.raw, 8192)); }
+  catch (error) { return c.json({ error: error instanceof RangeError ? "File request exceeds 8 KiB" : "Invalid JSON" }, error instanceof RangeError ? 413 : 400); }
+  if (!toolValidators.canvas_files(input)) return c.json({ error: "Invalid file request" }, 400);
+  const args = input as { name?: string; version_id?: string; request: CanvasFileRequest };
+  return c.json({ result: await c.get("service").fileRequest(args, args.request) });
+});
 app.post("/api/tools", async c => {
   let input: { name?: string; arguments?: Record<string, unknown> };
   try { input = JSON.parse(await readRequestText(c.req.raw, 1024 * 1024)); }
@@ -150,12 +170,12 @@ app.get("/gallery/preview", async c => {
   const payload = preview._meta.canvas;
   // Enforce isolation even if somebody opens the preview URL directly instead
   // of through the gallery's sandboxed iframe. Preview state is page-local.
-  c.header("Content-Security-Policy", "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'");
-  return c.html(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sidequery Canvas preview</title><style>body{margin:0;background:#181818;color:#f0f0f0;font-family:system-ui,sans-serif}#root{padding:24px}</style></head><body><div id="root"></div><script>window.__herdrCanvas=${JSON.stringify({ canvasId: payload.name, state: payload.state, theme: { kind: "dark" }, plugins: payload.plugins, ...(payload.server ? { serverVersionId: payload.versionId } : {}) }).replaceAll("<", "\\u003c")};${galleryBridge.replace(/<\/script/gi, "<\\/script")}</script><script type="module">${payload.js.replace(/<\/script/gi, "<\\/script")}</script></body></html>`);
+  c.header("Content-Security-Policy", `sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src ${new URL(c.req.url).origin}/api/canvas/files/transfer/; form-action 'none'; base-uri 'none'; frame-ancestors 'self'`);
+  return c.html(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sidequery Canvas preview</title><style>body{margin:0;background:#181818;color:#f0f0f0;font-family:system-ui,sans-serif}#root{padding:24px}</style></head><body><div id="root"></div><script>window.__herdrCanvas=${JSON.stringify({ canvasId: payload.name, state: payload.state, theme: { kind: "dark" }, plugins: payload.plugins, ...(payload.files ? { filesVersionId: payload.versionId } : {}), ...(payload.server ? { serverVersionId: payload.versionId } : {}) }).replaceAll("<", "\\u003c")};${galleryBridge.replace(/<\/script/gi, "<\\/script")}</script><script type="module">${payload.js.replace(/<\/script/gi, "<\\/script")}</script></body></html>`);
 });
 app.get("/", c => c.env.ASSETS.fetch(new Request(new URL("/index.html", c.req.url))));
 app.get("/gallery", c => c.env.ASSETS.fetch(new Request(new URL("/index.html", c.req.url))));
 app.get("/gallery.js", c => c.env.ASSETS.fetch(c.req.raw));
-app.onError((error, c) => c.json({ error: error.message }, error instanceof PluginError ? error.status : error instanceof CanvasAuthConfigurationError ? 503 : /not found/.test(error.message) ? 404 : 400));
+app.onError((error, c) => c.json({ error: error.message }, error instanceof PluginError || error instanceof CanvasFileError ? error.status : error instanceof CanvasAuthConfigurationError ? 503 : /not found/.test(error.message) ? 404 : 400));
 
 export default app;
