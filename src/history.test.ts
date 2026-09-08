@@ -25,7 +25,7 @@ test("history survives reconnect, scopes artifacts, and records distinct serves 
     expect(history.version(other.id, dir)).toBeNull();
     expect(history.list(dir)).toHaveLength(1);
     expect(history.db.query("select name from sqlite_master where type = 'table' order by name").all()).toEqual([
-      { name: "artifacts" }, { name: "serve_events" }, { name: "versions" },
+      { name: "artifact_remixes" }, { name: "artifacts" }, { name: "serve_events" }, { name: "versions" },
     ]);
   } finally { history.close(); }
 });

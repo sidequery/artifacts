@@ -67,13 +67,14 @@ export class CloudScriptService {
         const envelope = await scriptResponse(response, incoming.method);
         return { ...text({ status: envelope.status, ...(link ? { url: `${hosted.origin}/${link.slug}` } : {}) }), structuredContent: { response: envelope } };
       }
-      case "script_write": case "script_edit": case "script_restore": {
-        const target = this.artifacts.target("script", name);
+      case "script_remix": case "script_write": case "script_edit": case "script_restore": {
+        const target = this.artifacts.target("script", tool === "script_remix" ? args.new_name as string : name);
         // Read pending intent only after taking this operation's generation.
         // A concurrent explicit access change then either precedes this read or
         // supersedes this generation; it cannot be undone by stale metadata.
-        const generation = await hosted.links.begin(target);
+        let generation = tool === "script_remix" ? undefined : await hosted.links.begin(target);
         const settings: LinkUpdate = await hosted.links.draft(target);
+        if (tool === "script_remix") { settings.slug = args.slug as string | undefined ?? target.name; settings.access = "private"; }
         if (tool === "script_write") {
           const previous = await hosted.links.find(target);
           settings.slug = args.slug as string | undefined ?? settings.slug ?? previous?.slug ?? target.name;
@@ -84,18 +85,20 @@ export class CloudScriptService {
           const version = await scripts.version({ workspace: this.artifacts.workspace, id: args.version_id as string });
           if (version.name !== target.name) throw new Error("Version does not belong to this script");
         }
-        const mutation = tool === "script_write" ? await scripts.writeDraft({ ...input, source: args.contents as string })
+        const destination = {...input,name:target.name};
+        const mutation = tool === "script_remix" ? await scripts.remix({workspace:this.artifacts.workspace,name:args.name as string | undefined,version_id:args.version_id as string | undefined,new_name:args.new_name as string}) : tool === "script_write" ? await scripts.writeDraft({ ...input, source: args.contents as string })
           : tool === "script_edit" ? await scripts.editDraft({ ...input, edits: args.edits as CanvasEdit[], expected_hash: args.expected_hash as string | undefined })
           : await scripts.restore({ workspace: this.artifacts.workspace, id: args.version_id as string });
+        generation ??= await hosted.links.begin(target);
         await hosted.links.stage(target, generation, settings);
         const compiled = await compileScriptSource(mutation.source);
         if (compiled.ok && compiled.js) {
-          const secrets = await scripts.executionSecrets(input);
+          const secrets = await scripts.executionSecrets(destination);
           const backend = hosted.scriptBackends.getByName(JSON.stringify([this.artifacts.libraryKey, this.artifacts.workspace, target.name]));
           const validation = await backend.validate({ code: compiled.js, hash: createHash("sha256").update(compiled.js).digest("hex"), secrets });
           if (validation.ok) {
             try {
-              const activated = await scripts.activate({ ...input, source_hash: mutation.source_hash, code: compiled.js });
+              const activated = await scripts.activate({ ...destination, source_hash: mutation.source_hash, code: compiled.js });
               const link = await hosted.links.commit(target, generation, { ...settings, script_hash: activated.hash });
               if (!link) {
                 const { source, ...summary } = mutation;

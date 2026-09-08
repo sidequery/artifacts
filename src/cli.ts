@@ -125,6 +125,16 @@ async function main(): Promise<void> {
     env,
   });
 
+  if (args.command === "remix") {
+    const versionId = flagString(args.flags, "version");
+    if (args.positionals.length !== (versionId ? 1 : 2)) throw new Error("use remix SOURCE NEW_NAME or remix NEW_NAME --version ID");
+    const result = service.remix({ name: versionId ? undefined : args.positionals[0], version_id: versionId,
+      new_name: args.positionals[versionId ? 0 : 1]! });
+    printJson(result);
+    if (!result.ok) process.exitCode = 1;
+    return;
+  }
+
   if (args.command === "history") {
     printJson({ ok: true, versions: service.history(args.positionals[0]) });
     return;
@@ -286,6 +296,8 @@ Usage:
   canvas show VERSION_ID [--source]
   canvas open --version VERSION_ID [--event EVENT_ID] [--placement split|tab|zoomed|overlay]
   canvas restore VERSION_ID
+  canvas remix SOURCE NEW_NAME
+  canvas remix NEW_NAME --version VERSION_ID
   canvas server [--port 4786] [--state-dir PATH]
   canvas server start [--port 4786] [--at-login]
   canvas server stop | status | logs [--lines 100] | uninstall

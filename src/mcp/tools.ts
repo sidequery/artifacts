@@ -37,6 +37,13 @@ export const MCP_TOOLS = [
     inputSchema: { type: "object", properties: { version_id: { type: "string" } }, required: ["version_id"], additionalProperties: false },
   },
   {
+    name: "canvas_remix",
+    _meta: CANVAS_APP_META,
+    description: "Copy a working canvas or archived version to a new canvas with source provenance and fresh state. Never overwrites existing canvases or archived identities. Supply exactly one of name and version_id, plus new_name.",
+    inputSchema: { type: "object", properties: { name: { type: "string" }, version_id: { type: "string" }, new_name: { type: "string" } },
+      required: ["new_name"], oneOf: [{ required: ["name"] }, { required: ["version_id"] }], additionalProperties: false },
+  },
+  {
     name: "canvas_restore",
     _meta: CANVAS_APP_META,
     description: "Replace a working canvas with archived TSX. Saves the current working source first, adds a new revision, and preserves later history and current UI state. Returns typecheck diagnostics after restoration.",

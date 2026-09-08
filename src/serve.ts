@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import { assertRegularCanvas, ensureCanvasFileName } from "./canvasFile";
 import { compileCanvas } from "./compile";
 import { CanvasHistory, hash, historyPath, runtimeIdentity, type Version } from "./history";
+import { CanvasService } from "./service";
 import { canvasHtml } from "./html";
 import { galleryBundle, galleryData, galleryHtml, workingSource } from "./gallery/server";
 
@@ -78,6 +79,26 @@ export async function createCanvasServer(opts: CreateCanvasServerOptions): Promi
         try {
           const url = new URL(request.url);
           if (url.pathname === "/health") return json({ ok: true });
+
+          if (opts.gallery && url.pathname === "/api/tools" && request.method === "POST") {
+            // The gallery is a loopback UI. Untrusted websites and opaque canvas
+            // previews must not be able to create local files through this endpoint.
+            const allowedHosts = new Set([opts.hostname ?? "127.0.0.1"]);
+            if (["127.0.0.1", "::1", "localhost"].includes(opts.hostname ?? "127.0.0.1")) {
+              for (const host of ["127.0.0.1", "[::1]", "localhost"]) allowedHosts.add(host);
+            }
+            if (!allowedHosts.has(url.hostname) || request.headers.get("origin") !== url.origin || !request.headers.get("content-type")?.startsWith("application/json")) {
+              return json({ ok: false, error: "same-origin JSON request required" }, 403);
+            }
+            const workspace = url.searchParams.get("workspace");
+            if (workspace && resolve(workspace) !== canvasesDir) return json({ ok: false, error: "open this workspace's gallery to remix its canvas" }, 400);
+            const body = await request.json() as { name?: string; arguments?: Parameters<CanvasService["remix"]>[0] };
+            if (body.name !== "canvas_remix" || !body.arguments) return json({ ok: false, error: "unknown tool" }, 400);
+            try {
+              const service = new CanvasService({ canvasesDir, env: { ...env, HERDR_CANVAS_HISTORY_DB: history.path } });
+              return json(service.remix(body.arguments));
+            } catch (error) { return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400); }
+          }
 
           if (opts.gallery && request.method === "GET") {
             if (url.pathname === "/" || url.pathname === "/gallery") return new Response(galleryHtml(), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });

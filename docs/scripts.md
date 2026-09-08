@@ -108,3 +108,9 @@ Run `bun run bundle.ts`, read `handler.bundle.js`, and pass its complete content
 Keep the bundle within the 256 KiB UTF-8 source limit. Packages requiring native addons or a Node process cannot run in Workers. Rebuild from original source when changing bundled scripts; do not use targeted text edits on generated dependency internals. Worker and Node builtins remain external because the runtime supplies them. Scripts cannot import dependencies through adjacent files or package URLs.
 
 Agents can call `script_guide` to retrieve this workflow through MCP. `script_write` points to that guide; hosted `canvas_guide` includes the same script guidance.
+
+## Remix
+
+Select a working copy or historical revision in the gallery, then **Remix** and choose a new name. MCP offers `canvas_remix` and `script_remix`, with `new_name` and exactly one of `name` or `version_id`. Hosted calls optionally accept a new `slug`; otherwise it defaults to the destination name. Sources and destinations belong to the authenticated library and selected workspace.
+
+A remix creates a separate artifact and records its immutable source revision as provenance. Canvas browser and server sources stay paired. The new artifact starts with empty runtime data and no copied secret values; its hosted URL starts private. Destination names cannot overwrite existing drafts or archived artifacts, and URL collisions are rejected. Invalid source remains saved as a remix draft, with validation diagnostics; it receives a working URL only after successful validation. Remixing does not execute the request handler.

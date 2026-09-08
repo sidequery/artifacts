@@ -406,3 +406,22 @@ test("source and serialized state are bounded for drafts, edits, serves, and UI 
   await fails("setState", { workspace: "limits", name: "edge", key: "large", value: "x".repeat(64 * 1024) }, "64 KiB");
   await fails("recordServe", { workspace: "limits", name: "edge", source: "ok", runtime: "sdk", initial_state: { large: "x".repeat(64 * 1024) }, mode: "live" }, "64 KiB");
 });
+
+test("remix captures source pairs and provenance with fresh state and rejects collisions and foreign revisions", async () => {
+  const workspace = "remixes", name = "source";
+  const source = "export default () => null;\r\n", server_source = "original server\n";
+  await call("writeDraft", { workspace, name, source, server_source });
+  const served = await call<VersionResult>("recordServe", { workspace, name, source, server_source, runtime: "test", initial_state: { private: "state" }, mode: "live" });
+  await call("writeDraft", { workspace, name, source: "new client\n", server_source: "new server\n" });
+  const historical = await call<DraftResult & { versionId: string; origin: {source_version_id:string} }>("remix", {workspace,version_id:served.version.id,new_name:"historical",runtime:"test"});
+  expect(historical).toMatchObject({source,server_source,state:{},origin:{source_version_id:served.version.id}});
+  const current = await call<DraftResult & {origin:{source_version_id:string}}>("remix",{workspace,name,new_name:"current",runtime:"test"});
+  expect(current).toMatchObject({source:"new client\n",server_source:"new server\n",state:{}});
+  const origin = await call<{source:string;server_source:string}>("version",{workspace,id:current.origin.source_version_id});
+  expect(origin).toMatchObject({source:current.source,server_source:current.server_source});
+  expect(await call("version",{workspace,id:historical.versionId})).toMatchObject({reason:"remix",origin:{source_name:name,source_version_id:served.version.id}});
+  await fails("remix",{workspace,name,new_name:"current",runtime:"test"},"already exists");
+  await fails("remix",{workspace,name,version_id:served.version.id,new_name:"ambiguous",runtime:"test"},"not both");
+  await fails("remix",{workspace:"other",version_id:served.version.id,new_name:"foreign",runtime:"test"},"not found");
+  await fails("remix",{workspace,version_id:served.version.id,new_name:"foreign",runtime:"test"},"not found","bob");
+});

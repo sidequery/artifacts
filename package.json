@@ -44,6 +44,7 @@
     "src/diagnostics.ts",
     "src/gallery/client.tsx",
     "src/gallery/hosted.tsx",
+    "src/gallery/remix.tsx",
     "src/gallery/server.ts",
     "src/gallery/types.ts",
     "src/herdr.ts",

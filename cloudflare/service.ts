@@ -73,6 +73,14 @@ export class CloudCanvasService {
         return text({ versions, next_offset: versions.length === 100 ? offset + 100 : null });
       }
       case "canvas_version": return text(await this.library.version({ workspace: this.workspace, id: args.version_id as string, events_offset: args.events_offset as number | undefined }));
+      case "canvas_remix": {
+        const target = this.artifacts.target("canvas", args.new_name as string);
+        const slug = args.slug as string | undefined ?? target.name;
+        if (this.hosted) await this.hosted.links.check(target, slug);
+        const mutation = await this.library.remix({workspace:this.workspace,name:args.name as string | undefined,version_id:args.version_id as string | undefined,new_name:args.new_name as string,runtime});
+        const generation = await this.hosted?.links.begin(target);
+        return this.mutationResult(mutation, generation, this.hosted ? {slug,access:"private"} : {});
+      }
       case "canvas_write": {
         const target = this.artifacts.target("canvas", args.name as string);
         if (args.slug !== undefined) await this.artifacts.requireHosted().links.check(target, args.slug as string);

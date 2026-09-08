@@ -128,6 +128,7 @@ export class CanvasLibrary extends DurableObject<unknown> {
         primary key(workspace,name,compiled_id,part,ordinal),
         foreign key(workspace,name,compiled_id) references compiled_canvases(workspace,name,id)
       )`);
+      this.sql.exec("create table if not exists remix_origins (workspace text not null, name text not null, source_name text not null, source_version_id text not null references versions(id), primary key(workspace,name))");
       this.sql.exec("create index if not exists serve_events_version on serve_events(version_id, served_at)");
     });
   }
@@ -210,6 +211,29 @@ export class CanvasLibrary extends DurableObject<unknown> {
       const saved = this.draft(workspace, name);
       return { ok: true, path: sourcePath(workspace, name), workspace, name, source, server_source: saved.server_source,
         source_hash, state: JSON.parse(saved.state) as Record<string, unknown> };
+    });
+  }
+
+  remix(input: { workspace: string; name?: string; version_id?: string; new_name: string; runtime: string }) {
+    const workspace = workspaceName(input.workspace), name = canvasName(input.new_name), runtime = runtimeName(input.runtime);
+    if (Boolean(input.name) === Boolean(input.version_id)) throw new Error("provide name or version_id, but not both");
+    return this.state.storage.transactionSync(() => {
+      if (first(this.sql.exec("select name from drafts where workspace=? and name=? union all select name from artifacts where workspace=? and name=?", workspace, name, workspace, name))) throw new Error("Destination canvas already exists; choose a new name");
+      let origin: StoredVersion;
+      if (input.version_id) {
+        const version = this.findVersion(workspace, input.version_id);
+        if (!version) throw new Error("version not found in this workspace");
+        origin = version;
+      } else {
+        const draft = this.draft(workspace, canvasName(input.name));
+        origin = this.capture(workspace, draft.name, draft.source, draft.server_source, runtime, "remix-source", null, false);
+      }
+      const timestamp = now();
+      // Copy the immutable source pair only. State and backend identity start fresh.
+      this.sql.exec("insert into drafts(workspace,name,source,server_source,source_hash,state,created_at,updated_at) values(?,?,?,?,?,'{}',?,?)", workspace, name, origin.source, origin.server_source, origin.source_hash, timestamp, timestamp);
+      this.sql.exec("insert into remix_origins values(?,?,?,?)", workspace, name, origin.name, origin.id);
+      const version = this.capture(workspace, name, origin.source, origin.server_source, runtime, "remix", null, true);
+      return { ok: true, remixed: true, workspace, name, path: sourcePath(workspace,name), source: origin.source, server_source: origin.server_source, source_hash: origin.source_hash, state: {}, versionId: version.id, revision: version.revision, origin: { source_name: origin.name, source_version_id: origin.id } };
     });
   }
 
@@ -367,7 +391,7 @@ export class CanvasLibrary extends DurableObject<unknown> {
     if (!version) throw new Error("version not found in this workspace");
     const events_offset = input.events_offset ?? 0;
     const events = this.events({ workspace, version_id: version.id, offset: events_offset, limit: 20 });
-    return { ...version, events, events_offset, next_events_offset: events.length === 20 ? events_offset + 20 : null };
+    return { ...version, origin: first(this.sql.exec<{ source_name: string; source_version_id: string }>("select source_name,source_version_id from remix_origins where workspace=? and name=?", workspace, version.name)), events, events_offset, next_events_offset: events.length === 20 ? events_offset + 20 : null };
   }
 
   events(input: { workspace: string; version_id: string; offset?: number; limit?: number }): ServeEvent[] {

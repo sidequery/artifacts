@@ -30,6 +30,7 @@ export class ScriptLibrary extends DurableObject<unknown> {
     this.sql = state.storage.sql;
     this.sql.exec(`create table if not exists scripts (workspace text not null,name text not null,source text not null,source_hash text not null,updated_at text not null,active_code text,active_hash text,secrets text not null default '{}',primary key(workspace,name))`);
     this.sql.exec(`create table if not exists script_versions (id text primary key,workspace text not null,name text not null,revision integer not null,source text not null,source_hash text not null,created_at text not null,reason text not null,restored_from text,unique(workspace,name,revision))`);
+    this.sql.exec("create table if not exists script_remix_origins (workspace text not null,name text not null,source_name text not null,source_version_id text not null,primary key(workspace,name))");
     this.sql.exec(`create table if not exists compiled_scripts (workspace text not null,name text not null,hash text not null,code text not null,primary key(workspace,name,hash))`);
   }
   private row(input: {workspace: string; name: string}): Row {
@@ -48,6 +49,22 @@ export class ScriptLibrary extends DurableObject<unknown> {
     });
   }
   writeDraft(input: {workspace: string; name: string; source: string}) { return this.save(input,"edit"); }
+  remix(input: {workspace: string; name?: string; version_id?: string; new_name: string}) {
+    const {workspace,name} = key({workspace:input.workspace,name:input.new_name});
+    if (Boolean(input.name) === Boolean(input.version_id)) throw new Error("provide name or version_id, but not both");
+    return this.ctx.storage.transactionSync(() => {
+      if (this.sql.exec("select name from scripts where workspace=? and name=? union all select name from script_versions where workspace=? and name=?",workspace,name,workspace,name).toArray().length) throw new Error("Destination script already exists; choose a new name");
+      const origin = input.version_id ? this.version({workspace,id:input.version_id}) : (() => {
+        const draft = this.row({workspace,name:input.name!});
+        const latest = this.sql.exec<VersionRow>("select * from script_versions where workspace=? and name=? order by revision desc limit 1",workspace,draft.name).toArray()[0];
+        if (!latest || latest.source !== draft.source) throw new Error("Script draft has no matching revision");
+        return latest;
+      })();
+      const result = this.save({workspace,name,source:origin.source},"remix");
+      this.sql.exec("insert into script_remix_origins values(?,?,?,?)",workspace,name,origin.name,origin.id);
+      return {...result,remixed:true,origin:{source_name:origin.name,source_version_id:origin.id}};
+    });
+  }
   listDrafts(input: {workspace?: string; offset?: number; limit?: number} = {}) {
     const {offset,limit} = page(input), workspace = input.workspace === undefined ? null : text(input.workspace,"workspace");
     return this.sql.exec<{workspace: string; name: string; source_hash: string; updated_at: string; active_hash: string | null}>("select workspace,name,source_hash,updated_at,active_hash from scripts where (? is null or workspace=?) order by workspace,name limit ? offset ?",workspace,workspace,limit,offset).toArray().map(row=>({...row,id:row.name,path:`${row.workspace}/${row.name}.script.ts`,kind:"script" as const}));
@@ -118,7 +135,7 @@ export class ScriptLibrary extends DurableObject<unknown> {
     const workspace=text(input.workspace,"workspace"), id=text(input.id,"version id");
     const row=this.sql.exec<VersionRow>("select * from script_versions where workspace=? and id=?",workspace,id).toArray()[0];
     if (!row) throw new Error("version not found in this workspace");
-    return row;
+    return {...row,origin:this.sql.exec<{source_name: string;source_version_id: string}>("select source_name,source_version_id from script_remix_origins where workspace=? and name=?",workspace,row.name).toArray()[0] ?? null};
   }
   restore(input: {workspace: string; id: string}) {
     const version=this.version(input);

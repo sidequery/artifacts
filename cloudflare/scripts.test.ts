@@ -83,3 +83,23 @@ test("module-load validation rejects broken initialization without replacing the
   const streaming=await run('export default {fetch(){return new Response(new ReadableStream({start(c){c.enqueue(new TextEncoder().encode("streamed"));c.close();}}),{headers:{"content-type":"text/plain"}})}}',{},"streaming");
   expect(await streaming.text()).toBe("streamed");
 },30000);
+
+test("remix copies an immutable source revision, never secrets or activation, and preserves provenance",async()=>{
+  const workspace="remix",name="original";
+  const first=await call("writeDraft",{workspace,name,source:"original code"});
+  const [version]=await call("history",{workspace,name});
+  await call("setSecret",{workspace,name,key:"TOKEN",value:"secret-value"});
+  await call("activate",{workspace,name,source_hash:first.source_hash,code:"compiled"});
+  await call("writeDraft",{workspace,name,source:"new draft"});
+  const copied=await call("remix",{workspace,version_id:version.id,new_name:"copy"});
+  expect(copied).toMatchObject({source:"original code",origin:{source_name:name,source_version_id:version.id}});
+  expect(await call("secretNames",{workspace,name:"copy"})).toEqual([]);
+  await expect(call("active",{workspace,name:"copy"})).rejects.toThrow("no validated version");
+  const [copyVersion]=await call("history",{workspace,name:"copy"});
+  expect(await call("version",{workspace,id:copyVersion.id})).toMatchObject({reason:"remix",origin:{source_name:name,source_version_id:version.id}});
+  expect(await call("remix",{workspace,name,new_name:"current"})).toMatchObject({source:"new draft"});
+  await expect(call("remix",{workspace,name,new_name:"copy"})).rejects.toThrow("already exists");
+  await expect(call("remix",{workspace:"other",version_id:version.id,new_name:"copy"})).rejects.toThrow("not found");
+  await expect(call("remix",{workspace,version_id:version.id,new_name:"copy"},"bob")).rejects.toThrow("not found");
+  await expect(call("remix",{workspace,name,version_id:version.id,new_name:"ambiguous"})).rejects.toThrow("not both");
+});

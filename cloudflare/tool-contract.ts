@@ -71,6 +71,11 @@ const slugProperties = {
   slug: { type: "string", minLength: 1, maxLength: 80, pattern: "^[a-z0-9](?:[a-z0-9-]{0,78}[a-z0-9])?$", description: "Chosen root URL slug, unique across this deployment." },
   access: { type: "string", enum: ["private", "public"], description: "Private uses library permissions; public allows external HTTP callers. Default private." },
 };
+for (const kind of ["canvas", "script"]) {
+  // Canvas is shared with local MCP; hosted script authoring uses this contract too.
+  if (!CLOUD_MCP_TOOLS.some(tool => tool.name === kind + "_remix")) CLOUD_MCP_TOOLS.push({name:kind + "_remix",description:"Copy a working artifact or immutable revision to a new name in this workspace. Preserves source provenance. Starts with fresh state, storage, and secrets and a private URL. Never overwrites an existing artifact.",inputSchema:{type:"object",properties:{name:{type:"string",minLength:1},version_id:{type:"string",minLength:1},new_name:{type:"string",minLength:1},slug:slugProperties.slug},required:["new_name"],oneOf:[{required:["name"]},{required:["version_id"]}],additionalProperties:false}});
+  else Object.assign(CLOUD_MCP_TOOLS.find(tool => tool.name === kind + "_remix")!.inputSchema.properties!, {slug:slugProperties.slug});
+}
 const canvasWrite = CLOUD_MCP_TOOLS.find(tool => tool.name === "canvas_write")!;
 Object.assign(canvasWrite.inputSchema.properties!, slugProperties);
 function addScriptTool(name: string, description: string, properties: Record<string, object>, required: string[] = []) {

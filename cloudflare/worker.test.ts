@@ -664,3 +664,24 @@ test("gallery and standalone file uploads and downloads work outside the sandbox
     await page.close();
   } finally { await browser.close(); }
 }, 90_000);
+test("hosted remix tools create private independent artifacts and reject overwrites", async () => {
+  const original = payload(await client.callTool({name:"canvas_write",arguments:{name:"remix-original",contents:counterClient,server:counterServer,slug:"remix-original",access:"public"}}));
+  expect(original.ok).toBe(true);
+  const copied = payload(await client.callTool({name:"canvas_remix",arguments:{name:"remix-original",new_name:"remix-copy"}}));
+  expect(copied).toMatchObject({ok:true,remixed:true,name:"remix-copy",access:"private",slug:"remix-copy"});
+  expect(copied.origin.source_version_id).toBeString();
+  expect((await client.callTool({name:"canvas_remix",arguments:{name:"remix-original",new_name:"remix-copy"}})).isError).toBe(true);
+  const script='export default {fetch(request: Request,env: ScriptEnv) { env.sql.exec("create table if not exists counter(n integer)"); env.sql.exec("insert into counter values (1)"); return Response.json({count:env.sql.exec("select count(*) as n from counter").one().n,secret:env.secrets.TOKEN ?? null}); }}';
+  expect(payload(await client.callTool({name:"script_write",arguments:{name:"remix-script",contents:script,access:"public"}})).ok).toBe(true);
+  await client.callTool({name:"script_secrets",arguments:{name:"remix-script",secrets:{TOKEN:"original-only"}}});
+  const run=async(name:string)=>{
+    const result=await client.callTool({name:"script_run",arguments:{name,request:{path:"/"}}});
+    const envelope=(result.structuredContent as any).response;
+    return JSON.parse(Buffer.from(envelope.body,"base64").toString());
+  };
+  expect(await run("remix-script")).toEqual({count:1,secret:"original-only"});
+  expect(payload(await client.callTool({name:"script_remix",arguments:{name:"remix-script",new_name:"remix-script-copy"}}))).toMatchObject({ok:true,remixed:true,access:"private"});
+  expect(await run("remix-script-copy")).toEqual({count:1,secret:null});
+  expect(await run("remix-script")).toEqual({count:2,secret:"original-only"});
+  expect((await client.callTool({name:"script_remix",arguments:{name:"remix-script",new_name:"remix-script-copy"}})).isError).toBe(true);
+}, 120000);

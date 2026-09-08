@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename } from "node:path";
+import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { basename, resolve } from "node:path";
 import { createHash } from "node:crypto";
 
 import {
@@ -155,7 +155,51 @@ export class CanvasService {
     try {
       const version = archive.version(id, this.canvasesDir);
       if (!version) throw new Error("version not found in this workspace");
-      return { ...version, events: archive.events(id) };
+      return { ...version, origin: archive.origin(version.artifact_id), events: archive.events(id) };
+    } finally { archive.close(); }
+  }
+
+  remix(input: { name?: string; version_id?: string; new_name: string }) {
+    if (typeof input.new_name !== "string") throw new Error("new_name must be a string");
+    if ((input.name !== undefined) === (input.version_id !== undefined)) throw new Error("provide name or version_id, but not both");
+    if (input.name !== undefined && typeof input.name !== "string") throw new Error("name must be a string");
+    if (input.version_id !== undefined && (typeof input.version_id !== "string" || !input.version_id)) throw new Error("version_id must be a non-empty string");
+    const path = this.resolve(ensureCanvasFileName(input.new_name));
+    const name = canvasIdFromFile(path);
+    const archive = new CanvasHistory(historyPath(this.env));
+    try {
+      const revision = archive.db.transaction(() => {
+        if (archive.db.query("select id from artifacts where workspace = ? and name = ?").get(resolve(this.canvasesDir), name)) {
+          throw new Error("destination canvas already exists in history; choose a new name");
+        }
+        // Reject orphaned state and dangling links too: a remix always starts fresh.
+        for (const candidate of [path, path.replace(/\.canvas\.tsx$/, ".canvas.data.json")]) {
+          try { lstatSync(candidate); }
+          catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") continue; throw error; }
+          throw new Error("destination canvas or state already exists; choose a new name");
+        }
+        const runtime = runtimeIdentity();
+        let sourceVersion;
+        if (input.version_id !== undefined) {
+          sourceVersion = archive.version(input.version_id, this.canvasesDir);
+          if (!sourceVersion) throw new Error("version not found in this workspace");
+        } else {
+          const sourcePath = this.resolve(ensureCanvasFileName(input.name!));
+          assertRegularCanvas(sourcePath);
+          sourceVersion = archive.capture({ workspace: this.canvasesDir, name: canvasIdFromFile(sourcePath), sourcePath,
+            source: readFileSync(sourcePath, "utf8"), runtime, reason: "before-remix" });
+        }
+        const version = archive.capture({ workspace: this.canvasesDir, name, sourcePath: path,
+          source: sourceVersion.source, runtime, reason: "remix" });
+        archive.db.query("insert into artifact_remixes values (?, ?)").run(version.artifact_id, sourceVersion.id);
+        ensureCanvasesDir(this.canvasesDir);
+        // Exclusive creation never follows or replaces a competing destination link/file.
+        writeFileSync(path, sourceVersion.source, { flag: "wx" });
+        return version;
+      }).immediate();
+      const diagnostics = typecheckCanvas(path);
+      return { ok: diagnostics.length === 0, remixed: true, name, path, versionId: revision.id,
+        origin: archive.origin(revision.artifact_id), check: formatCanvasCheck(diagnostics), diagnostics };
     } finally { archive.close(); }
   }
 

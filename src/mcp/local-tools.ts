@@ -65,6 +65,10 @@ async function callTool(
   }
   if (name === "canvas_history") return text(JSON.stringify({ versions: service.history(args.name === undefined ? undefined : String(args.name)) }, null, 2));
   if (name === "canvas_version") return text(JSON.stringify(service.version(String(args.version_id)), null, 2));
+  if (name === "canvas_remix") {
+    const result = service.remix(args as Parameters<CanvasService["remix"]>[0]);
+    return withPreview(service, result, { name: result.name });
+  }
   if (name === "canvas_restore") {
     const result = service.restore(String(args.version_id));
     return withPreview(service, result, { name: canvasIdFromFile(result.path) });
