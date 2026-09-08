@@ -82,6 +82,18 @@ afterAll(async () => {
   await fixture?.close();
 });
 
+// Each simulated browser gets its own client IP, as it already gets its own
+// cookies. Keep the real rate limiter enabled without sharing its bucket
+// across unrelated test users and scenarios.
+let browserClient = 0;
+const browserIPs = new WeakMap<BrowserContext, string>();
+async function newBrowserContext() {
+  const ip = `198.51.100.${++browserClient}`;
+  const context = await browser.newContext({ extraHTTPHeaders: { "x-artifact-test-ip": ip } });
+  browserIPs.set(context, ip);
+  return context;
+}
+
 async function login(page: Page, name: string) {
   page.setDefaultTimeout(8000);
   try {
@@ -115,7 +127,9 @@ async function authorize(context: BrowserContext, user?: string, scope?: string)
   const oauthFetch: typeof fetch = async (input, init) => {
     const path = new URL(input instanceof Request ? input.url : String(input)).pathname;
     try {
-      const response = await fetch(input, { ...init, signal: AbortSignal.timeout(10000) });
+      const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+      headers.set("x-artifact-test-ip", browserIPs.get(context)!);
+      const response = await fetch(input, { ...init, headers, signal: AbortSignal.timeout(10000) });
       requests.push(`${init?.method ?? "GET"} ${path}: ${response.status}`);
       return response;
     } catch (error) { requests.push(`${path}: ${String(error)}`); throw error; }
@@ -173,8 +187,8 @@ test("discovery and anonymous surfaces require user login even on loopback", asy
 });
 
 test("real OIDC and MCP OAuth share per-user gallery, source and database boundaries", async () => {
-  const aliceContext = await browser.newContext();
-  const bobContext = await browser.newContext();
+  const aliceContext = await newBrowserContext();
+  const bobContext = await newBrowserContext();
   try {
     const aliceProvider = await authorize(aliceContext, "Alice");
     const bobPage = await bobContext.newPage();
@@ -283,7 +297,7 @@ test("real OIDC and MCP OAuth share per-user gallery, source and database bounda
 }, 120000);
 
 test("an authenticated provider outsider is denied team admission and password registration stays disabled", async () => {
-  const context = await browser.newContext();
+  const context = await newBrowserContext();
   try {
     const page = await context.newPage();
     await page.goto(origin);
@@ -328,7 +342,7 @@ test("standard MCP registration infers native redirects without relaxing Better 
 });
 
 test("ownership transfer preserves live resources and revokes former library access across HTTP and MCP", async () => {
-  const aliceContext = await browser.newContext(), bobContext = await browser.newContext();
+  const aliceContext = await newBrowserContext(), bobContext = await newBrowserContext();
   try {
     const aliceProvider = await authorize(aliceContext, "Alice"), bobProvider = await authorize(bobContext, "Bob");
     const alice = await connect(aliceProvider), bob = await connect(bobProvider), teamBob = await connect(bobProvider, "team");
