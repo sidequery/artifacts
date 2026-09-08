@@ -93,7 +93,10 @@
     "src/localProject.ts",
     "cloudflare/project.ts",
     "src/gallery/execution-controls.tsx",
-    "src/gallery/project-editor.tsx"
+    "src/gallery/project-editor.tsx",
+    "src/gallery/source-editor.tsx",
+    "src/gallery/select.tsx",
+    "src/gallery/move.tsx"
   ],
   "publishConfig": {
     "access": "public"
@@ -102,7 +105,7 @@
     "mcp": "bun run src/cli.ts mcp",
     "test": "bun test src scripts/prepare-plugins.test.ts examples/runner-status --timeout 30000",
     "test:e2e": "bun test e2e/herdr.e2e.test.ts",
-    "test:mcp-ui": "bun test e2e/mcp-app.test.ts e2e/gallery-scripts.test.ts e2e/gallery-navigation.test.ts e2e/execution-controls.test.ts e2e/browser-plugins.test.ts e2e/plugin-bridge.test.ts e2e/routing.test.ts e2e/runner-status.test.ts --timeout 30000",
+    "test:mcp-ui": "bun test e2e/gallery-move.test.ts e2e/project-editor.test.ts e2e/mcp-app.test.ts e2e/gallery-scripts.test.ts e2e/gallery-navigation.test.ts e2e/execution-controls.test.ts e2e/browser-plugins.test.ts e2e/plugin-bridge.test.ts e2e/routing.test.ts e2e/runner-status.test.ts --timeout 30000",
     "typecheck": "tsc --noEmit && tsc -p examples/runner-status/tsconfig.json --noEmit && tsc -p examples/runner-status/tsconfig.local.json --noEmit",
     "dev:cloudflare": "wrangler dev --local --var ENVIRONMENT:local",
     "prepare:celld": "bun run scripts/prepare-celld.ts",
@@ -124,6 +127,14 @@
   },
   "dependencies": {
     "@better-auth/oauth-provider": "1.7.3",
+    "@codemirror/commands": "^6.11.0",
+    "@codemirror/lang-javascript": "^6.2.5",
+    "@codemirror/lang-json": "^6.0.2",
+    "@codemirror/language": "^6.12.4",
+    "@codemirror/search": "^6.7.2",
+    "@codemirror/state": "^6.7.4",
+    "@codemirror/view": "^6.43.11",
+    "@lezer/highlight": "^1.2.3",
     "@modelcontextprotocol/ext-apps": "^1.7.5",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",

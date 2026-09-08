@@ -58,9 +58,11 @@ beforeAll(async () => {
       LINKS: { type: "durable-object", worker: "artifacts-auth-test", exportName: "ArtifactLinks" },
       SCRIPTS: { type: "durable-object", worker: "artifacts-auth-test", exportName: "ScriptLibrary" },
       SCRIPT_BACKENDS: { type: "durable-object", worker: "artifacts-auth-test", exportName: "ScriptBackend" },
+      FILE_BACKENDS: { type: "durable-object", worker: "artifacts-auth-test", exportName: "ArtifactFiles" },
+      FILES: { type: "r2", name: "ownership-files" },
       LOADER: { type: "worker-loader" }, ASSETS: { type: "assets" },
     },
-    exports: { ArtifactLinks: { type: "durable-object", storage: "sqlite" }, ScriptLibrary: { type: "durable-object", storage: "sqlite" }, ScriptBackend: { type: "durable-object", storage: "sqlite" }, ArtifactLibrary: { type: "durable-object", storage: "sqlite" }, ArtifactBackend: { type: "durable-object", storage: "sqlite" } },
+    exports: { ArtifactFiles: { type: "durable-object", storage: "sqlite" }, ArtifactLinks: { type: "durable-object", storage: "sqlite" }, ScriptLibrary: { type: "durable-object", storage: "sqlite" }, ScriptBackend: { type: "durable-object", storage: "sqlite" }, ArtifactLibrary: { type: "durable-object", storage: "sqlite" }, ArtifactBackend: { type: "durable-object", storage: "sqlite" } },
     assets: { directory: join(import.meta.dir, "../dist/cloudflare/assets"), hasUserWorker: true, runWorkerFirst: true, htmlHandling: "none" },
   }, dev: {} }] });
   await runtime.ready;
@@ -324,3 +326,101 @@ test("standard MCP registration infers native redirects without relaxing Better 
     if (item.expected) expect(body.application_type).toBe(item.expected);
   }
 });
+
+test("ownership transfer preserves live resources and revokes former library access across HTTP and MCP", async () => {
+  const aliceContext = await browser.newContext(), bobContext = await browser.newContext();
+  try {
+    const aliceProvider = await authorize(aliceContext, "Alice"), bobProvider = await authorize(bobContext, "Bob");
+    const alice = await connect(aliceProvider), bob = await connect(bobProvider), teamBob = await connect(bobProvider, "team");
+    const tool = async (client: Client, name: string, args: Record<string, unknown>) => {
+      const result = await client.callTool({ name, arguments: args });
+      expect(result.isError, JSON.stringify(result.content)).not.toBe(true);
+      return result;
+    };
+    const move = (context: BrowserContext, kind: string, name: string, from: string, library: string) => context.request.post(`${origin}/api/library/move?workspace=test&library=${from}`, { data: { kind, name, library } });
+    const decode = (result: any) => JSON.parse(atob(result.structuredContent.response.body));
+    const artifact = "ownership-artifact", script = "ownership-script";
+    const project = { files: { "helper.ts": "export const retained = 17;" }, dependencies: {} };
+    const created = await tool(alice, "artifact_write", { name: artifact, slug: artifact, contents: counterClient, server: counterServer, project });
+    const version = (created._meta as any).artifact.versionId;
+    const scriptSource = 'export default { fetch(request: Request, env: ScriptEnv) { env.sql.exec("create table if not exists counted(n integer)"); if(request.method === "POST") env.sql.exec("insert into counted values(1)"); return Response.json({count:env.sql.exec("select count(*) as n from counted").one().n,secret:env.secrets.TOKEN ?? null}); }}';
+    await tool(alice, "script_write", { name: script, contents: scriptSource, project });
+    const scriptVersion = payload(await tool(alice, "script_history", { name: script })).versions[0].id;
+    await tool(alice, "script_secrets", { name: script, secrets: { TOKEN: "transfer-retained" } });
+    expect(decode(await tool(alice, "artifact_request", { name: artifact, request: { path: "/counter", method: "POST" } })).value).toBe(1);
+    expect(decode(await tool(alice, "script_run", { name: script, request: { path: "/", method: "POST" } }))).toEqual({ count: 1, secret: "transfer-retained" });
+    for (const [kind, name] of [["artifact", artifact], ["script", script]]) {
+      await tool(alice, `${kind}_schedule`, { name, action: "set", interval_seconds: 3600, request: { path: kind === "artifact" ? "/counter" : "/", method: "POST" } });
+      await tool(alice, `${kind}_schedule`, { name, action: "pause" });
+    }
+    const grant = (await tool(alice, "artifact_files", { name: artifact, request: { operation: "upload", name: "retained.txt", size: 8, type: "text/plain" } })).structuredContent as any;
+    expect((await fetch(grant.result.url, { method: "PUT", body: "retained" })).status).toBe(201);
+    const oldDownload = (await tool(alice, "artifact_files", { name: artifact, request: { operation: "download", id: grant.result.file.id } })).structuredContent as any;
+    expect((await bobContext.request.get(`${origin}/${artifact}`)).status()).toBe(404);
+    expect((await move(bobContext, "artifact", artifact, "private", "team")).status()).toBe(404);
+    for (const [kind, name] of [["artifact", artifact], ["script", script]]) {
+      const response = await move(aliceContext, kind!, name!, "private", "team");
+      expect(response.status(), await response.text()).toBe(200);
+      expect(await response.json()).toMatchObject({ ok: true, kind, name, libraryScope: "team" });
+    }
+    expect((await bobContext.request.get(`${origin}/${artifact}`)).status()).toBe(200);
+    expect(await (await fetch(oldDownload.result.url)).text()).toBe("retained");
+    expect(payload(await tool(teamBob, "artifact_version", { version_id: version })).source).toBe(counterClient);
+    expect(payload(await tool(teamBob, "script_version", { version_id: scriptVersion })).source).toBe(scriptSource);
+    expect((await alice.callTool({ name: "artifact_version", arguments: { version_id: version } })).isError).toBe(true);
+    expect((await alice.callTool({ name: "script_version", arguments: { version_id: scriptVersion } })).isError).toBe(true);
+    for (const request of [{ operation: "upload", name: "denied.txt", size: 1, type: "text/plain" }, { operation: "download", id: grant.result.file.id }]) {
+      expect((await alice.callTool({ name: "artifact_files", arguments: { version_id: version, request } })).isError).toBe(true);
+    }
+    expect((await alice.callTool({ name: "artifact_edit", arguments: { name: artifact, edits: [{ old_text: "Counter", new_text: "Forbidden" }] } })).isError).toBe(true);
+    expect((await alice.callTool({ name: "script_secrets", arguments: { name: script, secrets: { TOKEN: "forbidden" } } })).isError).toBe(true);
+    for (const [kind, name, id] of [["artifact", artifact, version], ["script", script, scriptVersion]]) {
+      const source = await bobContext.request.get(`${origin}/api/source?workspace=test&library=team&kind=${kind}&version=${id}&format=json`);
+      expect(source.status()).toBe(200);
+      expect((await source.json()).project.files).toEqual(project.files);
+      expect((await aliceContext.request.get(`${origin}/api/source?workspace=test&kind=${kind}&version=${id}`)).status()).toBe(404);
+      const schedule = payload(await tool(teamBob, `${kind}_schedule`, { name }));
+      expect(schedule.schedule).toMatchObject({ paused: true, interval_seconds: 3600 });
+      await tool(teamBob, `${kind}_schedule`, { name, action: "run_now" });
+      expect(payload(await tool(teamBob, `${kind}_runs`, { name })).runs.length).toBeGreaterThan(0);
+    }
+    expect(decode(await tool(teamBob, "artifact_request", { name: artifact, request: { path: "/counter" } })).value).toBe(2);
+    expect(decode(await tool(teamBob, "script_run", { name: script, request: { path: "/" } }))).toEqual({ count: 2, secret: "transfer-retained" });
+    const files = (await tool(teamBob, "artifact_files", { version_id: version, request: { operation: "list" } })).structuredContent as any;
+    expect(files.result.files[0].id).toBe(grant.result.file.id);
+    for (const [kind, name, id] of [["artifact", artifact, version], ["script", script, scriptVersion]]) {
+      await tool(teamBob, `${kind}_edit`, { name, file: "helper.ts", edits: [{ old_text: "17", new_text: "18" }] });
+      await tool(teamBob, `${kind}_restore`, { ...(kind === "script" ? { name } : {}), version_id: id });
+    }
+    expect(decode(await tool(teamBob, "artifact_request", { name: artifact, request: { path: "/counter" } })).value).toBe(2);
+    expect(decode(await tool(teamBob, "script_run", { name: script, request: { path: "/" } }))).toEqual({ count: 2, secret: "transfer-retained" });
+    const teamGallery = await (await bobContext.request.get(`${origin}/api/gallery?workspace=test&library=team`)).json();
+    expect(teamGallery.capabilities.moves).toBe(true);
+    for (const name of [artifact, script]) expect(teamGallery.artifacts.find((item: any) => item.name === name)).toMatchObject({ url: `${origin}/${name}`, access: "private" });
+    // Team -> Bob's private library changes ownership, including the creator's
+    // URL and historical-version rights; it does not change URL access mode.
+    for (const [kind, name] of [["artifact", artifact], ["script", script]]) expect((await move(bobContext, kind!, name!, "team", "private")).status()).toBe(200);
+    expect((await aliceContext.request.get(`${origin}/${artifact}`)).status()).toBe(404);
+    expect((await bobContext.request.get(`${origin}/${artifact}`)).status()).toBe(200);
+    expect((await aliceContext.request.get(`${origin}/${script}`)).status()).toBe(404);
+    expect((await bobContext.request.get(`${origin}/${script}`)).status()).toBe(200);
+    expect((await teamBob.callTool({ name: "artifact_version", arguments: { version_id: version } })).isError).toBe(true);
+    expect((await teamBob.callTool({ name: "script_version", arguments: { version_id: scriptVersion } })).isError).toBe(true);
+    expect(payload(await tool(bob, "artifact_version", { version_id: version })).source).toBe(counterClient);
+    expect(payload(await tool(bob, "script_version", { version_id: scriptVersion })).source).toBe(scriptSource);
+    expect(decode(await tool(bob, "script_run", { name: script, request: { path: "/" } }))).toEqual({ count: 2, secret: "transfer-retained" });
+    await tool(bob, "artifact_link", { kind: "script", name: script, slug: script, access: "public" });
+    expect((await fetch(`${origin}/${script}`)).status).toBe(200);
+    expect((await move(bobContext, "script", script, "private", "team")).status()).toBe(200);
+    expect((await fetch(`${origin}/${script}`)).status).toBe(200);
+    const collision = "ownership-collision";
+    for (const [client, slug, contents] of [[alice, "collision-personal", "export default { private"], [teamBob, "collision-team", "export default { team"]] as const) {
+      expect((await client.callTool({ name: "script_write", arguments: { name: collision, slug, contents } })).isError).toBe(true);
+    }
+    expect((await move(aliceContext, "script", collision, "private", "team")).status()).toBe(409);
+    expect(payload(await tool(alice, "script_read", { name: collision })).source).toBe("export default { private");
+    expect(payload(await tool(teamBob, "script_read", { name: collision })).source).toBe("export default { team");
+    expect((await bobContext.request.post(`${origin}/api/library/move?workspace=test`, { headers: { Origin: "https://evil.example" }, data: { kind: "script", name: script, library: "team" } })).status()).toBe(403);
+    expect((await bobContext.request.post(`${origin}/api/library/move?workspace=test`, { data: { kind: "script", name: script, library: "private", privateKey: "alice" } })).status()).toBe(400);
+  } finally { await aliceContext.close(); await bobContext.close(); }
+}, 180000);

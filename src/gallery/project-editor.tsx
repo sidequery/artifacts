@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { SourceEditor } from "./source-editor";
+import { Select } from "./select";
 
 export type EditableProject = { files: Record<string, string>; dependencies: Record<string, string> };
 export const emptyEditableProject = (): EditableProject => ({ files: {}, dependencies: {} });
@@ -13,7 +15,7 @@ export function editableProject(value: unknown): EditableProject {
 }
 
 export function ProjectEditor({ entries, project, onProjectChange, onEntryChange, readOnly = false, disabled = false, onValidityChange }: {
-  entries: { id: string; label: string; source: string }[];
+  entries: { id: string; filename: string; source: string }[];
   project: EditableProject;
   onProjectChange: (project: EditableProject) => void;
   onEntryChange: (id: string, source: string) => void;
@@ -40,20 +42,19 @@ export function ProjectEditor({ entries, project, onProjectChange, onEntryChange
     setSelection(`file:${path}`); setFilename(""); setFileError("");
   }
   return <div className="project-editor">
-    <div className="script-fields">
-      <label>File <select aria-label="Project file" disabled={disabled} value={selection} onChange={event => setSelection(event.target.value)}>
-        {entries.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
-        {Object.keys(project.files).sort().map(path => <option key={path} value={`file:${path}`}>{path}</option>)}
-      </select></label>
-      {!readOnly ? <><input aria-label="New helper file" placeholder="lib/helpers.ts" value={filename} disabled={disabled} onChange={event => setFilename(event.target.value)} /><button type="button" disabled={disabled || !filename.trim()} onClick={addFile}>Add file</button>
-        {helper !== null ? <button type="button" disabled={disabled} onClick={() => { const files = { ...project.files }; delete files[helper]; onProjectChange({ ...project, files }); setSelection(entries[0]!.id); }}>Remove file</button> : null}</> : null}
+    <div className="project-file-bar" role="group" aria-label="Source files">
+      {entries.map(item => <button type="button" key={item.id} aria-pressed={selection === item.id} disabled={disabled} onClick={() => setSelection(item.id)}>{item.filename}</button>)}
+      {Object.keys(project.files).length ? <Select aria-label="Helper file" disabled={disabled} value={helper === null ? "" : selection} onChange={event => { if (event.target.value) setSelection(event.target.value); }}><option value="">Helper files</option>{Object.keys(project.files).sort().map(path => <option key={path} value={`file:${path}`}>{path}</option>)}</Select> : null}
     </div>
-    {fileError ? <p role="alert" className="error-message">{fileError}</p> : null}
-    <label className="source-editor-label">{entry?.label ?? helper}<textarea className="source-editor" aria-label={entry?.label ?? `Source of ${helper}`} spellCheck={false} readOnly={locked} value={selectedSource} onChange={event => {
-      if (entry) onEntryChange(entry.id, event.target.value);
-      else if (helper !== null) onProjectChange({ ...project, files: { ...project.files, [helper]: event.target.value } });
-    }} /></label>
-    <details><summary>Dependencies ({Object.keys(project.dependencies).length})</summary>
+    <SourceEditor filename={entry?.filename ?? helper ?? "source.ts"} value={selectedSource} readOnly={readOnly} disabled={disabled} onChange={source => {
+      if (entry) onEntryChange(entry.id, source);
+      else if (helper !== null) onProjectChange({ ...project, files: { ...project.files, [helper]: source } });
+    }} />
+    {!readOnly ? <details className="project-file-management"><summary>Manage helper files</summary><div className="script-fields">
+      <input aria-label="New helper file" placeholder="lib/helpers.ts" value={filename} disabled={disabled} onChange={event => setFilename(event.target.value)} /><button type="button" disabled={disabled || !filename.trim()} onClick={addFile}>Add file</button>
+      {helper !== null ? <button type="button" disabled={disabled} onClick={() => { const files = { ...project.files }; delete files[helper]; onProjectChange({ ...project, files }); setSelection(entries[0]!.id); }}>Remove file</button> : null}
+    </div>{fileError ? <p role="alert" className="error-message">{fileError}</p> : null}</details> : null}
+    <details className="project-dependencies"><summary>Dependencies ({Object.keys(project.dependencies).length})</summary>
       <p className="muted">Use package names and exact versions, for example {`{"lodash-es": "4.17.21"}`}.</p>
       <label>Dependencies (JSON)<textarea aria-label="Project dependencies" spellCheck={false} readOnly={locked} value={dependencies} onChange={event => {
         const value = event.target.value; setDependencies(value);

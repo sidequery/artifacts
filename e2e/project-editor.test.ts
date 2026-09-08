@@ -1,0 +1,76 @@
+import { expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { chromium, type Browser } from "playwright";
+
+test("source editor highlights code, preserves file buffers and undo, supports find, indent, keyboard escape and readonly", async () => {
+  const directory = await mkdtemp(join(import.meta.dir, ".editor-test-"));
+  let server: ReturnType<typeof Bun.serve> | undefined;
+  let browser: Browser | undefined;
+  try {
+    browser = await chromium.launch({ headless: true });
+    const entrypoint = join(directory, "entry.tsx");
+    await Bun.write(entrypoint, `import React, {useState} from 'react'; import {createRoot} from 'react-dom/client'; import {ProjectEditor} from '../../src/gallery/project-editor';
+      function App() {
+        const [entries,setEntries]=useState([{id:'client',filename:'artifact.artifact.tsx',source:'export const report = "hello";\\n'}, {id:'server',filename:'artifact.artifact.server.ts',source:'export const server = true;'}, {id:'script',filename:'script.ts',source:'export default {}'}]);
+        const [project,setProject]=useState({files:{'lib/value.ts':'export const value = 1;', 'data.json':'{"value": 1}'},dependencies:{}});
+        const [locked,setLocked]=useState(false); const [disabled,setDisabled]=useState(false); const [valid,setValid]=useState(true); const [saved,setSaved]=useState(0);
+        return <form onSubmit={e=>{e.preventDefault();setSaved(n=>n+1)}}><ProjectEditor entries={entries} project={project} onEntryChange={(id,source)=>setEntries(es=>es.map(e=>e.id===id?{...e,source}:e))} onProjectChange={setProject} onValidityChange={setValid} readOnly={locked} disabled={disabled}/><button type="button" onClick={()=>setLocked(v=>!v)}>Toggle readonly</button><button type="button" onClick={()=>setDisabled(v=>!v)}>Toggle disabled</button><output>{JSON.stringify({entries,project,valid,saved})}</output></form>
+      } createRoot(document.getElementById('root')!).render(<App/>);`);
+    const build = await Bun.build({ entrypoints: [entrypoint], target: "browser" });
+    expect(build.success).toBe(true);
+    const js = await build.outputs[0]!.text();
+    server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: request => new URL(request.url).pathname === "/client.js" ? new Response(js, { headers: { "content-type": "text/javascript" } }) : new Response('<div id="root"></div><script type="module" src="/client.js"></script>', { headers: { "content-type": "text/html" } }) });
+    const page = await browser.newPage();
+    await page.goto(server.url.href);
+    const client = page.getByRole("textbox", { name: "artifact.artifact.tsx", exact: true });
+    await client.waitFor();
+    expect(await page.locator(".cm-lineNumbers").count()).toBe(1);
+    expect(await client.locator("span").count()).toBeGreaterThan(0);
+    await client.fill('export const changed = "retained";');
+    await page.getByRole("button", { name: "artifact.artifact.server.ts", exact: true }).click();
+    await page.getByRole("textbox", { name: "artifact.artifact.server.ts", exact: true }).fill("export const server = false;");
+    await page.getByRole("button", { name: "script.ts", exact: true }).click();
+    await page.getByRole("textbox", { name: "script.ts", exact: true }).fill("export default {fetch(){}};");
+    await page.getByRole("combobox", { name: "Helper file" }).selectOption("file:data.json");
+    await page.getByRole("textbox", { name: "data.json", exact: true }).fill('{"value": 2}');
+    await page.getByRole("combobox", { name: "Helper file" }).selectOption("file:lib/value.ts");
+    await page.getByRole("textbox", { name: "lib/value.ts", exact: true }).fill("export const value = 3;");
+    await page.getByRole("button", { name: "artifact.artifact.tsx", exact: true }).click();
+    expect(await client.innerText()).toContain('export const changed = "retained";');
+    await client.press("ControlOrMeta+z");
+    expect(await client.innerText()).toContain('export const report = "hello";');
+    await client.press("ControlOrMeta+Shift+z");
+    await client.press("ControlOrMeta+Home");
+    await client.press("Tab");
+    expect(await client.innerText()).toMatch(/^  export/);
+    await client.press("Escape"); await client.press("Tab");
+    expect(await client.evaluate(el => el === document.activeElement)).toBe(false);
+    await page.getByRole("button", { name: "Find", exact: true }).click();
+    await page.getByRole("textbox", { name: "Find", exact: true }).fill("retained");
+    await page.getByRole("textbox", { name: "Find", exact: true }).press("Escape");
+    await client.press("ControlOrMeta+Enter");
+    expect(JSON.parse(await page.locator("output").innerText()).saved).toBe(1);
+    await page.getByText("Manage helper files", { exact: true }).click();
+    await page.getByRole("textbox", { name: "New helper file" }).fill("lib/new.ts");
+    await page.getByRole("button", { name: "Add file", exact: true }).click();
+    await page.getByRole("textbox", { name: "lib/new.ts", exact: true }).fill("export const fresh = 1;");
+    await page.getByRole("button", { name: "Remove file", exact: true }).click();
+    expect(JSON.parse(await page.locator("output").innerText()).project.files["lib/new.ts"]).toBeUndefined();
+    await page.getByText("Dependencies (0)", { exact: true }).click();
+    await page.getByRole("textbox", { name: "Project dependencies" }).fill('{"lodash-es":"4.17.21"}');
+    expect(JSON.parse(await page.locator("output").innerText()).project.dependencies).toEqual({ "lodash-es": "4.17.21" });
+    await page.getByRole("textbox", { name: "Project dependencies" }).fill('{"lodash-es":"latest"}');
+    expect(JSON.parse(await page.locator("output").innerText()).valid).toBe(false);
+    await page.getByRole("button", { name: "Toggle readonly" }).click();
+    expect(await client.getAttribute("aria-readonly")).toBe("true");
+    const before = await client.innerText();
+    await client.press("x");
+    expect(await client.innerText()).toBe(before);
+    await page.getByRole("button", { name: "artifact.artifact.server.ts", exact: true }).click();
+    expect(await page.getByRole("textbox", { name: "artifact.artifact.server.ts", exact: true }).innerText()).toContain("false");
+    await page.getByRole("button", { name: "Toggle disabled" }).click();
+    expect(await page.getByRole("textbox", { name: "artifact.artifact.server.ts", exact: true }).getAttribute("contenteditable")).toBe("false");
+    expect(JSON.parse(await page.locator("output").innerText()).project.files).toEqual({ "lib/value.ts": "export const value = 3;", "data.json": '{"value": 2}' });
+  } finally { await browser?.close(); server?.stop(true); await rm(directory, { recursive: true, force: true }); }
+}, 60000);

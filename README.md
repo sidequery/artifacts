@@ -219,14 +219,16 @@ Hosted `artifact_write` accepts `server` source alongside `contents`. Omitting
 `server` preserves the existing server; passing `null` removes it without
 deleting its database. Use `artifact_read` or `artifact_edit` with `part: "server"`
 for targeted server changes. Client and server source are versioned and restored
-together. The database is live state keyed by library, workspace and artifact name:
+together. The database is live state keyed by an immutable physical library, workspace and artifact name:
 editing or restoring source reloads the code while preserving that state, and
 opening an archived version does not restore an old database snapshot.
 
 Private artifacts receive databases isolated to the verified signed-in user. A
 team artifact shares one database with members authorized for that deployment's
 team library. Private and team artifacts with the same workspace and name remain
-separate. Generated servers receive Durable Object storage; ordinary D1, R2 and
+separate. Moving an item between personal and team libraries changes its owner
+while retaining that physical identity, history, data, files, secrets, schedules,
+and URL. URL access remains separately private or public. Generated servers receive Durable Object storage; ordinary D1, R2 and
 custom Worker bindings are not provided. The local Bun CLI, stdio MCP server and
 gallery do not execute artifact servers, so `artifactFetch` reports that server
 requests are unavailable there.

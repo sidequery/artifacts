@@ -11,7 +11,7 @@ import * as validators from "../dist/cloudflare/tool-validators.js";
 import { CLOUD_MCP_TOOLS } from "./tool-contract";
 import type { CloudArtifactService } from "./service";
 
-export async function handleCloudMcp(request: Request, service: CloudArtifactService, parsedBody?: unknown): Promise<Response> {
+export async function handleCloudMcp(request: Request, service: Pick<CloudArtifactService, "callTool" | "fileStorage">, parsedBody?: unknown): Promise<Response> {
   // Low-level SDK registration lets local and hosted transports share the same
   // JSON schemas, with argument validators generated from them at build time.
   const server = new Server({ name: "artifacts", version: "0.1.0" }, { capabilities: { tools: {}, resources: {} } });
