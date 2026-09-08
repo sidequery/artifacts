@@ -70,7 +70,11 @@ test("gallery filters, previews revisions, and preserves mobile library navigati
     expect(await campaign.getAttribute("aria-current")).toBe("true");
     expect(await desktop.getByRole("heading", { level: 1, name: "Campaign overview", exact: true }).isVisible()).toBe(true);
     expect(await desktop.getByRole("textbox", { name: "URL slug", exact: true }).isVisible()).toBe(false);
-    await screenshot(desktop, "gallery-desktop");
+    expect((await campaign.boundingBox())!.height).toBeLessThanOrEqual(40);
+    expect(await campaign.evaluate(el => getComputedStyle(el).borderLeftWidth)).toBe("0px");
+    const desktopFilters = (await desktop.getByRole("group", { name: "Filter library" }).boundingBox())!;
+    expect((await campaign.boundingBox())!.y).toBe(desktopFilters.y + desktopFilters.height);
+    await screenshot(desktop, "gallery-desktop-preview");
 
     const search = desktop.getByRole("searchbox", { name: "Search artifacts and scripts" });
     await search.fill("revenue");
@@ -96,7 +100,7 @@ test("gallery filters, previews revisions, and preserves mobile library navigati
     expect(await campaign.count()).toBe(0);
     expect(await revenue.count()).toBe(0);
     await script.click();
-    await desktop.getByRole("textbox", { name: "Script source", exact: true }).waitFor();
+    await desktop.getByRole("textbox", { name: "script.ts", exact: true }).waitFor();
     expect(await script.getAttribute("aria-current")).toBe("true");
     expect(calls).toEqual([]);
     await filters.getByRole("button", { name: "All", exact: true }).click();
@@ -105,13 +109,23 @@ test("gallery filters, previews revisions, and preserves mobile library navigati
     expect(await script.getAttribute("aria-current")).toBeNull();
 
     await desktop.getByRole("group", { name: "Artifact view" }).getByRole("button", { name: "Source", exact: true }).click();
-    const source = desktop.getByRole("textbox", { name: "Artifact source", exact: true });
+    const source = desktop.getByRole("textbox", { name: "Campaign overview.artifact.tsx", exact: true });
     await source.waitFor();
-    expect(await source.inputValue()).toBe(sourceFor(false));
+    expect(await source.innerText()).toBe(sourceFor(false));
+    const dimensions = await desktop.locator(".source-code-surface:visible").evaluate(el => ({ editor: el.getBoundingClientRect().height, pane: el.closest(".artifact-detail")!.getBoundingClientRect().height }));
+    expect(dimensions.editor).toBeGreaterThan(dimensions.pane / 2);
+    expect(await source.locator("span").evaluateAll(spans => new Set(spans.map(el => getComputedStyle(el).color)).size)).toBeGreaterThan(1);
+    const draft = sourceFor(false).replace("Current campaign", "Unsaved campaign");
+    await source.fill(draft);
+    await desktop.getByRole("group", { name: "Artifact view" }).getByRole("button", { name: "Preview", exact: true }).click();
+    await desktop.getByRole("group", { name: "Artifact view" }).getByRole("button", { name: "Source", exact: true }).click();
+    expect(await source.innerText()).toBe(draft);
+    await noHorizontalOverflow(desktop);
+    await screenshot(desktop, "gallery-desktop-source");
     await desktop.getByRole("combobox", { name: "Version", exact: true }).selectOption("campaign-revision-1");
     await desktop.getByRole("button", { name: "Restore revision", exact: true }).waitFor();
-    await desktop.waitForFunction(() => document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Artifact source"]')?.value.includes("Campaign revision 1"));
-    expect(await source.getAttribute("readonly")).not.toBeNull();
+    await desktop.waitForFunction(() => document.querySelector('[role="textbox"][aria-label="Campaign overview.artifact.tsx"]')?.textContent?.includes("Campaign revision 1"));
+    expect(await source.getAttribute("aria-readonly")).toBe("true");
     await desktop.getByRole("group", { name: "Artifact view" }).getByRole("button", { name: "Preview", exact: true }).click();
     await desktop.frameLocator('iframe[title="Preview of Campaign overview"]').getByRole("heading", { name: "Campaign revision 1" }).waitFor();
     expect(new URL(await desktop.getByTitle("Preview of Campaign overview").getAttribute("src") ?? "", server.url).searchParams.get("version")).toBe("campaign-revision-1");
@@ -128,6 +142,8 @@ test("gallery filters, previews revisions, and preserves mobile library navigati
     await mobile.goto(server.url.href);
     const mobileLibrary = mobile.getByRole("complementary", { name: "Artifacts and scripts", includeHidden: true });
     await mobileLibrary.getByTitle("default/Campaign overview", { exact: true }).waitFor();
+    const mobileFilters = (await mobile.getByRole("group", { name: "Filter library" }).boundingBox())!;
+    expect((await mobileLibrary.getByTitle("default/Campaign overview", { exact: true }).boundingBox())!.y).toBe(mobileFilters.y + mobileFilters.height);
     expect(await mobile.getByRole("heading", { level: 1, name: "Campaign overview", exact: true }).isVisible()).toBe(false);
     expect(await mobile.getByRole("button", { name: "Back to library", exact: true }).isVisible()).toBe(false);
     await noHorizontalOverflow(mobile);
@@ -144,6 +160,21 @@ test("gallery filters, previews revisions, and preserves mobile library navigati
     expect(await mobile.getByRole("link", { name: "Download source", exact: true }).isVisible()).toBe(true);
     await mobile.getByLabel("More actions", { exact: true }).click();
     await screenshot(mobile, "gallery-mobile-preview");
+    await mobile.getByRole("group", { name: "Artifact view" }).getByRole("button", { name: "Source", exact: true }).click();
+    const mobileSource = mobile.getByRole("textbox", { name: "Campaign overview.artifact.tsx", exact: true });
+    await mobileSource.waitFor();
+    await mobileSource.fill(sourceFor(false).replace("Current campaign", "Mobile unsaved campaign"));
+    await mobileSource.press("ControlOrMeta+Home");
+    for (const control of [mobile.getByRole("combobox", { name: "Version", exact: true }), mobile.getByRole("button", { name: "Save artifact", exact: true }), mobile.getByRole("button", { name: "Find", exact: true }), mobile.getByText("Manage helper files", { exact: true }), mobile.getByText("Dependencies (0)", { exact: true })]) {
+      await control.scrollIntoViewIfNeeded();
+      const bounds = (await control.boundingBox())!;
+      expect(bounds.x).toBeGreaterThanOrEqual(0);
+      expect(bounds.x + bounds.width).toBeLessThanOrEqual(390);
+      expect(bounds.y).toBeGreaterThanOrEqual(0);
+      expect(bounds.y + bounds.height).toBeLessThanOrEqual(844);
+    }
+    await noHorizontalOverflow(mobile);
+    await screenshot(mobile, "gallery-mobile-source");
     await mobile.getByRole("button", { name: "Back to library", exact: true }).click();
     await mobileLibrary.waitFor();
     expect(await mobileSearch.inputValue()).toBe("campaign");

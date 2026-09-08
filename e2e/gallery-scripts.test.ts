@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
 import { chromium } from "playwright";
+import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
 import type { GalleryArtifact } from "../src/gallery/types";
 
 test("gallery edits scripts without execution and runs requests only on demand", async () => {
@@ -32,20 +34,30 @@ test("gallery edits scripts without execution and runs requests only on demand",
   } });
   const browser = await chromium.launch({ headless: true });
   try {
-    const page = await browser.newPage();
+    const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
+    const screenshot = async (name: string) => { const directory = process.env.GALLERY_SCREENSHOT_DIR; if (directory) { await mkdir(directory, { recursive: true }); await page.screenshot({ path: join(directory, `${name}.png`), fullPage: true }); } };
     await page.goto(server.url.href);
-    await page.getByRole("textbox", { name: "Script source", exact: true }).waitFor();
+    await page.getByRole("textbox", { name: "script.ts", exact: true }).waitFor();
     expect(await page.locator("iframe").count()).toBe(0);
     expect(calls).toEqual([]);
-    await page.getByRole("textbox", { name: "Script source", exact: true }).fill('export default { fetch() { return new Response("changed"); } };');
+    await page.getByRole("textbox", { name: "script.ts", exact: true }).fill('export default { fetch() { return new Response("changed"); } };');
+    const views = page.getByRole("group", { name: "Script view" });
+    const sourceDimensions = await page.locator(".source-code-surface:visible").evaluate(el => ({ editor: el.getBoundingClientRect().height, pane: el.closest(".artifact-detail")!.getBoundingClientRect().height }));
+    expect(sourceDimensions.editor).toBeGreaterThan(sourceDimensions.pane / 2);
+    await screenshot("gallery-script-source");
+    await views.getByRole("button", { name: "Requests", exact: true }).click();
+    await views.getByRole("button", { name: "Source", exact: true }).click();
+    expect(await page.getByRole("textbox", { name: "script.ts", exact: true }).innerText()).toContain('new Response("changed")');
     await page.getByRole("button", { name: "Save script", exact: true }).click();
     await page.getByRole("status").filter({ hasText: "Script saved" }).waitFor();
     expect(calls.map(call => call.name)).toEqual(["script_write"]);
+    await views.getByRole("button", { name: "Requests", exact: true }).click();
     await page.getByRole("combobox", { name: "Request method" }).selectOption("POST");
     await page.getByRole("textbox", { name: "Request body" }).fill("hello 🌍");
     await page.getByRole("textbox", { name: "Request headers" }).fill('{"content-type":"text/plain"}');
     await page.getByRole("button", { name: "Run script" }).click();
     await page.getByLabel("Script response").waitFor();
+    await screenshot("gallery-script-request");
     expect(calls[1]?.arguments.request).toEqual({ path: "/", method: "POST", headers: [["content-type", "text/plain"]], body: Buffer.from("hello 🌍").toString("base64") });
     expect(await page.getByLabel("Script response").textContent()).toContain("200 OK\ncontent-type: text/plain\n\n<script>alert(1)</script> 🌍");
     await page.getByRole("button", { name: "Link settings", exact: true }).click();

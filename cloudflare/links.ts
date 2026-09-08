@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { LibraryOwnership, type LibrarySelection, type OwnershipEnvironment } from "./ownership";
 
 export type ArtifactTarget = { libraryKey: string; workspace: string; kind: "artifact" | "script"; name: string };
 export type LinkUpdate = { slug?: string; access?: "private" | "public"; version_id?: string; script_hash?: string };
@@ -19,12 +20,20 @@ function readLink(value: string): ArtifactLink {
 }
 /** Deployment-wide names; ownership is resolved before accessing any library. */
 export class ArtifactLinks extends DurableObject<unknown> {
+  private readonly ownership: LibraryOwnership;
   constructor(ctx: DurableObjectState, env: unknown) {
     super(ctx, env);
+    this.ownership = new LibraryOwnership(ctx.storage.sql, env as OwnershipEnvironment);
     ctx.storage.sql.exec("create table if not exists links (slug text primary key, target text not null unique, value text not null)");
     ctx.storage.sql.exec("create table if not exists generations (target text primary key, generation integer not null)");
     ctx.storage.sql.exec("create table if not exists pending_links (target text primary key, value text not null)");
   }
+  owner(target: ArtifactTarget) { return this.ownership.owner(target); }
+  admit(selection: LibrarySelection, create = false) { return this.ownership.admit(selection, create); }
+  admitRemix(selection: LibrarySelection, newName: string) { return this.ownership.admitRemix(selection, newName); }
+  move(selection: LibrarySelection & { name: string }, destination: string) { return this.ownership.move(selection, destination); }
+  catalog(input: Parameters<LibraryOwnership["catalog"]>[0]) { return this.ownership.catalog(input); }
+
   get(slug: string): ArtifactLink | null {
     const row = this.ctx.storage.sql.exec<{ value: string }>("select value from links where slug = ?", slug).toArray()[0];
     return row ? readLink(row.value) : null;

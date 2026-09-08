@@ -42,7 +42,8 @@ export async function artifactRoute(request: Request, env: Env): Promise<Respons
   if (link.access === "private") {
     const identity = await identify(request, env);
     if (identity instanceof Response) return identity;
-    if (link.libraryKey !== "team" && link.libraryKey !== identity.privateKey) return new Response("Not found", { status: 404 });
+    const owner = await env.LINKS.getByName("deployment").owner(link);
+    if (owner !== "team" && owner !== identity.privateKey) return new Response("Not found", { status: 404 });
     plugins = { user: identity.user, env };
     const origin = request.headers.get("Origin");
     if (origin && origin !== url.origin) return new Response("Origin is not allowed", { status: 403 });

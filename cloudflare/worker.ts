@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import type { DurableObjectNamespace, Fetcher } from "@cloudflare/workers-types";
 import { ArtifactLibrary } from "./library";
 import { authenticate, type AuthEnvironment } from "./auth";
-import { CloudArtifactService } from "./service";
+import { ManagedArtifactService } from "./managed-service";
 // esbuild 0.28.1 must initialize Better Auth's shared Zod module before
 // the MCP SDK constructs its top-level schemas (Zod 4.5.4).
 import { authenticateBetterAuth, getArtifactAuth, ArtifactAuthConfigurationError, type BetterAuthEnvironment, type ArtifactUser } from "./better-auth";
@@ -38,7 +38,7 @@ export type Env = AuthEnvironment & BetterAuthEnvironment & {
   ARTIFACTS_PUBLIC_ORIGIN?: string;
 };
 
-const app = new Hono<{ Bindings: Env; Variables: { service: CloudArtifactService; libraryScope: "private" | "team"; user: ArtifactUser | null } }>();
+const app = new Hono<{ Bindings: Env; Variables: { service: ManagedArtifactService; libraryScope: "private" | "team"; user: ArtifactUser | null } }>();
 app.get("/health", c => c.json({ ok: true, runtime: navigator.userAgent }));
 app.get("/sign-in", c => {
   if (c.env.AUTH_MODE !== "better-auth") return c.redirect("/");
@@ -94,11 +94,12 @@ app.use("*", async (c, next) => {
   if (libraryScope !== "private" && libraryScope !== "team") return c.json({ error: "Library must be private or team" }, 400);
   // The configured auth mode controls membership of this deployment's team. Private storage is
   // selected only from the verified subject, never a caller-supplied user ID.
-  const libraryKey = libraryScope === "team" ? "team" : user
+  const privateKey = user
     ? JSON.stringify(["private", "better-auth", user.id])
     : JSON.stringify(["private", c.env.ACCESS_TEAM_DOMAIN ?? "local", identity.subject]);
+  const libraryKey = libraryScope === "team" ? "team" : privateKey;
   c.set("libraryScope", libraryScope);
-  c.set("service", new CloudArtifactService(c.env.LIBRARIES.getByName(libraryKey), workspace, c.env.BACKENDS, libraryKey, { links: c.env.LINKS.getByName("deployment"), scripts: c.env.SCRIPTS.getByName(libraryKey), scriptBackends: c.env.SCRIPT_BACKENDS, origin: url.origin, publicOrigin: publicOrigin(c.req.url, c.env.ARTIFACTS_PUBLIC_ORIGIN) }, { user: identity, env: c.env }, c.env.FILE_BACKENDS ? { backends: c.env.FILE_BACKENDS, origin: publicOrigin(c.req.url, c.env.ARTIFACTS_PUBLIC_ORIGIN) } : undefined));
+  c.set("service", new ManagedArtifactService(c.env, workspace, libraryKey, privateKey, url.origin, publicOrigin(c.req.url, c.env.ARTIFACTS_PUBLIC_ORIGIN), { user: identity, env: c.env }));
   // Compilation uses shared isolate resources. Let an admitted operation finish
   // after a client disconnects rather than abandoning its native compiler I/O.
   const operation = next();
@@ -122,6 +123,17 @@ app.get("/api/gallery", async c => {
   const offset = Number(c.req.query("offset") ?? "0");
   if (!Number.isSafeInteger(offset) || offset < 0) return c.json({ error: "Invalid offset" }, 400);
   return c.json({ ...await c.get("service").gallery(c.req.query("all") === "1", offset), libraryScope: c.get("libraryScope") });
+});
+app.post("/api/library/move", async c => {
+  let input: { kind: "artifact" | "script"; name: string; library: "private" | "team" };
+  try { input = JSON.parse(await readRequestText(c.req.raw, 8192)); }
+  catch (error) { return c.json({ error: error instanceof RangeError ? "Move request exceeds 8 KiB" : "Invalid JSON" }, error instanceof RangeError ? 413 : 400); }
+  if (!input || typeof input.name !== "string" || !["artifact", "script"].includes(input.kind) || !["private", "team"].includes(input.library) || Object.keys(input).some(key => !["kind", "name", "library"].includes(key))) return c.json({ error: "Invalid move request" }, 400);
+  try { return c.json(await c.get("service").move(input)); }
+  catch (error) {
+    if (error instanceof Error && /already in use|already in this library/.test(error.message)) return c.json({ error: error.message }, 409);
+    throw error;
+  }
 });
 app.post("/api/plugins/call", async c => {
   let input: PluginRequest;

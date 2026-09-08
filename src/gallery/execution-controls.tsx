@@ -1,3 +1,4 @@
+import {Select} from "./select";
 import {useState} from "react";
 import {galleryTool} from "./hosted";
 
@@ -22,9 +23,9 @@ export function ExecutionControls({workspace,name,kind="script"}:{workspace:stri
       <button disabled={busy} onClick={()=>void perform(()=>control("get"))}>Load schedule</button>
       {loaded?<p>{schedule?(schedule.paused?"Paused":`Next run: ${new Date(schedule.next_run_at!).toISOString()} (UTC)`):"No schedule configured"}</p>:null}
       <form onSubmit={event=>{event.preventDefault();void perform(()=>control("set"));}}>
-        <label>Repeat <select aria-label="Schedule mode" value={mode} onChange={e=>setMode(e.target.value)}><option value="interval">Interval</option><option value="cron">Cron</option></select></label>
+        <label>Repeat <Select aria-label="Schedule mode" value={mode} onChange={e=>setMode(e.target.value)}><option value="interval">Interval</option><option value="cron">Cron</option></Select></label>
         {mode==="interval"?<label>Every (seconds) <input aria-label="Schedule interval" type="number" min="60" max="31536000" required value={interval} onChange={e=>setInterval(e.target.value)}/></label>:<><label>Cron <input aria-label="Schedule cron" required value={cron} onChange={e=>setCron(e.target.value)}/></label><label>Timezone <input aria-label="Schedule timezone" required value={timezone} onChange={e=>setTimezone(e.target.value)}/></label></>}
-        <label>Method <select aria-label="Schedule method" value={method} onChange={e=>setMethod(e.target.value)}>{["GET","POST","PUT","PATCH","DELETE","HEAD"].map(m=><option key={m}>{m}</option>)}</select></label>
+        <label>Method <Select aria-label="Schedule method" value={method} onChange={e=>setMethod(e.target.value)}>{["GET","POST","PUT","PATCH","DELETE","HEAD"].map(m=><option key={m}>{m}</option>)}</Select></label>
         <label>Path <input aria-label="Schedule path" required value={path} onChange={e=>setPath(e.target.value)}/></label>
         <label>Headers (JSON pairs) <textarea aria-label="Schedule headers" value={headers} onChange={e=>setHeaders(e.target.value)}/></label>
         <label>Body <textarea aria-label="Schedule body" value={body} onChange={e=>setBody(e.target.value)}/></label>

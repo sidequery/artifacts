@@ -30,6 +30,23 @@ owns script reads, mutations, execution, secrets and logs; `script-guide.ts`
 contains its MCP authoring guidance. `artifact-service.ts` supplies the shared
 library/workspace identity and URL metadata used by both services.
 
+`managed-service.ts` resolves authenticated library selections through the
+ownership directory in the existing deployment `ArtifactLinks` Durable Object.
+`ownership.ts` records logical ownership separately from immutable physical
+library/workspace/name identities. A move changes one ownership row, retaining
+sources, revisions, projects, compiled code, runtime SQLite/KV, files, secrets,
+schedules, execution history, and existing URLs. Legacy records retain their
+original library owner until first moved; no data migration is required.
+
+The directory serializes only admission and destination reservations. Compilation,
+HTTP execution, and file operations run outside that queue. An operation admitted
+before an ownership change may finish; every subsequent admission resolves the
+current owner, including version-only requests. Moving does not cancel in-flight
+execution or previously issued file transfer capabilities. URL access mode remains
+independent: private URLs check the current owner; public URLs remain public.
+New items reusing a vacated logical name receive fresh physical storage, and moves
+reject existing or reserved destination names instead of overwriting them.
+
 Storage and execution remain separate: `library.ts` and `scripts.ts` keep source
 and revisions; `links.ts` owns slugs and active revision pointers; `backend.ts`
 and `script-backend.ts` execute code. Code edits retain the validation and atomic

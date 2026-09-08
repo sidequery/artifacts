@@ -3,12 +3,15 @@ import { createRoot } from "react-dom/client";
 import { authClient, signInUrl } from "../auth/client-api";
 import type { GalleryArtifact, GalleryData } from "./types";
 import { ExecutionControls } from "./execution-controls";
-import { ArtifactSourcePanel, LinkSettings, ScriptPanel } from "./hosted";
+import { ArtifactSourcePanel, LinkSettings, ScriptPanel, type ScriptView } from "./hosted";
 import { artifactFileTransferUrl } from "../sdk/files";
 import { RemixPanel } from "./remix";
+import { Select } from "./select";
+import { MovePanel } from "./move";
+import { SourceEditor } from "./source-editor";
 
 type Scope = "current" | "all";
-type DetailTab = "preview" | "source";
+type DetailTab = "preview" | "source" | "activity" | "requests" | "secrets";
 type KindFilter = "all" | "artifact" | "script";
 type SourceState =
   | { status: "idle"; text: ""; error: "" }
@@ -21,165 +24,201 @@ const WORKING_VERSION = "working";
 type SessionUser = { id: string; name: string; email: string };
 
 const styles = `
-  :root { color-scheme: dark; --page: #111214; --panel: #161719; --raised: #1d1f21; --selected: #25282b; --line: #303336; --text: #e8e9e9; --muted: #a0a5aa; --subtle: #757b81; }
+  :root { color-scheme: dark; --page: #111214; --panel: #161719; --raised: #202225; --selected: #292c30; --line: #303336; --text: #e8e9e9; --muted: #a0a5aa; --subtle: #757b81; }
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
   html, body, #root { width: 100%; height: 100%; }
   body { margin: 0; background: var(--page); color: var(--text); font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; }
   button, input, select, textarea, a { font: inherit; color: inherit; touch-action: manipulation; }
   button, select, .download-link { cursor: pointer; }
-  button, select, input { min-height: 36px; border: 1px solid transparent; border-radius: 0; background: transparent; padding: 7px 10px; }
+  button, select, input { height: 32px; min-height: 32px; line-height: 20px; border: 1px solid transparent; border-radius: 0; background: transparent; padding: 5px 10px; }
+  button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
   select, input { border-color: var(--line); min-width: 0; }
-  select { background: var(--panel); }
-  button:disabled { opacity: .45; cursor: default; }
-  :is(button, input, select, textarea, summary, a):focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+  input { background: var(--page); }
+  button:disabled, select:disabled { opacity: .45; cursor: default; }
+  :is(button, input, select, textarea, summary, a):focus-visible { outline: 2px solid var(--text); outline-offset: -2px; }
   button, a { -webkit-tap-highlight-color: transparent; }
+  .select-control { position: relative; display: inline-flex; min-width: 0; vertical-align: middle; }
+  .select-control select { appearance: none; width: 100%; background: var(--panel); padding-right: 30px; text-overflow: ellipsis; }
+  .select-chevron { position: absolute; pointer-events: none; right: 12px; top: 50%; width: 6px; height: 6px; margin-top: -4px; border-right: 1px solid var(--muted); border-bottom: 1px solid var(--muted); transform: rotate(45deg); }
+  .select-control:has(select:disabled) .select-chevron { opacity: .45; }
   .gallery-app { display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
-  .app-header { display: flex; align-items: center; gap: 18px; min-height: 64px; padding: 10px 24px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
-  .wordmark { font-size: 19px; font-weight: 650; letter-spacing: -.65px; }
+  .app-header { display: flex; align-items: center; gap: 16px; min-height: 52px; padding: 8px 16px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
+  .wordmark { font-size: 17px; font-weight: 600; letter-spacing: -.4px; }
   .header-context { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .header-context::before { content: "/"; color: var(--subtle); margin-right: 18px; }
+  .header-context::before { content: "/"; color: var(--subtle); margin-right: 16px; }
   .header-actions { display: flex; gap: 8px; align-items: center; margin-left: auto; }
-  .header-actions select { max-width: 180px; border-color: transparent; }
+  .header-actions .select-control { max-width: 180px; }
+  .header-actions select { border-color: transparent; background: transparent; }
   .new-script { border-color: var(--line); white-space: nowrap; }
-  .new-script span { margin-right: 6px; color: var(--muted); }
-  .account { display: flex; align-items: center; gap: 8px; margin-left: 12px; }
+  .new-script span { color: var(--muted); }
+  .account { display: flex; align-items: center; gap: 8px; margin-left: 8px; }
   .account-name { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
-  .gallery-layout { display: grid; grid-template-columns: 276px minmax(0, 1fr); flex: 1; min-height: 0; }
+  .gallery-layout { display: grid; grid-template-columns: 248px minmax(0, 1fr); flex: 1; min-height: 0; }
   .library-panel { display: flex; flex-direction: column; min-height: 0; background: var(--panel); border-right: 1px solid var(--line); }
-  .library-heading { display: flex; align-items: center; gap: 8px; padding: 20px 20px 12px; }
-  .library-heading h2 { margin: 0; font-size: 13px; font-weight: 600; }
-  .library-count { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
-  .refresh-button { margin-left: auto; color: var(--muted); min-height: 28px; padding: 3px 0 3px 8px; font-size: 12px; }
-  .library-search { position: relative; margin: 0 16px 12px; }
-  .search-input { width: 100%; background: var(--page); padding: 9px 38px 9px 12px; }
+  .library-heading { display: flex; align-items: center; gap: 8px; padding: 10px 12px 6px; }
+  .library-heading h2 { margin: 0; font-size: 12px; font-weight: 500; color: var(--muted); }
+  .library-count { font-size: 12px; color: var(--subtle); font-variant-numeric: tabular-nums; }
+  .refresh-button { margin-left: auto; color: var(--muted); height: 28px; min-height: 28px; padding: 3px 0 3px 8px; font-size: 12px; }
+  .library-search { position: relative; margin: 0 12px 8px; }
+  .search-input { width: 100%; padding-right: 32px; }
   .search-input::placeholder { color: var(--subtle); }
   .search-input::-webkit-search-cancel-button { display: none; }
-  .clear-search { position: absolute; right: 0; top: 0; bottom: 0; width: 36px; padding: 0; color: var(--muted); font-size: 20px; }
-  .scope-control { margin: 0 16px 12px; display: flex; }
-  .scope-control select { width: 100%; color: var(--muted); background: transparent; border-color: transparent; padding-left: 0; }
-  .library-filters { display: flex; gap: 16px; padding: 0 20px; border-bottom: 1px solid var(--line); }
-  .library-filters button { padding: 7px 0 10px; border-bottom: 2px solid transparent; color: var(--muted); }
-  .library-filters button[aria-pressed="true"] { color: var(--text); border-bottom-color: var(--text); }
-  .artifact-list { overflow: auto; flex: 1; min-height: 0; padding: 10px 8px; }
-  .artifact-row { display: flex; align-items: center; gap: 11px; width: 100%; min-height: 56px; text-align: left; padding: 10px 12px; border-left: 2px solid transparent; }
-  .artifact-row[aria-current="true"] { background: var(--selected); border-left-color: #d4d7da; }
-  .artifact-icon { display: grid; place-items: center; flex: 0 0 26px; width: 26px; height: 28px; border: 1px solid #545a60; color: var(--muted); font: 11px/1 "SFMono-Regular", Consolas, monospace; }
-  .artifact-icon[data-kind="artifact"]::before { content: ""; width: 12px; height: 10px; border: 1px solid currentColor; border-top-width: 3px; }
-  .artifact-row-copy { min-width: 0; }
-  .artifact-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
-  .workspace-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11px; margin-top: 2px; }
-  .library-footer { padding: 12px 20px; border-top: 1px solid var(--line); color: var(--subtle); font-size: 11px; }
+  .clear-search { position: absolute; right: 0; top: 0; bottom: 0; width: 32px; padding: 0; color: var(--muted); font-size: 18px; }
+  .scope-control { margin: 0 12px 8px; display: flex; }
+  .scope-control .select-control { width: 100%; }
+  .scope-control select { color: var(--muted); background: transparent; border-color: transparent; padding-left: 0; }
+  .scope-control .select-chevron { right: 8px; }
+  .library-filters { display: flex; gap: 2px; padding: 0 8px 8px; border-bottom: 1px solid var(--line); }
+  .library-filters button { height: 28px; min-height: 28px; padding: 3px 8px; font-size: 12px; color: var(--muted); }
+  .library-filters button[aria-pressed="true"] { color: var(--text); background: var(--raised); }
+  .artifact-list { overflow: auto; flex: 1; min-height: 0; padding: 0; }
+  .artifact-row { display: flex; justify-content: flex-start; align-items: center; gap: 8px; width: 100%; height: auto; min-height: 34px; text-align: left; padding: 6px 12px; border: 0; }
+  .artifact-row[aria-current="true"] { background: var(--selected); }
+  .artifact-row-copy { min-width: 0; flex: 1; }
+  .artifact-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; }
+  .row-kind { flex-shrink: 0; color: var(--subtle); font-size: 11px; }
+  .workspace-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--subtle); font-size: 11px; }
+  .library-footer { padding: 8px 12px; border-top: 1px solid var(--line); color: var(--subtle); font-size: 11px; }
+  .library-footer details { margin-top: 4px; }
+  .library-footer summary { color: var(--muted); min-height: 24px; padding: 2px 0; }
+  .library-footer p { margin: 6px 0; font-size: 12px; }
   .artifact-detail { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-  .detail-header { display: flex; gap: 20px; align-items: center; justify-content: space-between; padding: 20px 28px 16px; }
+  .detail-header { display: flex; gap: 16px; align-items: center; justify-content: space-between; padding: 12px 20px; flex-shrink: 0; }
   .detail-title { min-width: 0; }
-  .detail-eyebrow { margin: 0 0 4px; color: var(--muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
-  .detail-title h1 { margin: 0; font-size: 21px; line-height: 1.3; font-weight: 550; letter-spacing: -.5px; overflow-wrap: anywhere; }
+  .detail-eyebrow { margin: 0 0 2px; color: var(--muted); font-size: 11px; }
+  .detail-title h1 { margin: 0; font-size: 19px; line-height: 1.3; font-weight: 550; letter-spacing: -.35px; overflow-wrap: anywhere; }
   .detail-title h1:focus { outline: none; }
-  .detail-actions { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+  .detail-actions { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; justify-content: flex-end; }
   .detail-actions > :is(button, a) { white-space: nowrap; }
-  .download-link { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 36px; padding: 7px 10px; text-decoration: none; }
-  .detail-actions .open-link { margin-left: 8px; background: var(--text); color: var(--page); padding-inline: 14px; }
-  .detail-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 0 28px; border-bottom: 1px solid var(--line); }
-  .view-control { display: flex; align-items: stretch; gap: 22px; }
-  .view-control button { padding: 12px 0; border-bottom: 2px solid transparent; color: var(--muted); }
-  .view-control button[aria-pressed="true"] { color: var(--text); border-bottom-color: var(--text); }
-  .script-view-label { padding-block: 12px; color: var(--muted); }
-  .revision-control { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
-  .version-select { max-width: 280px; border-color: transparent; background: transparent; color: var(--text); }
+  .download-link { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; min-height: 32px; line-height: 20px; padding: 5px 10px; border: 1px solid transparent; text-decoration: none; }
+  .detail-actions .open-link { margin-left: 6px; background: var(--text); color: var(--page); }
+  .detail-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 4px 12px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
+  .view-control { display: flex; align-items: center; gap: 2px; }
+  .view-control button { padding: 5px 10px; color: var(--muted); }
+  .view-control button[aria-pressed="true"] { color: var(--text); background: var(--raised); }
+  .revision-control { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
+  .version-select { width: 240px; max-width: 240px; }
+  .version-select select { border-color: transparent; background: transparent; color: var(--text); }
   .detail-actions button[aria-expanded="true"] { background: var(--raised); }
   .back-library, .mobile-more { display: none; }
   .mobile-more { position: relative; }
-  .mobile-more summary { padding: 10px; list-style: none; }
+  .mobile-more summary { padding: 5px 10px; list-style: none; }
   .mobile-more summary::-webkit-details-marker { display: none; }
   .mobile-more .download-link { position: absolute; top: 100%; right: 0; min-width: 160px; background: var(--panel); border: 1px solid var(--line); z-index: 2; }
   .detail-disclosure { flex-shrink: 0; max-height: 42vh; overflow: auto; background: var(--panel); border-bottom: 1px solid var(--line); }
-  .link-settings, .script-fields { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
-  .link-settings { padding: 18px 28px; }
-  .link-settings label { display: flex; align-items: center; gap: 8px; }
-  .link-settings button, .script-panel button { border-color: var(--line); background: var(--raised); }
+  .link-settings, .script-fields { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
+  .link-settings { padding: 12px 20px; }
+  .link-settings label, .script-fields label { display: flex; flex-direction: column; align-items: stretch; gap: 4px; min-width: 0; color: var(--muted); font-size: 12px; }
+  .link-settings :is(button, .download-link), .script-panel button { border-color: var(--line); background: var(--raised); }
+  .library-move { padding: 12px 20px; }
+  .library-move p { margin: 0 0 10px; max-width: 720px; }
+  .library-move button { border-color: var(--line); }
+  .link-note { flex-basis: 100%; margin: 0; color: var(--muted); font-size: 12px; }
+  .link-settings [role="status"] { align-self: center; }
   .link-settings .muted { font-size: 12px; }
-  .script-panel { width: 100%; padding: 24px 28px; overflow: auto; }
-  .script-panel label { display: block; color: var(--muted); font-size: 12px; }
+  .script-panel { display: flex; flex-direction: column; flex: 1; width: 100%; min-width: 0; min-height: 0; overflow: hidden; }
+  .source-form { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
+  .source-form > .script-fields { padding: 12px 16px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
+  .source-actions { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--line); flex-shrink: 0; }
+  .source-actions p { margin: 0; color: var(--muted); }
+  .source-actions .source-readonly { margin-right: auto; }
+  .script-panel label { color: var(--muted); font-size: 12px; }
   .script-panel :is(input, select) { color: var(--text); }
-  .script-panel textarea, .artifact-execution textarea { display: block; width: 100%; min-height: 80px; margin: 8px 0 16px; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 0; padding: 14px; font: 13px/1.7 "SFMono-Regular", Consolas, monospace; resize: vertical; }
-  .script-panel .source-editor { min-height: 320px; }
-  .project-editor > .script-fields { margin-bottom: 16px; }
-  .script-panel details { margin: 20px 0; border-top: 1px solid var(--line); padding-top: 12px; }
-  summary { cursor: pointer; min-height: 36px; padding-block: 7px; color: var(--text); }
-  .script-panel pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 16px; border: 1px solid var(--line); background: var(--panel); }
-  .artifact-execution { padding: 12px 28px; }
-  .artifact-execution label { display: inline-block; margin: 8px 12px 8px 0; }
-  .artifact-execution label:has(textarea) { display: block; }
+  .project-editor { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
+  .project-file-bar { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; padding: 6px 12px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
+  .project-file-bar button { background: transparent; border-color: transparent; font: 12px/20px "SFMono-Regular", Consolas, monospace; }
+  .project-file-bar button[aria-pressed="true"] { background: var(--raised); }
+  .source-code-editor { display: flex; flex-direction: column; flex: 1; min-height: 180px; min-width: 0; }
+  .source-code-surface { flex: 1; min-height: 0; min-width: 0; }
+  .source-code-status { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 16px; border-top: 1px solid var(--line); color: var(--subtle); font-size: 11px; flex-shrink: 0; }
+  .project-file-management, .project-dependencies { flex-shrink: 0; border-top: 1px solid var(--line); padding: 0 16px; max-height: 35vh; overflow: auto; }
+  .project-file-management > div { padding-bottom: 10px; }
+  .project-file-management details { margin: 0; }
+  .project-file-management p { margin: 6px 0; }
+  .script-panel textarea, .artifact-execution textarea { display: block; width: 100%; min-height: 80px; margin: 6px 0 12px; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 0; padding: 10px; font: 13px/1.6 "SFMono-Regular", Consolas, monospace; resize: vertical; }
+  summary { cursor: pointer; min-height: 32px; padding-block: 5px; color: var(--text); }
+  .script-panel pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; border: 1px solid var(--line); background: var(--panel); }
+  .script-activity, .artifact-execution { flex: 1; min-height: 0; overflow: auto; padding: 16px 20px; }
+  .script-activity p { color: var(--muted); }
+  .script-activity label { display: block; }
+  .script-activity details + details { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 8px; }
+  .artifact-execution label { display: inline-flex; flex-direction: column; gap: 4px; margin: 8px 12px 8px 0; }
+  .artifact-execution label:has(textarea) { display: flex; margin-right: 0; }
   .artifact-execution button { border-color: var(--line); }
-  .artifact-execution table { border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 12px; }
+  .artifact-execution table { border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 12px; width: 100%; }
   .artifact-execution :is(td, th) { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--line); }
   .artifact-execution p { color: var(--muted); }
   .muted { color: var(--muted); }
   .artifact-stage { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
+  .source-stage { display: flex; flex: 1; min-width: 0; min-height: 0; }
+  .preview-stage { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; }
   .preview-frame { display: block; width: 100%; height: 100%; border: 0; }
   .preview-loading { position: absolute; inset: 0; display: grid; place-items: center; background: var(--page); color: var(--muted); pointer-events: none; }
-  .source-code { flex: 1; min-width: 0; margin: 0; padding: 24px 28px; overflow: auto; font: 13px/1.7 "SFMono-Regular", Consolas, monospace; tab-size: 2; }
   .state-message { margin: 0; padding: 12px; color: var(--muted); }
-  .library-empty { padding: 24px 12px; }
+  .library-empty { padding: 20px 12px; }
   .library-empty p { margin: 0 0 8px; color: var(--muted); }
   .library-empty button { border-color: var(--line); }
-  .empty-detail { margin: auto; max-width: 400px; padding: 32px; text-align: center; }
+  .empty-detail { margin: auto; max-width: 400px; padding: 24px; text-align: center; }
   .empty-detail h2 { margin: 0 0 8px; font-size: 18px; font-weight: 500; }
   .empty-detail p { margin: 0; color: var(--muted); }
   .error-message { color: #f2a5a5; }
-  .refresh-error { padding: 12px 24px; margin: 0; border-bottom: 1px solid var(--line); background: var(--panel); }
+  .source-form > .error-message, .script-panel > .error-message { margin: 0; padding: 8px 16px; flex-shrink: 0; }
+  .refresh-error { padding: 10px 16px; margin: 0; border-bottom: 1px solid var(--line); background: var(--panel); }
   @media (hover: hover) and (pointer: fine) {
     button:hover:not(:disabled), .download-link:hover { background: var(--raised); }
     .artifact-row[aria-current="true"]:hover { background: var(--selected); }
     .detail-actions .open-link:hover { background: #fff; }
+    .view-control button:hover:not([aria-pressed="true"]), .library-filters button:hover:not([aria-pressed="true"]) { color: var(--text); background: transparent; }
   }
   @media (max-width: 1100px) {
-    .gallery-layout { grid-template-columns: 244px minmax(0, 1fr); }
-    .detail-header { align-items: flex-start; gap: 12px; padding-inline: 20px; }
-    .detail-actions { max-width: 270px; }
-    .detail-toolbar { padding-inline: 20px; }
-    .revision-control > span { display: none; }
+    .gallery-layout { grid-template-columns: 220px minmax(0, 1fr); }
+    .detail-header { align-items: flex-start; gap: 10px; padding-inline: 16px; }
+    .detail-actions { max-width: 300px; }
+    .revision-control > span:not(.select-control) { display: none; }
     .account-name { display: none; }
   }
   @media (max-width: 760px) {
-    .app-header { min-height: 60px; padding: 10px 16px; gap: 12px; }
-    .wordmark { font-size: 18px; }
+    .app-header { min-height: 52px; padding: 6px 12px; gap: 10px; }
+    .wordmark { font-size: 17px; }
     .header-context { display: none; }
     .header-actions { gap: 4px; }
-    .header-actions select { max-width: 130px; }
+    .header-actions .select-control { max-width: 130px; }
     .account { margin-left: 0; }
     .new-script { font-size: 12px; }
     .gallery-layout { display: flex; flex: 1; }
     .library-panel, .artifact-detail { width: 100%; flex: 1; }
     .library-panel { border-right: 0; }
-    .library-heading { padding-top: 24px; }
-    .artifact-row { min-height: 68px; }
-    .artifact-name { font-size: 15px; }
-    .workspace-name { font-size: 12px; }
-    .back-library { display: inline-flex; align-self: flex-start; margin: 10px 10px 0; min-height: 44px; color: var(--muted); }
-    .detail-header { flex-direction: column; padding: 8px 20px 12px; }
+    .artifact-row { min-height: 44px; }
+    .artifact-name { font-size: 14px; }
+    .back-library { display: inline-flex; align-self: flex-start; margin: 4px 4px 0; min-height: 36px; color: var(--muted); }
+    .detail-header { flex-direction: column; padding: 4px 12px 8px; }
     .detail-actions { max-width: none; justify-content: flex-start; margin-left: -10px; }
-    .detail-title h1 { font-size: 22px; }
-    .detail-toolbar { gap: 4px; padding-inline: 20px; }
-    .version-select { max-width: 152px; padding-inline: 4px; }
-    .view-control { gap: 16px; }
-    .revision-control { min-width: 0; }
+    .detail-title h1 { font-size: 19px; }
+    .detail-toolbar { gap: 4px; padding-inline: 4px; }
+    .version-select { width: 150px; max-width: 150px; }
+    .version-select select { padding-left: 6px; }
+    .view-control { gap: 0; }
+    .view-control button { padding-inline: 8px; }
+    .revision-control { min-width: 0; margin-left: auto; }
     .desktop-download { display: none; }
     .mobile-more { display: block; }
-    .script-panel, .link-settings { padding: 20px; }
-    .script-panel .source-editor { min-height: 260px; }
-    .script-fields > :is(input, label) { max-width: 100%; }
+    .link-settings { padding: 12px; }
+    .script-fields > :is(input, label, .select-control) { max-width: 100%; }
     .link-settings label { flex: 1; min-width: 0; }
     .link-settings input { width: 100%; }
-    .link-settings button, .detail-actions > :is(button, a) { min-height: 44px; }
-    .scope-control select, .refresh-button, .library-filters button { min-height: 44px; }
-    .library-filters { gap: 24px; }
     .detail-disclosure { max-height: 45dvh; }
+    .project-file-bar { padding-inline: 6px; }
+    .source-actions { padding: 8px 12px; }
+    .source-code-status { padding-inline: 12px; }
+    .source-code-status .editor-shortcuts { display: none; }
+    .script-activity, .artifact-execution { padding: 12px; }
   }
   @media (pointer: coarse) {
-    button, input, select, .download-link, summary { min-height: 44px; }
+    button, input, select, .download-link, summary { height: auto; min-height: 44px; }
     input, select, textarea, .script-panel textarea { font-size: 16px; }
+    .search-input { padding-block: 11px; }
+    .clear-search { height: 44px; }
   }
 `;
 
@@ -247,7 +286,8 @@ function App() {
   const [query, setQuery] = useState("");
   const [kindFilter, setKindFilter] = useState<KindFilter>("all");
   const [showLinks, setShowLinks] = useState(false);
-  const [showActivity, setShowActivity] = useState(false);
+  const [showMove, setShowMove] = useState(false);
+  const [sourceVisited, setSourceVisited] = useState<string | null>(null);
   const [mobileDetail, setMobileDetail] = useState(false);
   const [narrowLayout, setNarrowLayout] = useState(() => window.matchMedia("(max-width: 760px)").matches);
   const detailHeading = useRef<HTMLHeadingElement>(null);
@@ -329,7 +369,8 @@ function App() {
         if (remix) return payload.artifacts.find(artifact => (artifact.kind ?? "artifact") === remix.kind && artifact.name === remix.name && artifact.workspace === remix.workspace)?.key ?? current;
         if (created) return payload.artifacts.find(artifact => artifact.kind === "script" && artifact.name === created)?.key ?? current;
         if (current && payload.artifacts.some((artifact) => artifact.key === current)) return current;
-        return payload.artifacts[0]?.key ?? null;
+        const selection = new URLSearchParams(window.location.search);
+        return payload.artifacts.find(item => item.name === selection.get("name") && item.workspace === (selection.get("workspace") ?? payload.workspace) && (item.kind ?? "artifact") === (selection.get("kind") ?? "artifact"))?.key ?? payload.artifacts[0]?.key ?? null;
       });
     } catch (error) {
       if (controller.signal.aborted || request !== galleryRequest.current) return;
@@ -372,6 +413,10 @@ function App() {
     [gallery, selectedKey],
   );
 
+  const activeTab: DetailTab = selectedArtifact?.kind === "script"
+    ? tab === "preview" ? "source" : tab
+    : tab === "requests" || tab === "secrets" ? "preview" : tab;
+
   const sortedVersions = useMemo(
     () => [...(selectedArtifact?.versions ?? [])].sort((left, right) => right.revision - left.revision),
     [selectedArtifact],
@@ -388,6 +433,10 @@ function App() {
   useEffect(() => {
     setSelectedVersion(resolvedVersion);
   }, [resolvedVersion]);
+
+  useEffect(() => {
+    if (activeTab === "source" && selectedArtifact && resolvedVersion) setSourceVisited(`${selectedArtifact.key}:${resolvedVersion}`);
+  }, [activeTab, selectedArtifact?.key, resolvedVersion]);
 
   const previewUrl = selectedArtifact && selectedArtifact.kind !== "script" && resolvedVersion
     ? `${artifactUrl("/gallery/preview", selectedArtifact, resolvedVersion)}&refresh=${refreshEpoch}`
@@ -446,7 +495,7 @@ function App() {
   }, [selectedArtifact]);
 
   useEffect(() => {
-    if (tab !== "source" || gallery?.capabilities?.links || !selectedArtifact || selectedArtifact.kind === "script" || !resolvedVersion) {
+    if (activeTab !== "source" || gallery?.capabilities?.links || !selectedArtifact || selectedArtifact.kind === "script" || !resolvedVersion) {
       setSource({ status: "idle", text: "", error: "" });
       return;
     }
@@ -478,17 +527,17 @@ function App() {
     })();
 
     return () => controller.abort();
-  }, [resolvedVersion, selectedArtifact, tab, gallery?.capabilities?.links]);
+  }, [resolvedVersion, selectedArtifact, activeTab, gallery?.capabilities?.links]);
 
   useEffect(() => {
-    if (tab === "preview") setPreviewLoading(true);
-  }, [previewUrl, tab]);
+    if (activeTab === "preview") setPreviewLoading(true);
+  }, [previewUrl, activeTab]);
 
   const selectArtifact = (artifact: GalleryArtifact) => {
     if (narrowLayout && !mobileDetail) setPreviewLoading(true);
     setMobileDetail(true);
     setShowLinks(false);
-    setShowActivity(false);
+    setShowMove(false);
     setCreatingScript(false);
     setRemixing(false);
     setSelectedKey(artifact.key);
@@ -534,12 +583,12 @@ function App() {
           <span className="wordmark">Artifacts</span>
           {gallery?.workspace ? <span className="header-context" title={gallery.workspace}>{gallery.workspace}</span> : null}
           <div className="header-actions">
-            {gallery?.libraryScope ? <select aria-label="Library" value={gallery.libraryScope} onChange={event => {
+            {gallery?.libraryScope ? <Select aria-label="Library" value={gallery.libraryScope} onChange={event => {
               const url = new URL(window.location.href);
               url.searchParams.set("library", event.target.value);
               window.location.assign(url.href);
-            }}><option value="private">My library</option><option value="team">Team library</option></select> : null}
-            {gallery?.capabilities?.scripts ? <button className="new-script" onClick={() => { setCreatingScript(true); setRemixing(false); setShowLinks(false); setShowActivity(false); setMobileDetail(true); }}><span aria-hidden="true">+</span>New script</button> : null}
+            }}><option value="private">Personal library</option><option value="team">Team library</option></Select> : null}
+            {gallery?.capabilities?.scripts ? <button className="new-script" onClick={() => { setCreatingScript(true); setRemixing(false); setShowLinks(false); setShowMove(false); setMobileDetail(true); }}><span aria-hidden="true">+</span>New script</button> : null}
             {user ? <div className="account">
               <span className="account-name" title={user.email}>{user.name}</span>
               <button type="button" disabled={signingOut} onClick={() => void signOut()}>{signingOut ? "Signing out…" : "Sign out"}</button>
@@ -565,9 +614,9 @@ function App() {
               {query ? <button type="button" className="clear-search" aria-label="Clear search" onClick={() => { setQuery(""); searchInput.current?.focus(); }}><span aria-hidden="true">×</span></button> : null}
             </div>
             <div className="scope-control">
-              <select aria-label="Project scope" value={scope} onChange={event => setScope(event.target.value as Scope)}>
+              <Select aria-label="Project scope" value={scope} onChange={event => setScope(event.target.value as Scope)}>
                 <option value="current">Current project</option><option value="all">All projects</option>
-              </select>
+              </Select>
             </div>
             {gallery?.capabilities?.scripts ? <div className="library-filters" role="group" aria-label="Filter library">
               {([['all', 'All'], ['artifact', 'Artifacts'], ['script', 'Scripts']] as const).map(([value, label]) =>
@@ -585,27 +634,29 @@ function App() {
                 : filteredArtifacts.map(artifact => <button className="artifact-row" type="button" key={artifact.key}
                   title={`${artifact.workspace}/${artifact.name}`} aria-current={!creatingScript && artifact.key === selectedKey ? "true" : undefined}
                   onClick={() => selectArtifact(artifact)} onFocus={event => event.currentTarget.scrollIntoView({ block: "nearest" })}>
-                  <span className="artifact-icon" data-kind={artifact.kind ?? "artifact"} aria-hidden="true">{artifact.kind === "script" ? "/>" : null}</span>
                   <span className="artifact-row-copy">
                     <span className="artifact-name">{artifact.name}</span>
-                    {artifact.kind === "script" ? <span className="workspace-name">Script{artifact.slug ? ` · /${artifact.slug}` : ""}</span> : null}
                     {scope === "all" ? <span className="workspace-name">{artifact.workspace}</span> : null}
                     {!artifact.working ? <span className="workspace-name">Archived</span> : null}
                   </span>
+                  {artifact.kind === "script" ? <span className="row-kind">Script</span> : null}
                 </button>)}
             </div>
-            <div className="library-footer">{query || kindFilter !== "all" ? `${filteredArtifacts.length} of ${gallery?.artifacts.length ?? 0} items` : scope === "all" ? "Across all projects" : "In this project"}</div>
+            <div className="library-footer">{query || kindFilter !== "all" ? `${filteredArtifacts.length} of ${gallery?.artifacts.length ?? 0} items` : scope === "all" ? "Across all projects" : "In this project"}
+              {gallery?.capabilities?.scripts ? <details><summary>Artifacts and scripts</summary><p>Artifacts are interactive apps with a UI and optional backend. Scripts are HTTP handlers that return a response when their URL is called.</p><p>Both have source files, dependencies, history, and their own URL.</p></details> : null}
+            </div>
           </aside>
 
           <div className="artifact-detail" hidden={narrowLayout && !mobileDetail}>
             <button className="back-library" type="button" onClick={() => setMobileDetail(false)} aria-label="Back to library"><span aria-hidden="true">←&nbsp;</span> Library</button>
             <div className="detail-header">
               <div className="detail-title">
-                <p className="detail-eyebrow">{creatingScript ? "Create" : selectedArtifact?.kind === "script" ? "Script" : selectedArtifact ? "Artifact" : "Library"}</p>
+                <p className="detail-eyebrow">{creatingScript ? "Create" : selectedArtifact?.kind === "script" ? "HTTP script" : selectedArtifact ? "Interactive artifact" : "Library"}</p>
                 <h1 ref={detailHeading} tabIndex={-1}>{creatingScript ? "New script" : selectedArtifact?.name ?? "Your artifacts"}</h1>
               </div>
               {!creatingScript && selectedArtifact && resolvedVersion ? <div className="detail-actions">
                 {gallery?.capabilities?.links ? <button type="button" aria-expanded={showLinks} aria-controls="link-settings-panel" onClick={() => setShowLinks(value => !value)}>Link settings</button> : null}
+                {gallery?.capabilities?.moves && gallery.libraryScope ? <button type="button" aria-expanded={showMove} aria-controls="library-move-panel" onClick={() => { setShowMove(value => !value); setShowLinks(false); setRemixing(false); }}>Move</button> : null}
                 <button type="button" onClick={() => setRemixing(value => !value)} aria-expanded={remixing}>Remix</button>
                 <a className="download-link desktop-download" href={downloadUrl} download onClick={downloadSource}>Download source</a>
                 <details className="mobile-more"><summary aria-label="More actions">More</summary><a className="download-link" href={downloadUrl} download onClick={downloadSource}>Download source</a></details>
@@ -613,32 +664,38 @@ function App() {
               </div> : null}
             </div>
             {!creatingScript && selectedArtifact && resolvedVersion ? <div className="detail-toolbar">
-              {selectedArtifact.kind !== "script" ? <div className="view-control" role="group" aria-label="Artifact view">
-                <button type="button" aria-pressed={tab === "preview"} aria-controls="artifact-panel" onClick={() => setTab("preview")}>Preview</button>
-                <button type="button" aria-pressed={tab === "source"} aria-controls="artifact-panel" onClick={() => setTab("source")}>Source</button>
-                {gallery?.capabilities?.links ? <button type="button" aria-expanded={showActivity} aria-controls="execution-panel" onClick={() => setShowActivity(value => !value)}>Activity</button> : null}
-              </div> : <span className="script-view-label">Source & requests</span>}
-              <label className="revision-control"><span>Version</span><select className="version-select" aria-label="Version" value={resolvedVersion} onChange={event => setSelectedVersion(event.target.value)}>
+              <div className="view-control" role="group" aria-label={selectedArtifact.kind === "script" ? "Script view" : "Artifact view"}>
+                {(selectedArtifact.kind === "script"
+                  ? [["source", "Source"], ["requests", "Requests"], ["activity", "Activity"], ["secrets", "Secrets"]] as const
+                  : [["preview", "Preview"], ["source", "Source"], ...(gallery?.capabilities?.links ? [["activity", "Activity"] as const] : [])] as const
+                ).map(([value, label]) => <button key={value} type="button" aria-pressed={activeTab === value} aria-controls="artifact-panel" onClick={() => setTab(value)}>{label}</button>)}
+              </div>
+              <label className="revision-control"><span>Version</span><Select className="version-select" aria-label="Version" value={resolvedVersion} onChange={event => setSelectedVersion(event.target.value)}>
                 {selectedArtifact.working ? <option value={WORKING_VERSION}>Working copy</option> : null}
                 {sortedVersions.map(version => <option key={version.id} value={version.id}>Revision {version.revision} · {formatDate(version.createdAt)}</option>)}
-              </select></label>
+              </Select></label>
             </div> : null}
+            {showMove && !creatingScript && selectedArtifact && gallery?.libraryScope && gallery.capabilities?.moves ? <div id="library-move-panel" className="detail-disclosure"><MovePanel key={selectedArtifact.key} artifact={selectedArtifact} library={gallery.libraryScope} onCancel={() => setShowMove(false)} /></div> : null}
             {remixing && !creatingScript && selectedArtifact && resolvedVersion ? <div className="detail-disclosure"><RemixPanel key={selectedArtifact.key + resolvedVersion} artifact={selectedArtifact} version={resolvedVersion} onCancel={() => setRemixing(false)} onSaved={async name => { createdRemix.current = {name, workspace:selectedArtifact.workspace, kind:selectedArtifact.kind ?? "artifact"}; await loadGallery(); setSelectedVersion("working"); setQuery(""); setKindFilter("all"); setRemixing(false); }} /></div> : null}
             {!creatingScript && selectedArtifact && gallery?.capabilities?.links ? <div id="link-settings-panel" className="detail-disclosure" hidden={!showLinks}><LinkSettings key={selectedArtifact.key} artifact={selectedArtifact} onSaved={loadGallery} /></div> : null}
-            {!creatingScript && selectedArtifact && selectedArtifact.kind !== "script" && gallery?.capabilities?.links ? <div id="execution-panel" className="detail-disclosure" hidden={!showActivity}><div className="artifact-execution"><ExecutionControls key={selectedArtifact.key + "execution"} workspace={selectedArtifact.workspace} name={selectedArtifact.name} kind="artifact" /></div></div> : null}
-            <section id="artifact-panel" className="artifact-stage" aria-label={selectedArtifact?.kind === "script" || creatingScript ? "Script editor" : tab === "preview" ? "Artifact preview" : "Artifact source"}>
-              {creatingScript ? <ScriptPanel key="new-script" workspace={gallery?.workspace ?? "default"} onCancel={() => setCreatingScript(false)} onSaved={async name => { createdScriptName.current = name; await loadGallery(); setCreatingScript(false); setSelectedVersion("working"); setQuery(""); setKindFilter("all"); }} />
-                : selectedArtifact?.kind === "script" ? <ScriptPanel key={`${selectedArtifact.key}:${resolvedVersion}`} artifact={selectedArtifact} workspace={selectedArtifact.workspace} version={resolvedVersion ?? undefined} sourceUrl={resolvedVersion ? artifactUrl("/api/source", selectedArtifact, resolvedVersion) : undefined} onSaved={async () => { setSelectedVersion("working"); await loadGallery(); }} />
-                : !selectedArtifact ? <div className="empty-detail"><h2>{loading ? "Loading your library…" : "A place for your work"}</h2><p>{loading ? "Your saved artifacts will appear shortly." : "Select an artifact from the library to preview it, explore its source, or revisit a revision."}</p></div>
+            <section id="artifact-panel" className="artifact-stage" aria-label={selectedArtifact?.kind === "script" || creatingScript ? "Script editor" : activeTab === "preview" ? "Artifact preview" : activeTab === "activity" ? "Artifact activity" : "Artifact source"}>
+              {creatingScript ? <ScriptPanel key="new-script" workspace={gallery?.workspace ?? "default"} onCancel={() => setCreatingScript(false)} onSaved={async name => { createdScriptName.current = name; await loadGallery(); setCreatingScript(false); setSelectedVersion("working"); setTab("source"); setQuery(""); setKindFilter("all"); }} />
+                : selectedArtifact?.kind === "script" ? <ScriptPanel key={`${selectedArtifact.key}:${resolvedVersion}`} artifact={selectedArtifact} workspace={selectedArtifact.workspace} version={resolvedVersion ?? undefined} view={activeTab as ScriptView} sourceUrl={resolvedVersion ? artifactUrl("/api/source", selectedArtifact, resolvedVersion) : undefined} onSaved={async () => { setSelectedVersion("working"); await loadGallery(); }} />
+                : !selectedArtifact ? <div className="empty-detail"><h2>{loading ? "Loading your library…" : "Your library"}</h2><p>{loading ? "Your saved artifacts will appear shortly." : "Select an artifact or script to open it."}</p></div>
                 : !resolvedVersion ? <div className="empty-detail"><h2>No readable version</h2><p>This artifact has no saved source available to preview.</p></div>
-                : tab === "preview" ? <>
-                  {previewLoading ? <div className="preview-loading" role="status">Loading preview…</div> : null}
-                  {!narrowLayout || mobileDetail ? <iframe ref={previewFrame} key={previewUrl} className="preview-frame" src={previewUrl} title={`Preview of ${selectedArtifact.name}`} sandbox="allow-scripts" onLoad={() => setPreviewLoading(false)} /> : null}
-                </>
-                : gallery?.capabilities?.links ? <ArtifactSourcePanel key={`${selectedArtifact.key}:${resolvedVersion}`} artifact={selectedArtifact} version={resolvedVersion} sourceUrl={artifactUrl("/api/source", selectedArtifact, resolvedVersion)} onSaved={async () => { setSelectedVersion("working"); await loadGallery(); }} />
-                : source.status === "ready" ? <pre className="source-code" tabIndex={0} aria-label={`Source of ${selectedArtifact.name}`}><code>{source.text}</code></pre>
-                : source.status === "error" ? <p role="alert" className="state-message error-message">{source.error}</p>
-                : <p className="state-message" role="status">Loading source…</p>}
+                : <>
+                  {activeTab === "preview" ? <div className="preview-stage">
+                    {previewLoading ? <div className="preview-loading" role="status">Loading preview…</div> : null}
+                    {!narrowLayout || mobileDetail ? <iframe ref={previewFrame} key={previewUrl} className="preview-frame" src={previewUrl} title={`Preview of ${selectedArtifact.name}`} sandbox="allow-scripts" onLoad={() => setPreviewLoading(false)} /> : null}
+                  </div> : null}
+                  {sourceVisited === `${selectedArtifact.key}:${resolvedVersion}` || activeTab === "source" ? <div className="source-stage" hidden={activeTab !== "source"}>
+                    {gallery?.capabilities?.links ? <ArtifactSourcePanel key={`${selectedArtifact.key}:${resolvedVersion}`} artifact={selectedArtifact} version={resolvedVersion} sourceUrl={artifactUrl("/api/source", selectedArtifact, resolvedVersion)} onSaved={async () => { setSelectedVersion("working"); await loadGallery(); }} />
+                      : source.status === "ready" ? <SourceEditor filename={`${selectedArtifact.name}.artifact.tsx`} value={source.text} onChange={() => {}} readOnly />
+                      : source.status === "error" ? <p role="alert" className="state-message error-message">{source.error}</p>
+                      : <p className="state-message" role="status">Loading source…</p>}
+                  </div> : null}
+                  {gallery?.capabilities?.links ? <div id="execution-panel" className="artifact-execution" hidden={activeTab !== "activity"}><ExecutionControls key={selectedArtifact.key + "execution"} workspace={selectedArtifact.workspace} name={selectedArtifact.name} kind="artifact" /></div> : null}
+                </>}
             </section>
           </div>
         </div>

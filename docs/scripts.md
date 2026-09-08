@@ -122,3 +122,21 @@ Schedules execute the latest validated revision, not an invalid draft or a histo
 `script_runs` and `artifact_runs` expose the latest 100 of up to 1,000 retained executions: revision, trigger, start/end times, duration, HTTP status and outcome. The gallery's **Run history** shows the same records. These records live in host-owned SQLite, separate from the user handler's database, and survive code updates and source restores. An `interrupted` record means completion is unknown and side effects may already have occurred.
 
 Script logs can be filtered by `run_id` from `script_runs`; the existing 100-entry log retention still applies. Script success describes the HTTP handler returning a response, not completion of `waitUntil` tasks or streamed response bodies. Artifact history includes response serialization; artifact console capture is not provided.
+
+## Moving between libraries
+
+In the hosted gallery, **Move to team** changes an item's owner from your personal
+library to the deployment's team. **Move to personal** moves a team item into the
+signed-in user's personal library, removing other team members' management access.
+Both artifacts and scripts retain their complete source history, helper modules,
+backend data, files, secrets, schedules, and existing URLs. The URL's **Private** or
+**Public** setting is separate and remains unchanged. Existing destination names
+cause a conflict; moves never replace another item.
+
+The authenticated HTTP operation is
+`POST /api/library/move?library=private&workspace=default` with
+`{"kind":"script","name":"handler","library":"team"}`. The query selects the
+current owner and the body selects the destination. Use `kind: "artifact"` for an
+artifact, and swap `private`/`team` for the reverse direction. A personal destination
+is always the caller's own library. Operations admitted before a move may finish,
+and existing file transfer grants remain valid until their usual expiry.

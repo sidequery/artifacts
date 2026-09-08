@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { editableProject, ProjectEditor } from "./project-editor";
 
 const project = { files: { "lib/helper.ts": "export const value = 1;" }, dependencies: { "lodash-es": "4.17.21" } };
-const entries = [{ id: "client", label: "Artifact source", source: "client" }, { id: "server", label: "Server source", source: "server" }];
+const entries = [{ id: "client", filename: "artifact.artifact.tsx", source: "client" }, { id: "server", filename: "artifact.artifact.server.ts", source: "server" }];
 const props = { entries, project, onProjectChange: () => {}, onEntryChange: () => {}, onValidityChange: () => {} };
 
 test("authoring snapshot retains every helper and dependency without uploading vendor lock files", () => {
@@ -17,8 +17,8 @@ test("authoring snapshot retains every helper and dependency without uploading v
 
 test("project source picker exposes both artifact entrypoints and stored helpers", () => {
   const markup = renderToStaticMarkup(<ProjectEditor {...props} />);
-  expect(markup).toContain('value="client"');
-  expect(markup).toContain('value="server"');
+  expect(markup).toContain('artifact.artifact.tsx');
+  expect(markup).toContain('artifact.artifact.server.ts');
   expect(markup).toContain('value="file:lib/helper.ts"');
   expect(markup).toContain("Add file");
   expect(markup).toContain("4.17.21");
@@ -29,6 +29,6 @@ test("historical project snapshots expose readable sources and dependencies with
   expect(markup).toContain('value="file:lib/helper.ts"');
   expect(markup).not.toContain("Add file");
   expect(markup).not.toContain("New helper file");
-  expect(markup.match(/readOnly=""/g)).toHaveLength(2);
+  expect(markup.match(/readOnly=""/g)).toHaveLength(1);
   expect(markup).not.toContain('select aria-label="Project file" disabled');
 });
