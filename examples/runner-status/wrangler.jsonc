@@ -1,0 +1,13 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "canvas-runner-status",
+  "main": "worker.ts",
+  "compatibility_date": "2026-09-07",
+  "durable_objects": { "bindings": [{ "name": "RUNNER_STATUS", "class_name": "RunnerStatus" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RunnerStatus"] }],
+  "vars": {
+    "RUNNER_ORG": "your-org",
+    "RUNNER_REPOS": "your-org/api,your-org/web",
+    "RUNNER_NAME_PREFIX": ""
+  }
+}

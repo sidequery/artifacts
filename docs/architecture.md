@@ -35,6 +35,13 @@ and revisions; `links.ts` owns slugs and active revision pointers; `backend.ts`
 and `script-backend.ts` execute code. Code edits retain the validation and atomic
 activation sequence before switching a working URL.
 
+Successful canvas edits persist both compiled client and server code in the
+library Durable Object before activating the revision. Each revision pins its
+compiled artifact, including its SDK/browser libraries and compiler identity.
+Gallery, standalone, MCP and backend reads load that artifact without invoking
+the compiler. Source-only revisions from older installations require an explicit
+`canvas_compile` backfill by name or version ID; source/history remain intact.
+
 ## Herdr integration
 
 `herdr-plugin.toml` declares the pane and actions. An action specifies the command

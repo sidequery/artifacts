@@ -29,6 +29,12 @@ for (const tool of CLOUD_MCP_TOOLS) {
       part: { type: "string", enum: ["client", "server"], default: "client", description: "Select browser TSX or native server TypeScript." },
     };
   }
+  if (tool.name === "canvas_compile") {
+    tool.description = "Compile and durably save the client/server bundle for a working canvas or an archived revision. Select name or version_id. Use this to prepare source-only revisions from older installations; reads never compile. Already compiled archived revisions keep their original bundle.";
+    tool.inputSchema.properties = { name: { type: "string" }, version_id: { type: "string" } };
+    delete tool.inputSchema.required;
+    tool.inputSchema.oneOf = [{ required: ["name"] }, { required: ["version_id"] }];
+  }
 }
 
 export const CANVAS_REQUEST_SCHEMA = {

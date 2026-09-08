@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { Miniflare } from "miniflare";
+import type { CompiledCanvas } from "./library";
 
 let runtime: Miniflare;
 
@@ -316,6 +317,7 @@ test("constructor migrates legacy draft and version tables without losing client
   const storage = await runtime.unsafeGetDurableObjectStorage("canvas-library-test", "CanvasLibrary", { name: library });
   await storage.exec("alter table drafts drop column server_source");
   await storage.exec("alter table versions drop column server_source");
+  await storage.exec("alter table versions drop column compiled_id");
   await runtime.unsafeEvictDurableObject("canvas-library-test", "CanvasLibrary", { name: library });
 
   const draft = await call<{ source: string; server_source: string | null }>("preview", { workspace: "legacy", name: "overview" }, library);
@@ -326,6 +328,70 @@ test("constructor migrates legacy draft and version tables without losing client
   const versionColumns = await storage.exec<{ name: string }>("pragma table_info(versions)");
   expect(draftColumns.map(column => column.name)).toContain("server_source");
   expect(versionColumns.map(column => column.name)).toContain("server_source");
+  expect(versionColumns.map(column => column.name)).toContain("compiled_id");
+  expect(version).toMatchObject({ compiled_id: null });
+});
+
+test("compiled pairs are immutable, scoped, runtime-specific and durable with large Unicode bundles", async () => {
+  const input = { workspace: "compiled", name: "overview", source: "client\n", server_source: "server\n", runtime: "sdk-a",
+    client_js: "a".repeat(16 * 1024 - 1) + "😀漢字".repeat(250_000), server_js: "server 😀".repeat(20_000) };
+  const saved = await call<CompiledCanvas>("saveCompiled", input);
+  expect(saved).toMatchObject({ runtime: input.runtime, client_js: input.client_js, server_js: input.server_js });
+  expect(await call("saveCompiled", input)).toEqual(saved);
+  await fails("saveCompiled", { ...input, client_js: "replacement" }, "immutable");
+  for (const selection of [{ workspace: "other", name: input.name }, { workspace: input.workspace, name: "other" }]) {
+    expect(await call("compiled", { ...selection, id: saved.id })).toBeNull();
+  }
+  expect(await call("compiled", { workspace: input.workspace, name: input.name, id: saved.id }, "bob")).toBeNull();
+  expect(await call("compiled", { ...input, server_source: "changed\n" })).toBeNull();
+  expect(await call("compiled", { ...input, source: "changed\n" })).toBeNull();
+  expect(await call("compiled", { ...input, server_source: null })).toBeNull();
+  const updated = await call<CompiledCanvas>("saveCompiled", { ...input, runtime: "sdk-b", client_js: "new SDK" });
+  expect(updated.id).not.toBe(saved.id);
+  expect(await call("compiled", { workspace: input.workspace, name: input.name, source: input.source, server_source: input.server_source })).toEqual(updated);
+  expect(await call("compiled", { ...input, runtime: "sdk-a" })).toEqual(saved);
+  const clientOnly = await call<CompiledCanvas>("saveCompiled", { ...input, server_source: null, server_js: null });
+  expect(clientOnly.server_js).toBeNull();
+  await fails("saveCompiled", { ...input, server_js: null }, "invalid compiled");
+  await fails("saveCompiled", { ...input, server_source: null }, "invalid compiled");
+  await runtime.unsafeEvictDurableObject("canvas-library-test", "CanvasLibrary", { name: "alice" });
+  expect(await call("compiled", { workspace: input.workspace, name: input.name, id: saved.id })).toEqual(saved);
+  expect(await call("compiled", { workspace: input.workspace, name: input.name, id: updated.id })).toEqual(updated);
+});
+
+test("served versions pin compiled outputs and legacy or restored versions attach once", async () => {
+  const input = { workspace: "compiled-versions", name: "overview", source: "client\n", server_source: "server\n", runtime: "sdk-a", client_js: "client output", server_js: "server output" };
+  const compiled = await call<CompiledCanvas>("saveCompiled", input);
+  const serve = { ...input, compiled_id: compiled.id, mode: "preview", initial_state: {} };
+  const first = await call<VersionResult>("recordServe", serve);
+  expect((await call<VersionResult>("recordServe", serve)).version.id).toBe(first.version.id);
+  expect(await call("preview", { workspace: input.workspace, version_id: first.version.id })).toMatchObject({ compiled_id: compiled.id });
+  await fails("recordServe", { ...serve, server_source: "changed\n" }, "does not match");
+  await fails("recordServe", { ...serve, source: "changed\n" }, "does not match");
+  await fails("recordServe", { ...serve, workspace: "another" }, "does not match");
+  await fails("recordServe", { ...serve, runtime: "sdk-b" }, "does not match");
+  const newer = await call<CompiledCanvas>("saveCompiled", { ...input, runtime: "sdk-b", client_js: "new runtime" });
+  const second = await call<VersionResult>("recordServe", { ...serve, runtime: "sdk-b", compiled_id: newer.id });
+  expect(second.version.id).not.toBe(first.version.id);
+  await fails("recordServe", { ...serve, version_id: first.version.id, runtime: "sdk-b", compiled_id: newer.id }, "immutable");
+  const legacy = await call<VersionResult>("recordServe", { ...input, name: "legacy", mode: "preview", initial_state: {} });
+  const legacyCompiled = await call<CompiledCanvas>("saveCompiled", { ...input, name: "legacy", runtime: "sdk-b" });
+  const attachment = { workspace: input.workspace, name: "legacy", version_id: legacy.version.id, compiled_id: legacyCompiled.id };
+  expect(await call("attachCompiled", attachment)).toEqual({ ok: true });
+  expect(await call("attachCompiled", attachment)).toEqual({ ok: true });
+  expect(await call<unknown[]>("events", { workspace: input.workspace, version_id: legacy.version.id })).toHaveLength(1);
+  await fails("attachCompiled", { ...attachment, compiled_id: compiled.id }, "does not match");
+  await fails("attachCompiled", { ...attachment, workspace: "another" }, "does not match");
+  await fails("attachCompiled", { workspace: input.workspace, name: input.name, version_id: first.version.id, compiled_id: newer.id }, "immutable");
+  const attached = await call<VersionResult>("recordServe", { ...serve, name: "legacy", version_id: legacy.version.id, runtime: "sdk-b", compiled_id: legacyCompiled.id });
+  expect(attached.version.id).toBe(legacy.version.id);
+  expect(attached.version).toMatchObject({ compiled_id: legacyCompiled.id, runtime: "sdk-a" });
+  await call("writeDraft", input);
+  const restored = await call<{ versionId: string }>("restore", { workspace: input.workspace, id: first.version.id, runtime: "sdk-b" });
+  expect(await call("preview", { workspace: input.workspace, version_id: restored.versionId })).toMatchObject({ compiled_id: null });
+  const result = await call<VersionResult>("recordServe", { ...serve, version_id: restored.versionId, runtime: "sdk-b", compiled_id: newer.id });
+  expect(result.version.id).toBe(restored.versionId);
+  expect(result.version).toMatchObject({ compiled_id: newer.id });
 });
 
 test("source and serialized state are bounded for drafts, edits, serves, and UI state", async () => {

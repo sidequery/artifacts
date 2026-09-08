@@ -1,0 +1,10 @@
+{
+  "extends": "../../cloudflare/tsconfig.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true
+  },
+  "include": [
+    "./local.worker.ts"
+  ],
+  "exclude": []
+}
