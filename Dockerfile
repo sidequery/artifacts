@@ -4,7 +4,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV SHELL=/bin/bash
 ENV TERM=xterm-256color
 ENV HERDR_E2E=1
-ENV HERDR_SESSION=canvas-e2e
+ENV HERDR_SESSION=artifact-e2e
 ENV PATH="/usr/local/bin:${PATH}"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -27,7 +27,7 @@ RUN curl -fsSL https://herdr.dev/install.sh | sh
 
 RUN install -m 0755 /root/.bun/bin/bun /usr/local/bin/bun \
     && install -m 0755 /root/.local/bin/herdr /usr/local/bin/herdr \
-    && useradd --create-home --shell /bin/bash canvas
+    && useradd --create-home --shell /bin/bash artifact
 
 RUN curl -fsSL https://terminal-browser.sh/install \
     | XDG_DATA_HOME=/opt XDG_BIN_HOME=/usr/local/bin AGENT_SKILLS_HOME=/tmp/terminal-browser-skills TERMINAL_BROWSER_SKIP_EDITOR_SETUP=1 bash
@@ -41,7 +41,7 @@ COPY skills ./skills
 
 RUN bun install --frozen-lockfile
 
-ENV HOME=/home/canvas
-USER canvas
+ENV HOME=/home/artifact
+USER artifact
 
 CMD ["bun", "e2e/inside.ts"]

@@ -1,10 +1,10 @@
-# Scripts and direct canvas links
+# Scripts and direct artifact links
 
-The hosted gallery supports canvases and standalone scripts. Either can have a chosen root URL such as `/sales-dashboard` or `/stripe-webhook`. Canvas URLs open the interactive canvas and its backend; script URLs invoke the script's HTTP handler. Slugs are unique across the deployment, including across artifact types and libraries. Existing application routes are reserved.
+The hosted gallery supports artifacts and standalone scripts. Either can have a chosen root URL such as `/sales-dashboard` or `/stripe-webhook`. Artifact URLs open the interactive artifact and its backend; script URLs invoke the script's HTTP handler. Slugs are unique across the deployment, including across artifact types and libraries. Existing application routes are reserved.
 
 ## Gallery
 
-Choose **New script**, enter a name and URL slug, and edit the TypeScript source. Select **Private** or **Public**, then **Save script**. Scripts appear alongside canvases in the library. Selecting a script loads its source without running it.
+Choose **New script**, enter a name and URL slug, and edit the TypeScript source. Select **Private** or **Public**, then **Save script**. Scripts appear alongside artifacts in the library. Selecting a script loads its source without running it.
 
 For either artifact, the **URL /** field and access selector control its direct link. **Save link** updates the settings; **Open** visits the URL and **Copy URL** copies its absolute address. Opening a script URL sends a GET request and runs its handler. Updating the source keeps the chosen URL. Changing the slug changes the URL; old URLs are not aliases.
 
@@ -14,7 +14,7 @@ Expand **Run** to choose an HTTP method, path, headers as a JSON object, and a t
 
 Expand **Logs** and select **Load logs** to inspect recent execution output. Under **Secrets**, enter a name and value and select **Save secret**; the value field clears after saving. Enter a name and select **Remove secret** to delete it. Stored secret values are never loaded into the editor or source history.
 
-These controls are available in the hosted gallery. The local gallery continues to support existing canvases.
+These controls are available in the hosted gallery. The local gallery continues to support existing artifacts.
 
 ## Script handler
 
@@ -65,7 +65,7 @@ HTML served at artifact URLs is sandboxed with a response Content Security Polic
 
 ## MCP
 
-Agents use `script_write`, `script_read`, `script_edit`, `script_list`, `script_history`, `script_restore`, `script_run`, `script_logs`, and `script_secrets` to manage scripts. `artifact_link` sets the slug and access for either `kind: "canvas"` or `kind: "script"`. Creation and link results include the resulting URL.
+Agents use `script_write`, `script_read`, `script_edit`, `script_list`, `script_history`, `script_restore`, `script_run`, `script_logs`, and `script_secrets` to manage scripts. `artifact_link` sets the slug and access for either `kind: "artifact"` or `kind: "script"`. Creation and link results include the resulting URL.
 
 `script_run` takes a request object with `path`, `method`, `headers` as an array of `[name, value]` pairs, and an optional base64 `body`. Its structured result contains `response` with `status`, `statusText`, `headers`, and an optional base64 `body`. For example:
 
@@ -86,7 +86,7 @@ Agents use `script_write`, `script_read`, `script_edit`, `script_list`, `script_
 
 ## Third-party dependencies
 
-Scripts and canvases accept an optional `project` alongside their existing entrypoint source:
+Scripts and artifacts accept an optional `project` alongside their existing entrypoint source:
 
 ```json
 {
@@ -95,30 +95,30 @@ Scripts and canvases accept an optional `project` alongside their existing entry
 }
 ```
 
-Import helpers with relative paths such as `./lib/message`, and import packages normally. The gallery source editor provides a file picker, add/remove helper controls, and an exact-version dependency editor. `script_read`, `script_edit`, `canvas_read`, and `canvas_edit` accept `file` to target a helper. Omit `project` on write to retain it; when supplied, its files and dependency declarations replace the whole project. Read responses include the complete project snapshot. Historical views are read-only and restoring a revision restores every source file and its dependency lock.
+Import helpers with relative paths such as `./lib/message`, and import packages normally. The gallery source editor provides a file picker, add/remove helper controls, and an exact-version dependency editor. `script_read`, `script_edit`, `artifact_read`, and `artifact_edit` accept `file` to target a helper. Omit `project` on write to retain it; when supplied, its files and dependency declarations replace the whole project. Read responses include the complete project snapshot. Historical views are read-only and restoring a revision restores every source file and its dependency lock.
 
 Dependency declarations accept exact npm versions only. The service resolves packages when declarations change, verifies tarball integrity, and archives the package source and types with the artifact revision. Edits with unchanged dependencies, replay, and execution use this archived snapshot without registry access. Package installation scripts never execute. Download/decompression, file counts, and stored content are bounded. The service only accesses the public npm registry and rejects arbitrary tarball origins.
 
-The compiler currently supports one version of each package. Conflicting transitive requirements and missing required peers produce explicit diagnostics. Browser React, ReactDOM and React Router dependencies use Canvas's own compatible runtime so hooks do not load a second React. Packages must support the browser or Workers environment; native addons and packages requiring a Node process are unsupported. Source archives contain up to 64 helper files (1 MiB total) and up to 64 resolved packages with a dependency lock bounded to 4,096 files and 8 MiB. The entrypoint remains limited to 256 KiB.
+The compiler currently supports one version of each package. Conflicting transitive requirements and missing required peers produce explicit diagnostics. Browser React, ReactDOM and React Router dependencies use Artifacts' own compatible runtime so hooks do not load a second React. Packages must support the browser or Workers environment; native addons and packages requiring a Node process are unsupported. Source archives contain up to 64 helper files (1 MiB total) and up to 64 resolved packages with a dependency lock bounded to 4,096 files and 8 MiB. The entrypoint remains limited to 256 KiB.
 
-Hosted Cloudflare and celld deployments use the same project contract. Local canvas CLI and MCP also persist the project beside the canvas and carry its files and dependency snapshot through history and remix. Use `canvas write NAME --file SOURCE --project PROJECT_JSON`, where the JSON contains files and exact dependency declarations, or pass `project` to local MCP `canvas_write`. Source-only local writes preserve the project; update helpers by replacing `project.files`. Standalone script tools remain hosted-only.
+Hosted Cloudflare and celld deployments use the same project contract. Local artifact CLI and MCP also persist the project beside the artifact and carry its files and dependency snapshot through history and remix. Use `artifacts write NAME --file SOURCE --project PROJECT_JSON`, where the JSON contains files and exact dependency declarations, or pass `project` to local MCP `artifact_write`. Source-only local writes preserve the project; update helpers by replacing `project.files`. Standalone script tools remain hosted-only.
 
 Agents can call `script_guide` to retrieve the authoring contract through MCP.
 
 ## Remix
 
-Select a working copy or historical revision in the gallery, then **Remix** and choose a new name. MCP offers `canvas_remix` and `script_remix`, with `new_name` and exactly one of `name` or `version_id`. Hosted calls optionally accept a new `slug`; otherwise it defaults to the destination name. Sources and destinations belong to the authenticated library and selected workspace.
+Select a working copy or historical revision in the gallery, then **Remix** and choose a new name. MCP offers `artifact_remix` and `script_remix`, with `new_name` and exactly one of `name` or `version_id`. Hosted calls optionally accept a new `slug`; otherwise it defaults to the destination name. Sources and destinations belong to the authenticated library and selected workspace.
 
-A remix creates a separate artifact and records its immutable source revision as provenance. Canvas browser and server sources stay paired. The new artifact starts with empty runtime data and no copied secret values; its hosted URL starts private. Destination names cannot overwrite existing drafts or archived artifacts, and URL collisions are rejected. Invalid source remains saved as a remix draft, with validation diagnostics; it receives a working URL only after successful validation. Remixing does not execute the request handler.
+A remix creates a separate artifact and records its immutable source revision as provenance. Artifact browser and server sources stay paired. The new artifact starts with empty runtime data and no copied secret values; its hosted URL starts private. Destination names cannot overwrite existing drafts or archived artifacts, and URL collisions are rejected. Invalid source remains saved as a remix draft, with validation diagnostics; it receives a working URL only after successful validation. Remixing does not execute the request handler.
 
 ## Schedules and execution history
 
-Hosted Cloudflare and celld servers can schedule scripts and canvas backends with native Durable Object alarms. Configure **Schedule** in the gallery, or call `script_schedule` / `canvas_schedule` with `name` and `action: "set"`. Supply exactly one of `interval_seconds` (at least 60) or a five-field `cron` expression. Cron accepts an IANA `timezone`, defaulting to `UTC`. Supply a relative HTTP `request` (path, method, headers, optional base64 body); the default is GET `/`.
+Hosted Cloudflare and celld servers can schedule scripts and artifact backends with native Durable Object alarms. Configure **Schedule** in the gallery, or call `script_schedule` / `artifact_schedule` with `name` and `action: "set"`. Supply exactly one of `interval_seconds` (at least 60) or a five-field `cron` expression. Cron accepts an IANA `timezone`, defaulting to `UTC`. Supply a relative HTTP `request` (path, method, headers, optional base64 body); the default is GET `/`.
 
-Use `action: "get"`, `"pause"`, `"resume"`, or `"run_now"` to inspect or control the schedule. Run-now executes the saved request, including while paused. Each artifact has one schedule. Removing a canvas server pauses its schedule. The local filesystem CLI/stdio runtime does not execute backends or run a scheduler; use `canvas server` for local scheduled execution.
+Use `action: "get"`, `"pause"`, `"resume"`, or `"run_now"` to inspect or control the schedule. Run-now executes the saved request, including while paused. Each artifact has one schedule. Removing an artifacts server pauses its schedule. The local filesystem CLI/stdio runtime does not execute backends or run a scheduler; use `artifacts server` for local scheduled execution.
 
 Schedules execute the latest validated revision, not an invalid draft or a historical preview. An occurrence is durably claimed before calling user code; missed intervals are skipped rather than accumulated. Failures and uncertain interrupted invocations are not automatically replayed. Application handlers should make repeated writes idempotent when that matters. A local celld server must be running for alarms to execute.
 
-`script_runs` and `canvas_runs` expose the latest 100 of up to 1,000 retained executions: revision, trigger, start/end times, duration, HTTP status and outcome. The gallery's **Run history** shows the same records. These records live in host-owned SQLite, separate from the user handler's database, and survive code updates and source restores. An `interrupted` record means completion is unknown and side effects may already have occurred.
+`script_runs` and `artifact_runs` expose the latest 100 of up to 1,000 retained executions: revision, trigger, start/end times, duration, HTTP status and outcome. The gallery's **Run history** shows the same records. These records live in host-owned SQLite, separate from the user handler's database, and survive code updates and source restores. An `interrupted` record means completion is unknown and side effects may already have occurred.
 
-Script logs can be filtered by `run_id` from `script_runs`; the existing 100-entry log retention still applies. Script success describes the HTTP handler returning a response, not completion of `waitUntil` tasks or streamed response bodies. Canvas history includes response serialization; canvas console capture is not provided.
+Script logs can be filtered by `run_id` from `script_runs`; the existing 100-entry log retention still applies. Script success describes the HTTP handler returning a response, not completion of `waitUntil` tasks or streamed response bodies. Artifact history includes response serialization; artifact console capture is not provided.

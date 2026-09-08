@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { authOrigin, canvasAuthOptions } from "./better-auth";
+import { authOrigin, artifactAuthOptions, requireArtifactScope } from "./better-auth";
 import { teamAllowsUser, teamProviderOptions } from "./team-auth";
 
 const secret = "0123456789abcdef0123456789abcdef";
@@ -54,33 +54,33 @@ test("team admission requires a verified allowlisted email or domain unless the 
 });
 
 test("auth origin accepts HTTPS and explicit loopback development origins while rejecting unsafe or non-origin URLs", () => {
-  expect(authOrigin({ BETTER_AUTH_URL: "https://canvas.example" })).toBe("https://canvas.example");
-  expect(authOrigin({ BETTER_AUTH_URL: "https://canvas.example:8443" })).toBe("https://canvas.example:8443");
+  expect(authOrigin({ BETTER_AUTH_URL: "https://artifact.example" })).toBe("https://artifact.example");
+  expect(authOrigin({ BETTER_AUTH_URL: "https://artifact.example:8443" })).toBe("https://artifact.example:8443");
   for (const url of ["http://localhost:4785", "http://127.0.0.1:4785", "http://[::1]:4785"]) {
     expect(authOrigin({ BETTER_AUTH_URL: url })).toBe(url);
   }
   for (const url of [
-    "http://canvas.example",
+    "http://artifact.example",
     "http://localhost.example:4785",
-    "https://user:password@canvas.example",
-    "https://canvas.example/auth",
-    "https://canvas.example?tenant=one",
-    "https://canvas.example#auth",
+    "https://user:password@artifact.example",
+    "https://artifact.example/auth",
+    "https://artifact.example?tenant=one",
+    "https://artifact.example#auth",
   ]) expect(() => authOrigin({ BETTER_AUTH_URL: url })).toThrow("must be the deployment's HTTPS origin");
   expect(() => authOrigin({})).toThrow("Configure BETTER_AUTH_URL");
 });
 
-test("Canvas auth options keep password auth disabled and configure the bounded MCP OAuth server", () => {
+test("Artifact auth options keep password auth disabled and configure the bounded MCP OAuth server", () => {
   const database = new Database(":memory:");
   try {
-    const options = canvasAuthOptions({
-      BETTER_AUTH_URL: "https://canvas.example",
+    const options = artifactAuthOptions({
+      BETTER_AUTH_URL: "https://artifact.example",
       BETTER_AUTH_SECRET: secret,
       BETTER_AUTH_ALLOW_ALL_USERS: "true",
     }, database);
     expect(options).toMatchObject({
-      appName: "Canvas",
-      baseURL: "https://canvas.example",
+      appName: "Artifacts",
+      baseURL: "https://artifact.example",
       basePath: "/api/auth",
       emailAndPassword: { enabled: false },
       rateLimit: { enabled: true, storage: "database" },
@@ -89,7 +89,7 @@ test("Canvas auth options keep password auth disabled and configure the bounded 
     expect(oauth?.options).toMatchObject({
       loginPage: "/sign-in",
       consentPage: "/consent",
-      scopes: ["openid", "profile", "email", "offline_access", "canvas"],
+      scopes: ["openid", "profile", "email", "offline_access", "artifacts", "canvas"],
       grantTypes: ["authorization_code", "refresh_token"],
       allowDynamicClientRegistration: true,
       allowUnauthenticatedClientRegistration: true,
@@ -100,6 +100,16 @@ test("Canvas auth options keep password auth disabled and configure the bounded 
     database.close();
   }
 
-  expect(() => canvasAuthOptions({ BETTER_AUTH_URL: "https://canvas.example", BETTER_AUTH_SECRET: secret }, undefined as never)).toThrow("AUTH_DB");
-  expect(() => canvasAuthOptions({ BETTER_AUTH_URL: "https://canvas.example", BETTER_AUTH_SECRET: "too-short" }, {} as never)).toThrow("at least 32");
+  expect(() => artifactAuthOptions({ BETTER_AUTH_URL: "https://artifact.example", BETTER_AUTH_SECRET: secret }, undefined as never)).toThrow("AUTH_DB");
+  expect(() => artifactAuthOptions({ BETTER_AUTH_URL: "https://artifact.example", BETTER_AUTH_SECRET: "too-short" }, {} as never)).toThrow("at least 32");
+});
+
+
+test("MCP authorization accepts new and existing scopes without accepting partial matches", () => {
+  for (const scope of ["artifacts", "canvas", "openid artifacts offline_access", "canvas offline_access"]) {
+    expect(() => requireArtifactScope(scope)).not.toThrow();
+  }
+  for (const scope of [undefined, null, [], "", "artifact", "canvases", "openid offline_access", "not-artifacts"]) {
+    expect(() => requireArtifactScope(scope)).toThrow();
+  }
 });

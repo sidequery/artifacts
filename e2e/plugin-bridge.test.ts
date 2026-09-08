@@ -13,23 +13,23 @@ test("gallery and standalone frame bridge requires enablement and accepts only i
     const errors: string[] = [];
     page.on("pageerror", error => errors.push(error.message));
     await page.goto(`http://127.0.0.1:${server.port}`);
-    await page.setContent('<iframe id="canvas" sandbox="allow-scripts"></iframe><iframe id="other" sandbox="allow-scripts"></iframe>');
+    await page.setContent('<iframe id="artifact" sandbox="allow-scripts"></iframe><iframe id="other" sandbox="allow-scripts"></iframe>');
     await page.evaluate(bridge => {
       window.addEventListener("message", event => {
-        const frame = document.querySelector<HTMLIFrameElement>("#canvas")!;
-        if (event.source !== frame.contentWindow || event.data?.type !== "canvas/plugin-request") return;
+        const frame = document.querySelector<HTMLIFrameElement>("#artifact")!;
+        if (event.source !== frame.contentWindow || event.data?.type !== "artifact/plugin-request") return;
         // A sibling's forged response has the right ID but the wrong source.
         document.querySelector<HTMLIFrameElement>("#other")!.contentWindow!.postMessage(event.data, "*");
-        setTimeout(() => frame.contentWindow!.postMessage({ type: "canvas/plugin-response", id: event.data.id, result: event.data.request.input }, "*"), 100);
+        setTimeout(() => frame.contentWindow!.postMessage({ type: "artifact/plugin-response", id: event.data.id, result: event.data.request.input }, "*"), 100);
       });
-      document.querySelector<HTMLIFrameElement>("#other")!.srcdoc = `<script>onmessage=e=>parent.frames[0].postMessage({type:'canvas/plugin-response',id:e.data.id,result:'forged'},'*')<\/script>`;
-      document.querySelector<HTMLIFrameElement>("#canvas")!.srcdoc = `<button>Call</button><p>idle</p><script>window.__herdrCanvas={plugins:true};${bridge.replace(/<\/script/gi, "<\\/script")}document.querySelector('button').onclick=()=>window.__herdrCanvas.onPluginCall({plugin:'directory',operation:'lookup',input:'verified'}).then(result=>document.querySelector('p').textContent=result);<\/script>`;
+      document.querySelector<HTMLIFrameElement>("#other")!.srcdoc = `<script>onmessage=e=>parent.frames[0].postMessage({type:'artifact/plugin-response',id:e.data.id,result:'forged'},'*')<\/script>`;
+      document.querySelector<HTMLIFrameElement>("#artifact")!.srcdoc = `<button>Call</button><p>idle</p><script>window.__artifacts={plugins:true};${bridge.replace(/<\/script/gi, "<\\/script")}document.querySelector('button').onclick=()=>window.__artifacts.onPluginCall({plugin:'directory',operation:'lookup',input:'verified'}).then(result=>document.querySelector('p').textContent=result);<\/script>`;
     }, bridge);
-    const frame = page.frameLocator("#canvas");
+    const frame = page.frameLocator("#artifact");
     await frame.getByRole("button").click();
     await frame.getByText("verified", { exact: true }).waitFor();
-    await page.locator("#canvas").evaluate((element, bridge) => {
-      (element as HTMLIFrameElement).srcdoc = `<p></p><script>window.__herdrCanvas={plugins:false};${bridge.replace(/<\/script/gi, "<\\/script")}document.querySelector('p').textContent=typeof window.__herdrCanvas.onPluginCall;<\/script>`;
+    await page.locator("#artifact").evaluate((element, bridge) => {
+      (element as HTMLIFrameElement).srcdoc = `<p></p><script>window.__artifacts={plugins:false};${bridge.replace(/<\/script/gi, "<\\/script")}document.querySelector('p').textContent=typeof window.__artifacts.onPluginCall;<\/script>`;
     }, bridge);
     await frame.getByText("undefined", { exact: true }).waitFor();
     expect(errors).toEqual([]);

@@ -1,8 +1,8 @@
 import { SignJWT, exportJWK, generateKeyPair } from "jose";
 
-const CLIENT_ID = "canvas-test";
+const CLIENT_ID = "artifact-test";
 const CLIENT_SECRET = "fixture-only-not-real-secret";
-const KEY_ID = "canvas-oidc-fixture";
+const KEY_ID = "artifact-oidc-fixture";
 
 const USERS = {
   "test-alice": { id: "test-alice", email: "alice@example.test", name: "Alice" },

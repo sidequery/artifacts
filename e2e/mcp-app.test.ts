@@ -3,38 +3,38 @@ import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser, type FrameLocator, type Page } from "playwright";
 
-import { canvasAppHtml, canvasAppResult, type CanvasAppPayload } from "../src/mcp/app";
-import { CanvasService } from "../src/service";
-import { tempDir, writeCanvas } from "../src/test/fixtures";
+import { artifactAppHtml, artifactAppResult, type ArtifactAppPayload } from "../src/mcp/app";
+import { ArtifactService } from "../src/service";
+import { tempDir, writeArtifact } from "../src/test/fixtures";
 
-const INTERACTIVE_CANVAS = `import { Button, H1, Stack, Text, useCanvasAction, useCanvasState, useHostTheme } from "sidequery/canvas";
+const INTERACTIVE_ARTIFACT = `import { Button, H1, Stack, Text, useArtifactAction, useArtifactState, useHostTheme } from "sidequery/artifacts";
 
 export default function Interactive() {
-  const [count, setCount] = useCanvasState<number>("count", 0);
-  const act = useCanvasAction();
+  const [count, setCount] = useArtifactState<number>("count", 0);
+  const act = useArtifactAction();
   const theme = useHostTheme();
   return (
     <Stack gap={8}>
-      <H1>Interactive canvas</H1>
+      <H1>Interactive artifact</H1>
       <Text>Count: {count}</Text>
       <Text>Theme: {theme.kind}</Text>
       <Button onClick={() => setCount(value => value + 1)}>Increment</Button>
-      <Button onClick={() => act({ type: "promptAgent", prompt: "Explain this canvas" })}>Prompt agent</Button>
-      <Button onClick={() => act({ type: "openUrl", url: "https://example.com/canvas" })}>Open docs</Button>
+      <Button onClick={() => act({ type: "promptAgent", prompt: "Explain this artifact" })}>Prompt agent</Button>
+      <Button onClick={() => act({ type: "openUrl", url: "https://example.com/artifact" })}>Open docs</Button>
     </Stack>
   );
 }
 `;
 
-const RESIZABLE_CANVAS = `import { Button, H1, Stack, Text, useCanvasState } from "sidequery/canvas";
+const RESIZABLE_ARTIFACT = `import { Button, H1, Stack, Text, useArtifactState } from "sidequery/artifacts";
 
 export default function Resizable() {
-  const [expanded, setExpanded] = useCanvasState<boolean>("expanded", false);
+  const [expanded, setExpanded] = useArtifactState<boolean>("expanded", false);
   const rows = expanded ? 45 : 2;
   return (
     <Stack gap={8}>
-      <H1>Resizable canvas</H1>
-      <Text>This deliberately long sentence wraps onto more lines when the host makes the canvas narrow, while remaining fully readable.</Text>
+      <H1>Resizable artifact</H1>
+      <Text>This deliberately long sentence wraps onto more lines when the host makes the artifact narrow, while remaining fully readable.</Text>
       <Button onClick={() => setExpanded(value => !value)}>{expanded ? "Show less" : "Show more"}</Button>
       {Array.from({ length: rows }, (_, index) => <Text key={index}>Content row {index + 1}</Text>)}
       <Text>Last content</Text>
@@ -43,16 +43,16 @@ export default function Resizable() {
 }
 `;
 
-const SERVER_CANVAS = `import { Button, H1, Stack, Text, canvasFetch, useCanvasState } from "sidequery/canvas";
+const SERVER_ARTIFACT = `import { Button, H1, Stack, Text, artifactFetch, useArtifactState } from "sidequery/artifacts";
 
-export default function ServerCanvas() {
-  const [result, setResult] = useCanvasState<string>("result", "idle");
+export default function ServerArtifact() {
+  const [result, setResult] = useArtifactState<string>("result", "idle");
   const load = async () => {
     try {
-      const response = await canvasFetch("/api/items?limit=2", {
+      const response = await artifactFetch("/api/items?limit=2", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ source: "canvas" }),
+        body: JSON.stringify({ source: "artifact" }),
       });
       setResult(String(response.status) + ":" + await response.text());
     } catch (error) {
@@ -61,7 +61,7 @@ export default function ServerCanvas() {
   };
   return (
     <Stack gap={8}>
-      <H1>Server canvas</H1>
+      <H1>Server artifact</H1>
       <Button onClick={() => { void load(); }}>Load server data</Button>
       <Text>Result: {result}</Text>
     </Stack>
@@ -74,17 +74,17 @@ let server: ReturnType<typeof Bun.serve>;
 let hostHtml: string;
 const fixtureDirs = new Set<string>();
 
-async function resultFor(source: string, name: string, state: Record<string, unknown> = {}): Promise<{ canvas: CanvasAppPayload }> {
-  const dir = tempDir("canvas-mcp-browser-");
+async function resultFor(source: string, name: string, state: Record<string, unknown> = {}): Promise<{ artifact: ArtifactAppPayload }> {
+  const dir = tempDir("artifact-mcp-browser-");
   fixtureDirs.add(dir);
-  const path = writeCanvas(dir, name, source);
-  writeFileSync(path.replace(".canvas.tsx", ".canvas.data.json"), JSON.stringify(state));
-  const result = await canvasAppResult(new CanvasService({
-    canvasesDir: dir,
+  const path = writeArtifact(dir, name, source);
+  writeFileSync(path.replace(".artifact.tsx", ".artifact.data.json"), JSON.stringify(state));
+  const result = await artifactAppResult(new ArtifactService({
+    artifactsDir: dir,
     cwd: dir,
-    env: { HERDR_CANVAS_HISTORY_DB: join(dir, "history.sqlite") },
+    env: { ARTIFACTS_HISTORY_DB: join(dir, "history.sqlite") },
   }), { name });
-  if (!("_meta" in result) || !result._meta) throw new Error("canvas result missing app metadata");
+  if (!("_meta" in result) || !result._meta) throw new Error("artifact result missing app metadata");
   return result._meta;
 }
 
@@ -105,8 +105,8 @@ async function openHost(): Promise<{ page: Page; app: FrameLocator; errors: stri
 }
 
 async function layout(app: FrameLocator) {
-  return app.locator("#canvas-shell").evaluate(shell => {
-    const viewport = document.getElementById("canvas-viewport")!;
+  return app.locator("#artifact-shell").evaluate(shell => {
+    const viewport = document.getElementById("artifact-viewport")!;
     return {
       mode: document.documentElement.dataset.displayMode,
       shellHeight: shell.getBoundingClientRect().height,
@@ -128,11 +128,11 @@ beforeAll(async () => {
   });
   if (!hostBuild.success) throw new Error(hostBuild.logs.join("\n"));
   const hostJs = await hostBuild.outputs[0]!.text();
-  const appHtml = (await canvasAppHtml()).replace(
+  const appHtml = (await artifactAppHtml()).replace(
     "<head>",
     `<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'none'; connect-src 'none'">`,
   );
-  hostHtml = `<!doctype html><html><head><style>html,body{margin:0}iframe{display:block;border:0}</style></head><body><iframe id="app" sandbox="allow-scripts"></iframe><script>window.canvasAppHtml=${JSON.stringify(appHtml).replaceAll("<", "\\u003c")}</script><script type="module">${hostJs.replaceAll("</script", "<\\/script")}</script></body></html>`;
+  hostHtml = `<!doctype html><html><head><style>html,body{margin:0}iframe{display:block;border:0}</style></head><body><iframe id="app" sandbox="allow-scripts"></iframe><script>window.artifactAppHtml=${JSON.stringify(appHtml).replaceAll("<", "\\u003c")}</script><script type="module">${hostJs.replaceAll("</script", "<\\/script")}</script></body></html>`;
   server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -154,31 +154,31 @@ afterEach(async () => {
   fixtureDirs.clear();
 });
 
-test("renders and replaces interactive canvases through the MCP Apps bridge", async () => {
-  const dir = tempDir("canvas-mcp-browser-");
+test("renders and replaces interactive artifacts through the MCP Apps bridge", async () => {
+  const dir = tempDir("artifact-mcp-browser-");
   fixtureDirs.add(dir);
   const db = join(dir, "history.sqlite");
-  const sourcePath = writeCanvas(dir, "interactive", INTERACTIVE_CANVAS);
-  const statePath = sourcePath.replace(".canvas.tsx", ".canvas.data.json");
+  const sourcePath = writeArtifact(dir, "interactive", INTERACTIVE_ARTIFACT);
+  const statePath = sourcePath.replace(".artifact.tsx", ".artifact.data.json");
   writeFileSync(statePath, '{"count":4}');
   const originalSource = readFileSync(sourcePath, "utf8");
   const originalSidecar = readFileSync(statePath, "utf8");
-  const service = new CanvasService({
-    canvasesDir: dir,
+  const service = new ArtifactService({
+    artifactsDir: dir,
     cwd: dir,
-    env: { HERDR_CANVAS_HISTORY_DB: db },
+    env: { ARTIFACTS_HISTORY_DB: db },
   });
-  const delivered = await canvasAppResult(service, { name: "interactive" });
+  const delivered = await artifactAppResult(service, { name: "interactive" });
   expect(delivered.ok).toBe(true);
-  if (!("_meta" in delivered) || !delivered._meta) throw new Error("canvas result missing app metadata");
+  if (!("_meta" in delivered) || !delivered._meta) throw new Error("artifact result missing app metadata");
 
   const { page, app, errors } = await openHost();
   await page.evaluate(result => window.mcpHost!.sendResult(result), {
-    content: [{ type: "text", text: "Canvas ready" }],
+    content: [{ type: "text", text: "Artifact ready" }],
     _meta: delivered._meta,
   });
 
-  await app.getByRole("heading", { name: "Interactive canvas" }).waitFor();
+  await app.getByRole("heading", { name: "Interactive artifact" }).waitFor();
   await app.getByText("Count: 4").waitFor();
   await app.getByText("Theme: dark").waitFor();
   await app.getByRole("button", { name: "Increment" }).click();
@@ -187,11 +187,11 @@ test("renders and replaces interactive canvases through the MCP Apps bridge", as
   await app.getByRole("button", { name: "Prompt agent" }).click();
   await page.waitForFunction(() => window.mcpHost!.messages.length === 1);
   expect(await page.evaluate(() => window.mcpHost!.messages)).toEqual([
-    { role: "user", content: [{ type: "text", text: "Explain this canvas" }] },
+    { role: "user", content: [{ type: "text", text: "Explain this artifact" }] },
   ]);
   await app.getByRole("button", { name: "Open docs" }).click();
   await page.waitForFunction(() => window.mcpHost!.links.length === 1);
-  expect(await page.evaluate(() => window.mcpHost!.links)).toEqual(["https://example.com/canvas"]);
+  expect(await page.evaluate(() => window.mcpHost!.links)).toEqual(["https://example.com/artifact"]);
 
   await page.evaluate(() => window.mcpHost!.setTheme("light"));
   await app.getByText("Theme: light").waitFor();
@@ -199,17 +199,17 @@ test("renders and replaces interactive canvases through the MCP Apps bridge", as
   expect(readFileSync(sourcePath, "utf8")).toBe(originalSource);
   expect(readFileSync(statePath, "utf8")).toBe(originalSidecar);
 
-  const replacementPath = writeCanvas(dir, "replacement", INTERACTIVE_CANVAS.replace("Interactive canvas", "Replacement canvas"));
-  writeFileSync(replacementPath.replace(".canvas.tsx", ".canvas.data.json"), '{"count":9}');
-  const replacement = await canvasAppResult(service, { name: "replacement" });
+  const replacementPath = writeArtifact(dir, "replacement", INTERACTIVE_ARTIFACT.replace("Interactive artifact", "Replacement artifact"));
+  writeFileSync(replacementPath.replace(".artifact.tsx", ".artifact.data.json"), '{"count":9}');
+  const replacement = await artifactAppResult(service, { name: "replacement" });
   if (!("_meta" in replacement) || !replacement._meta) throw new Error("replacement result missing app metadata");
   await page.evaluate(result => window.mcpHost!.sendResult(result), {
     content: [{ type: "text", text: "Replacement ready" }],
     _meta: replacement._meta,
   });
-  await app.getByRole("heading", { name: "Replacement canvas" }).waitFor();
+  await app.getByRole("heading", { name: "Replacement artifact" }).waitFor();
   await app.getByText("Count: 9").waitFor();
-  expect(await app.getByRole("heading", { name: "Interactive canvas" }).count()).toBe(0);
+  expect(await app.getByRole("heading", { name: "Interactive artifact" }).count()).toBe(0);
 
   await page.evaluate(async results => {
     await Promise.all(results.map(result => window.mcpHost!.sendResult(result)));
@@ -217,19 +217,19 @@ test("renders and replaces interactive canvases through the MCP Apps bridge", as
     { content: [{ type: "text", text: "Old result" }], _meta: delivered._meta },
     { content: [{ type: "text", text: "Newest result" }], _meta: replacement._meta },
   ]);
-  await app.getByRole("heading", { name: "Replacement canvas" }).waitFor();
+  await app.getByRole("heading", { name: "Replacement artifact" }).waitFor();
   await page.waitForTimeout(100);
-  expect(await app.getByRole("heading", { name: "Interactive canvas" }).count()).toBe(0);
+  expect(await app.getByRole("heading", { name: "Interactive artifact" }).count()).toBe(0);
 
   await page.evaluate(() => window.mcpHost!.cancel("Stopped by host"));
   await app.getByRole("status").waitFor();
-  expect(await app.getByRole("status").textContent()).toBe("Canvas request cancelled.");
-  expect(await app.getByRole("heading", { name: "Replacement canvas" }).count()).toBe(0);
+  expect(await app.getByRole("status").textContent()).toBe("Artifact request cancelled.");
+  expect(await app.getByRole("heading", { name: "Replacement artifact" }).count()).toBe(0);
   await page.evaluate(result => window.mcpHost!.sendResult(result), {
     content: [{ type: "text", text: "Replacement ready again" }],
     _meta: replacement._meta,
   });
-  await app.getByRole("heading", { name: "Replacement canvas" }).waitFor();
+  await app.getByRole("heading", { name: "Replacement artifact" }).waitFor();
 
   await page.evaluate(() => window.mcpHost!.sendResult({
     content: [{ type: "text", text: "Compilation failed" }],
@@ -237,19 +237,19 @@ test("renders and replaces interactive canvases through the MCP Apps bridge", as
   }));
   await app.getByRole("status").waitFor();
   expect(await app.getByRole("status").textContent()).toBe("Compilation failed");
-  expect(await app.getByRole("heading", { name: "Replacement canvas" }).count()).toBe(0);
+  expect(await app.getByRole("heading", { name: "Replacement artifact" }).count()).toBe(0);
   expect(errors).toEqual([]);
   await page.close();
 }, 30_000);
 
 test("applies natural, capped, shrinking, narrow, and fixed inline sizes without feedback", async () => {
-  const meta = await resultFor(RESIZABLE_CANVAS, "resizable");
+  const meta = await resultFor(RESIZABLE_ARTIFACT, "resizable");
   const { page, app, errors } = await openHost();
   await page.evaluate(meta => window.mcpHost!.sendResult({
     content: [{ type: "text", text: "Resizable ready" }],
     _meta: meta,
   }), meta);
-  await app.getByRole("heading", { name: "Resizable canvas" }).waitFor();
+  await app.getByRole("heading", { name: "Resizable artifact" }).waitFor();
   await page.waitForFunction(() => document.querySelector("iframe")!.getBoundingClientRect().height > 100);
 
   const iframe = page.locator("#app");
@@ -269,7 +269,7 @@ test("applies natural, capped, shrinking, narrow, and fixed inline sizes without
   const last = app.getByText("Last content");
   await last.scrollIntoViewIfNeeded();
   const lastBox = (await last.boundingBox())!;
-  const viewportBox = (await app.locator("#canvas-viewport").boundingBox())!;
+  const viewportBox = (await app.locator("#artifact-viewport").boundingBox())!;
   expect(lastBox.y + lastBox.height).toBeLessThanOrEqual(viewportBox.y + viewportBox.height + 1);
 
   await page.evaluate(() => window.mcpHost!.configure({ containerDimensions: { width: 640, maxHeight: 360 } }));
@@ -287,7 +287,7 @@ test("applies natural, capped, shrinking, narrow, and fixed inline sizes without
   expect(silentlyClamped.viewportScrollHeight).toBeGreaterThan(silentlyClamped.viewportClientHeight);
   await last.scrollIntoViewIfNeeded();
   const clampedLastBox = (await last.boundingBox())!;
-  const clampedViewportBox = (await app.locator("#canvas-viewport").boundingBox())!;
+  const clampedViewportBox = (await app.locator("#artifact-viewport").boundingBox())!;
   expect(clampedLastBox.y + clampedLastBox.height).toBeLessThanOrEqual(clampedViewportBox.y + clampedViewportBox.height + 1);
   await page.evaluate(() => window.mcpHost!.setInlineFrameLimit());
   await page.waitForFunction(() => document.querySelector("iframe")!.getBoundingClientRect().height === 600);
@@ -325,7 +325,7 @@ test("applies natural, capped, shrinking, narrow, and fixed inline sizes without
 }, 30_000);
 
 test("negotiates fullscreen while preserving state and survives external, declined, and failed changes", async () => {
-  const meta = await resultFor(INTERACTIVE_CANVAS, "modes", { count: 4 });
+  const meta = await resultFor(INTERACTIVE_ARTIFACT, "modes", { count: 4 });
   const { page, app, errors } = await openHost();
   await page.evaluate(meta => window.mcpHost!.sendResult({
     content: [{ type: "text", text: "Modes ready" }],
@@ -333,11 +333,11 @@ test("negotiates fullscreen while preserving state and survives external, declin
   }), meta);
   await app.getByText("Count: 4").waitFor();
   const iframe = page.locator("#app");
-  const expand = app.getByRole("button", { name: "Expand canvas" });
+  const expand = app.getByRole("button", { name: "Expand artifact" });
   await expand.waitFor();
   const appearance = await expand.evaluate(button => {
-    const viewport = document.getElementById("canvas-viewport")!;
-    const shell = document.getElementById("canvas-shell")!;
+    const viewport = document.getElementById("artifact-viewport")!;
+    const shell = document.getElementById("artifact-shell")!;
     return {
       bodyBackground: getComputedStyle(document.body).backgroundColor,
       htmlBackground: getComputedStyle(document.documentElement).backgroundColor,
@@ -405,9 +405,10 @@ test("negotiates fullscreen while preserving state and survives external, declin
   await page.close();
 }, 30_000);
 
-test("routes canvasFetch through canvas_request only for server-enabled MCP canvases", async () => {
-  const meta = await resultFor(SERVER_CANVAS, "server-data");
-  meta.canvas.server = true;
+test.each([false, true])("routes server requests for cached legacy runtime=%s only when enabled", async legacy => {
+  const meta = await resultFor(SERVER_ARTIFACT, "server-data");
+  if (legacy) meta.artifact.js = meta.artifact.js.replaceAll("__artifacts", "__herdrCanvas");
+  meta.artifact.server = true;
   const { page, app, errors } = await openHost();
   await page.evaluate(() => window.mcpHost!.setServerToolResult({
     content: [],
@@ -421,26 +422,26 @@ test("routes canvasFetch through canvas_request only for server-enabled MCP canv
     },
   }));
   await page.evaluate(meta => window.mcpHost!.sendResult({
-    content: [{ type: "text", text: "Server canvas ready" }],
+    content: [{ type: "text", text: "Server artifact ready" }],
     _meta: meta,
   }), meta);
-  await app.getByRole("heading", { name: "Server canvas" }).waitFor();
+  await app.getByRole("heading", { name: "Server artifact" }).waitFor();
   const load = app.getByRole("button", { name: "Load server data" });
   await load.click();
   await app.getByText('Result: 202:{"rows":2}').waitFor();
 
   const calls = await page.evaluate(() => window.mcpHost!.serverToolCalls);
   expect(calls).toHaveLength(1);
-  expect(calls[0]?.name).toBe("canvas_request");
+  expect(calls[0]?.name).toBe("artifact_request");
   expect(Object.keys(calls[0]?.arguments ?? {}).sort()).toEqual(["request", "version_id"]);
-  expect(calls[0]?.arguments?.version_id).toBe(meta.canvas.versionId);
+  expect(calls[0]?.arguments?.version_id).toBe(meta.artifact.versionId);
   const request = calls[0]?.arguments?.request as {
     path: string; method: string; headers: [string, string][]; body: string;
   };
   expect(request.path).toBe("/api/items?limit=2");
   expect(request.method).toBe("POST");
   expect(new Headers(request.headers).get("content-type")).toBe("application/json");
-  expect(atob(request.body)).toBe('{"source":"canvas"}');
+  expect(atob(request.body)).toBe('{"source":"artifact"}');
 
   await page.evaluate(() => window.mcpHost!.setServerToolResult({
     content: [{ type: "text", text: "Database unavailable" }],
@@ -450,22 +451,22 @@ test("routes canvasFetch through canvas_request only for server-enabled MCP canv
   await app.getByText("Result: error:Database unavailable").waitFor();
   await page.evaluate(() => window.mcpHost!.setServerToolResult({ content: [], structuredContent: {} }));
   await load.click();
-  await app.getByText("Result: error:Canvas server response was missing.").waitFor();
+  await app.getByText("Result: error:Artifact server response was missing.").waitFor();
 
-  const withoutServer = { canvas: { ...meta.canvas, server: false } };
+  const withoutServer = { artifact: { ...meta.artifact, server: false } };
   await page.evaluate(meta => window.mcpHost!.sendResult({ content: [], _meta: meta }), withoutServer);
-  await app.getByRole("heading", { name: "Server canvas" }).waitFor();
+  await app.getByRole("heading", { name: "Server artifact" }).waitFor();
   await load.click();
-  await app.getByText("Result: error:Canvas server requests are unavailable in this view.").waitFor();
+  await app.getByText("Result: error:Artifact server requests are unavailable in this view.").waitFor();
   expect(await page.evaluate(() => window.mcpHost!.serverToolCalls.length)).toBe(3);
   expect(errors).toEqual([]);
   await page.close();
 }, 30_000);
 
 test("ordinary React hooks update component state through the canonical and legacy SDK imports", async () => {
-  const { HOOKS_CANVAS } = await import("../src/test/fixtures");
-  for (const specifier of ["sidequery/canvas", "herdr/canvas", "cursor/canvas"]) {
-    const meta = await resultFor(HOOKS_CANVAS.replaceAll("sidequery/canvas", specifier), "hooks");
+  const { HOOKS_ARTIFACT } = await import("../src/test/fixtures");
+  for (const specifier of ["sidequery/artifacts", "herdr/canvas", "cursor/canvas"]) {
+    const meta = await resultFor(HOOKS_ARTIFACT.replaceAll("sidequery/artifacts", specifier), "hooks");
     const { page, app, errors } = await openHost();
     await page.evaluate(meta => window.mcpHost!.sendResult({ content: [], _meta: meta }), meta);
     await app.getByRole("button", { name: "Hooks 0:0:0:0:0", exact: true }).click();
@@ -478,25 +479,25 @@ test("ordinary React hooks update component state through the canonical and lega
 
 
 test("routes plugin calls through MCP and removes the bridge for an unavailable view", async () => {
-  const source = `import { Button, pluginCall, useState } from "sidequery/canvas";
-export default function Canvas() {
+  const source = `import { Button, pluginCall, useState } from "sidequery/artifacts";
+export default function Artifact() {
   const [value, setValue] = useState("idle");
   return <><Button onClick={() => { pluginCall<string>("directory", "lookup", {id:"one"}).then(setValue).catch(e => setValue(e.message)); }}>Lookup</Button><p>{value}</p></>;
 }`;
   const meta = await resultFor(source, "plugin-call");
-  meta.canvas.plugins = true;
+  meta.artifact.plugins = true;
   const { page, app, errors } = await openHost();
   await page.evaluate(() => window.mcpHost!.setServerToolResult({ content: [], structuredContent: { result: "Found one" } }));
   await page.evaluate(meta => window.mcpHost!.sendResult({ content: [], _meta: meta }), meta);
   await app.getByRole("button", { name: "Lookup" }).click();
   await app.getByText("Found one").waitFor();
   expect(await page.evaluate(() => window.mcpHost!.serverToolCalls.map(({ name, arguments: args }) => ({ name, arguments: args })))).toEqual([
-    { name: "canvas_plugin_call", arguments: { plugin: "directory", operation: "lookup", input: { id: "one" } } },
+    { name: "artifact_plugin_call", arguments: { plugin: "directory", operation: "lookup", input: { id: "one" } } },
   ]);
   await page.evaluate(() => window.mcpHost!.setServerToolResult({ content: [{ type: "text", text: "Operation denied" }], isError: true }));
   await app.getByRole("button", { name: "Lookup" }).click();
   await app.getByText("Operation denied").waitFor();
-  meta.canvas.plugins = false;
+  meta.artifact.plugins = false;
   await page.evaluate(meta => window.mcpHost!.sendResult({ content: [], _meta: meta }), meta);
   await app.getByRole("button", { name: "Lookup" }).click();
   await app.getByText("Plugin functions are unavailable in this view").waitFor();
@@ -506,9 +507,9 @@ export default function Canvas() {
 }, 30_000);
 
 
-test("routed canvases navigate inside MCP and reset when a new preview arrives", async () => {
-  const { ROUTING_CANVAS } = await import("../src/test/routing");
-  const meta = await resultFor(ROUTING_CANVAS, "routed");
+test("routed artifacts navigate inside MCP and reset when a new preview arrives", async () => {
+  const { ROUTING_ARTIFACT } = await import("../src/test/routing");
+  const meta = await resultFor(ROUTING_ARTIFACT, "routed");
   const { page, app, errors } = await openHost();
   const outerUrl = page.url();
   await page.evaluate(meta => window.mcpHost!.sendResult({ content: [], _meta: meta }), meta);
@@ -523,15 +524,16 @@ test("routed canvases navigate inside MCP and reset when a new preview arrives",
   await page.close();
 }, 30000);
 
-test("canvas files use pinned metadata tools and host downloads without a generated server", async () => {
-  const source = `import { Button, canvasFiles, useState } from "sidequery/canvas";
-export default function Canvas() {
+test.each([false, true])("file tools and downloads support cached legacy runtime=%s without a server", async legacy => {
+  const source = `import { Button, artifactFiles, useState } from "sidequery/artifacts";
+export default function Artifact() {
   const [value, setValue] = useState("idle");
-  return <><Button onClick={() => { canvasFiles.list().then(v => setValue(v.files[0]?.name ?? "empty")).catch(e => setValue(e.message)); }}>List files</Button><Button onClick={() => { canvasFiles.download("one").then(() => setValue("downloaded")).catch(e => setValue(e.message)); }}>Download file</Button><p>{value}</p></>;
+  return <><Button onClick={() => { artifactFiles.list().then(v => setValue(v.files[0]?.name ?? "empty")).catch(e => setValue(e.message)); }}>List files</Button><Button onClick={() => { artifactFiles.download("one").then(() => setValue("downloaded")).catch(e => setValue(e.message)); }}>Download file</Button><p>{value}</p></>;
 }`;
   const meta = await resultFor(source, "files");
-  meta.canvas.files = true;
-  meta.canvas.server = false;
+  if (legacy) meta.artifact.js = meta.artifact.js.replaceAll("__artifacts", "__herdrCanvas");
+  meta.artifact.files = true;
+  meta.artifact.server = false;
   const { page, app, errors } = await openHost();
   const file = { id: "one", name: "report.csv", size: 123, type: "text/csv", uploaded: "2026-09-07T00:00:00Z" };
   await page.evaluate(file => window.mcpHost!.setServerToolResult({ content: [], structuredContent: { result: { files: [file] } } }), file);
@@ -539,22 +541,48 @@ export default function Canvas() {
   await app.getByRole("button", { name: "List files" }).click();
   await app.getByText("report.csv", { exact: true }).waitFor();
   expect(await page.evaluate(() => window.mcpHost!.serverToolCalls.map(({ name, arguments: args }) => ({ name, arguments: args })))).toEqual([
-    { name: "canvas_files", arguments: { version_id: meta.canvas.versionId, request: { operation: "list" } } },
+    { name: "artifact_files", arguments: { version_id: meta.artifact.versionId, request: { operation: "list" } } },
   ]);
-  const url = `https://canvas.example/api/canvas/files/transfer/${"a".repeat(64)}/12345678-1234-1234-1234-123456789abc`;
+  const url = `https://artifact.example/api/${legacy ? "canvas" : "artifact"}/files/transfer/${"a".repeat(64)}/12345678-1234-1234-1234-123456789abc`;
   await page.evaluate(({ file, url }) => window.mcpHost!.setServerToolResult({ content: [], structuredContent: { result: { file, url, expires: "2026-09-07T00:05:00Z" } } }), { file, url });
   await app.getByRole("button", { name: "Download file" }).click();
   await app.getByText("downloaded", { exact: true }).waitFor();
   expect(await page.evaluate(() => window.mcpHost!.links)).toEqual([url]);
-  expect(await page.evaluate(() => { const call = window.mcpHost!.serverToolCalls[1]!; return { name: call.name, arguments: call.arguments }; })).toEqual({ name: "canvas_files", arguments: { version_id: meta.canvas.versionId, request: { operation: "download", id: "one" } } });
+  expect(await page.evaluate(() => { const call = window.mcpHost!.serverToolCalls[1]!; return { name: call.name, arguments: call.arguments }; })).toEqual({ name: "artifact_files", arguments: { version_id: meta.artifact.versionId, request: { operation: "download", id: "one" } } });
   await page.evaluate(() => window.mcpHost!.setServerToolResult({ content: [{ type: "text", text: "File access denied" }], isError: true }));
   await app.getByRole("button", { name: "List files" }).click();
   await app.getByText("File access denied", { exact: true }).waitFor();
-  meta.canvas.files = false;
+  meta.artifact.files = false;
   await page.evaluate(meta => window.mcpHost!.sendResult({ content: [], _meta: meta }), meta);
   await app.getByRole("button", { name: "List files" }).click();
-  await app.getByText("Canvas files are unavailable in this view.", { exact: true }).waitFor();
+  await app.getByText("Artifact files are unavailable in this view.", { exact: true }).waitFor();
   expect(await page.evaluate(() => window.mcpHost!.serverToolCalls.length)).toBe(3);
   expect(errors).toEqual([]);
   await page.close();
 }, 30_000);
+
+
+test("cached Canvas runtime receives state and themes and unmounts when replaced", async () => {
+  const meta = await resultFor(INTERACTIVE_ARTIFACT, "cached", { count: 7 });
+  // Archived JS carries the original globals/event names independently of today's compiler aliases.
+  meta.artifact.js = meta.artifact.js.replaceAll("__artifacts", "__herdrCanvas").replaceAll("artifact-theme-change", "canvas-theme-change");
+  const { page, app, errors } = await openHost();
+  await page.evaluate(meta => window.mcpHost!.sendResult({ content: [], _meta: meta }), meta);
+  await app.getByText("Count: 7").waitFor();
+  await app.getByRole("button", { name: "Increment" }).click();
+  await app.getByText("Count: 8").waitFor();
+  await page.evaluate(() => window.mcpHost!.setTheme("light"));
+  await app.getByText("Theme: light").waitFor();
+  await app.locator("#root").evaluate(() => {
+    const host = window as typeof window & { __herdrCanvasUnmount?: () => void; legacyUnmounts?: number };
+    const unmount = host.__herdrCanvasUnmount!;
+    host.__herdrCanvasUnmount = () => { host.legacyUnmounts = (host.legacyUnmounts ?? 0) + 1; unmount(); };
+  });
+  const replacement = await resultFor(INTERACTIVE_ARTIFACT.replace("Interactive artifact", "Fresh artifact"), "fresh", { count: 2 });
+  await page.evaluate(meta => window.mcpHost!.sendResult({ content: [], _meta: meta }), replacement);
+  await app.getByRole("heading", { name: "Fresh artifact" }).waitFor();
+  await app.getByText("Count: 2").waitFor();
+  expect(await app.locator("#root").evaluate(() => (window as typeof window & { legacyUnmounts?: number }).legacyUnmounts)).toBe(1);
+  expect(errors).toEqual([]);
+  await page.close();
+}, 30000);

@@ -1,6 +1,6 @@
 import { ProjectStorage } from "./project-storage";
 import { DurableObject } from "cloudflare:workers";
-import { sha256, MAX_SOURCE_BYTES, type CanvasEdit } from "./library";
+import { sha256, MAX_SOURCE_BYTES, type ArtifactEdit } from "./library";
 
 import { emptyProject, normalizeProject, projectSourceHash, type ArtifactProject } from "./project";
 
@@ -92,7 +92,7 @@ export class ScriptLibrary extends DurableObject<unknown> {
     const actualEnd = Math.min(end,lines.length);
     return {workspace:row.workspace,name:row.name,path:input.file ?? `${row.workspace}/${row.name}.script.ts`,file:input.file,project,source:lines.slice(start-1,actualEnd).join(""),source_hash:input.file === undefined ? row.source_hash : sha256(selected),total_lines:lines.length,start_line:start,end_line:actualEnd,next_line:actualEnd<lines.length?actualEnd+1:null};
   }
-  editDraft(input: {workspace: string; name: string; file?: string; edits: CanvasEdit[]; expected_hash?: string}) {
+  editDraft(input: {workspace: string; name: string; file?: string; edits: ArtifactEdit[]; expected_hash?: string}) {
     return this.ctx.storage.transactionSync(() => {
       const row = this.row(input), project = this.projectStorage.read(row.project);
       if (input.file !== undefined && !Object.hasOwn(project.files,input.file)) throw new Error("project file not found");

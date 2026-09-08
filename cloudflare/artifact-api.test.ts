@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
-import { canvasApiRequest, canvasApiResponse } from "./canvas-api";
+import { artifactApiRequest, artifactApiResponse } from "./artifact-api";
 
 test("direct API envelopes preserve binary bodies, query strings and public application credentials", async () => {
   const bytes = new Uint8Array([0, 255, 128, 10, 13]);
-  const input = await canvasApiRequest(new Request("https://canvas.example/demo/api/items?a=1&a=%FF", {
+  const input = await artifactApiRequest(new Request("https://artifact.example/demo/api/items?a=1&a=%FF", {
     method: "PATCH", body: bytes,
     headers: { cookie: "session=private", "cf-access-jwt-assertion": "jwt", "cf-access-client-id": "id", "cf-access-client-secret": "secret", authorization: "Bearer app-token", "x-input": "kept" },
   }), "/demo", false);
@@ -14,7 +14,7 @@ test("direct API envelopes preserve binary bodies, query strings and public appl
   for (const name of ["cookie", "cf-access-jwt-assertion", "cf-access-client-id", "cf-access-client-secret"]) expect(headers.has(name)).toBe(false);
   expect(headers.get("authorization")).toBe("Bearer app-token");
   expect(headers.get("x-input")).toBe("kept");
-  const response = canvasApiResponse({ status: 201, statusText: "Created", headers: [["x-output", "kept"], ["set-cookie", "session=forged"], ["content-type", "application/octet-stream"]], body: input.body }, "PATCH");
+  const response = artifactApiResponse({ status: 201, statusText: "Created", headers: [["x-output", "kept"], ["set-cookie", "session=forged"], ["content-type", "application/octet-stream"]], body: input.body }, "PATCH");
   expect(response.status).toBe(201);
   expect(response.statusText).toBe("Created");
   expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
@@ -25,7 +25,7 @@ test("direct API envelopes preserve binary bodies, query strings and public appl
 
 test("private API requests remove authorization and GET/HEAD requests have no body", async () => {
   for (const method of ["GET", "HEAD"]) {
-    const input = await canvasApiRequest(new Request("https://canvas.example/demo/api", { method, headers: { authorization: "Bearer management" } }), "/demo", true);
+    const input = await artifactApiRequest(new Request("https://artifact.example/demo/api", { method, headers: { authorization: "Bearer management" } }), "/demo", true);
     expect(input.path).toBe("/api");
     expect(input.body).toBeUndefined();
     expect(new Headers(input.headers).has("authorization")).toBe(false);
@@ -33,19 +33,19 @@ test("private API requests remove authorization and GET/HEAD requests have no bo
 });
 
 test("direct API requests enforce the 256 KiB byte boundary", async () => {
-  const atLimit = await canvasApiRequest(new Request("https://canvas.example/demo/api", { method: "POST", body: new Uint8Array(256 * 1024) }), "/demo", false);
+  const atLimit = await artifactApiRequest(new Request("https://artifact.example/demo/api", { method: "POST", body: new Uint8Array(256 * 1024) }), "/demo", false);
   expect(atob(atLimit.body!).length).toBe(256 * 1024);
-  await expect(canvasApiRequest(new Request("https://canvas.example/demo/api", { method: "POST", body: new Uint8Array(256 * 1024 + 1) }), "/demo", false)).rejects.toThrow("256 KiB");
+  await expect(artifactApiRequest(new Request("https://artifact.example/demo/api", { method: "POST", body: new Uint8Array(256 * 1024 + 1) }), "/demo", false)).rejects.toThrow("256 KiB");
 });
 
 test("API responses preserve not-found status, sandbox HTML and suppress bodyless payloads", async () => {
-  const response = canvasApiResponse({ status: 404, statusText: "Not Found", headers: [["content-type", "text/html"], ["content-security-policy", "default-src 'self'"]], body: btoa("<h1>Missing</h1>") }, "GET");
+  const response = artifactApiResponse({ status: 404, statusText: "Not Found", headers: [["content-type", "text/html"], ["content-security-policy", "default-src 'self'"]], body: btoa("<h1>Missing</h1>") }, "GET");
   expect(response.status).toBe(404);
   expect(await response.text()).toBe("<h1>Missing</h1>");
   expect(response.headers.get("content-security-policy")).toContain("default-src 'self'");
   expect(response.headers.get("content-security-policy")).toContain("sandbox allow-scripts allow-forms");
   for (const [method, status] of [["HEAD", 200], ["GET", 204], ["GET", 205], ["GET", 304]] as const) {
-    expect(canvasApiResponse({ status, statusText: "", headers: [], body: btoa("ignored") }, method).body).toBeNull();
+    expect(artifactApiResponse({ status, statusText: "", headers: [], body: btoa("ignored") }, method).body).toBeNull();
   }
-  expect(() => canvasApiResponse({ status: 200, statusText: "OK", headers: [], body: btoa("x".repeat(256 * 1024 + 1)) }, "GET")).toThrow("256 KiB");
+  expect(() => artifactApiResponse({ status: 200, statusText: "OK", headers: [], body: btoa("x".repeat(256 * 1024 + 1)) }, "GET")).toThrow("256 KiB");
 });

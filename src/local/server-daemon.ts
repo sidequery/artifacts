@@ -4,12 +4,12 @@ import { mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/prom
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
-import { canvasDataRoot, ensureCelldRuntime } from "./celld-runtime";
+import { artifactDataRoot, ensureCelldRuntime } from "./celld-runtime";
 import { CLI_ENTRY, PLUGIN_ROOT } from "../paths";
 
 export const SERVER_PORT = 4786;
-export const LAUNCHD_LABEL = "com.sidequery.canvas.server";
-export const SYSTEMD_UNIT = "sidequery-canvas-server.service";
+export const LAUNCHD_LABEL = "com.sidequery.artifacts.server";
+export const SYSTEMD_UNIT = "sidequery-artifacts-server.service";
 
 export type CommandResult = { exitCode: number; stdout: string; stderr: string };
 export type RunCommand = (command: string, args: string[]) => Promise<CommandResult>;
@@ -59,12 +59,26 @@ export function serverDaemonPaths(
   platform: NodeJS.Platform = process.platform,
   home = homedir(),
 ) {
-  const dataRoot = canvasDataRoot(env, platform, home);
+  const dataRoot = artifactDataRoot(env, platform, home);
   const daemonDir = join(dataRoot, "daemon");
   const serviceSuffix = createHash("sha256").update(dataRoot).digest("hex").slice(0, 12);
-  const launchdLabel = `${LAUNCHD_LABEL}.${serviceSuffix}`;
-  const systemdUnit = `sidequery-canvas-server-${serviceSuffix}.service`;
+  let launchdLabel = `${LAUNCHD_LABEL}.${serviceSuffix}`;
+  let systemdUnit = `sidequery-artifacts-server-${serviceSuffix}.service`;
   const systemdConfig = platform === "linux" && env.XDG_CONFIG_HOME ? resolve(env.XDG_CONFIG_HOME) : join(home, ".config");
+  // Reuse installed service identities so start/stop/status still control the
+  // existing daemon and its state directory after a package upgrade.
+  const legacyLabel = `com.sidequery.canvas.server.${serviceSuffix}`;
+  const legacyUnit = `sidequery-canvas-server-${serviceSuffix}.service`;
+  const hasLaunchd = (label: string) => existsSync(join(daemonDir, `${label}.plist`)) || existsSync(join(home, "Library", "LaunchAgents", `${label}.plist`));
+  const hasSystemd = (unit: string) => existsSync(join(systemdConfig, "systemd", "user", unit));
+  if (platform === "darwin" && hasLaunchd(legacyLabel)) {
+    if (hasLaunchd(launchdLabel)) throw new Error("Both legacy Canvas and Artifacts services exist for this data root; resolve the duplicate service definitions first");
+    launchdLabel = legacyLabel;
+  }
+  if (platform === "linux" && hasSystemd(legacyUnit)) {
+    if (hasSystemd(systemdUnit)) throw new Error("Both legacy Canvas and Artifacts services exist for this data root; resolve the duplicate service definitions first");
+    systemdUnit = legacyUnit;
+  }
   return {
     dataRoot,
     daemonDir,
@@ -96,7 +110,7 @@ function systemdQuote(value: string): string {
 }
 
 function systemdPathValue(value: string): string {
-  if (/[\r\n]/.test(value)) throw new Error("Canvas data paths containing line breaks are unsupported by systemd");
+  if (/[\r\n]/.test(value)) throw new Error("Artifact data paths containing line breaks are unsupported by systemd");
   return value.replaceAll("\\", "\\\\").replaceAll("%", "%%");
 }
 
@@ -128,7 +142,7 @@ ${args}
     </array>
     <key>EnvironmentVariables</key>
     <dict>
-      <key>CANVAS_DATA_HOME</key>
+      <key>ARTIFACTS_DATA_HOME</key>
       <string>${xml(input.paths.dataRoot)}</string>
     </dict>
     <key>RunAtLoad</key>
@@ -156,12 +170,12 @@ export function systemdUnit(input: { execPath: string; cliEntry: string; port: n
   // The colon prefix disables systemd dollar expansion for these literal paths.
   const command = ["/usr/bin/env", "--", ...serverArguments(input)].map(systemdQuote).join(" ");
   return `[Unit]
-Description=Sidequery Canvas local server
+Description=Sidequery Artifacts local server
 After=network.target
 
 [Service]
 Type=simple
-Environment=${systemdQuote(`CANVAS_DATA_HOME=${input.paths.dataRoot}`)}
+Environment=${systemdQuote(`ARTIFACTS_DATA_HOME=${input.paths.dataRoot}`)}
 WorkingDirectory=${systemdPathValue(input.paths.dataRoot)}
 ExecStart=:${command}
 Restart=on-failure
@@ -244,7 +258,7 @@ export class ServerDaemonManager {
   constructor(dependencies: ServerDaemonDependencies = {}) {
     this.platform = dependencies.platform ?? process.platform;
     if (this.platform !== "darwin" && this.platform !== "linux") {
-      throw new Error(`Canvas server background service is unsupported on ${this.platform}; background services require macOS launchd or Linux systemd.`);
+      throw new Error(`Artifact server background service is unsupported on ${this.platform}; background services require macOS launchd or Linux systemd.`);
     }
     const home = dependencies.home ?? homedir();
     this.paths = serverDaemonPaths(dependencies.env, this.platform, home);
@@ -267,7 +281,7 @@ export class ServerDaemonManager {
     });
     this.prepareRuntime = dependencies.prepareRuntime ?? (async dataRoot => {
       if (!existsSync(join(PLUGIN_ROOT, "dist", "celld", "wrangler.jsonc"))) {
-        throw new Error("Packaged Canvas server assets are missing. From a source checkout, run bun run build:package first.");
+        throw new Error("Packaged Artifact server assets are missing. From a source checkout, run bun run build:package first.");
       }
       await ensureCelldRuntime({ dataRoot, notify: message => console.error(message) });
     });
@@ -341,11 +355,11 @@ export class ServerDaemonManager {
     const port = options.port ?? SERVER_PORT;
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("server start --port must be an integer between 1 and 65535");
     const current = await this.status();
-    if (current.running) throw new Error(`Canvas server is already ${current.detail}${current.url ? ` at ${current.url}` : ""}.`);
+    if (current.running) throw new Error(`Artifact server is already ${current.detail}${current.url ? ` at ${current.url}` : ""}.`);
     await this.prepareRuntime(this.paths.dataRoot);
     const loaded = await this.supervisorState();
     if (loaded.loaded) await this.stopSupervisor();
-    if (!this.portAvailable(port)) throw new Error(`Canvas server port ${port} is already in use.`);
+    if (!this.portAvailable(port)) throw new Error(`Artifact server port ${port} is already in use.`);
     await mkdir(this.paths.daemonDir, { recursive: true, mode: 0o700 });
     await rm(this.paths.readyPath, { force: true });
     const config: ServerConfig = { port, stateDir: this.paths.stateDir };
@@ -382,7 +396,7 @@ export class ServerDaemonManager {
         if (status.ready) return status;
         await this.sleep(100);
       }
-      throw new Error(`Canvas server did not become ready within 190 seconds. See ${this.paths.logPath}`);
+      throw new Error(`Artifact server did not become ready within 190 seconds. See ${this.paths.logPath}`);
     } catch (error) {
       return await this.failStart(error);
     }
@@ -396,7 +410,7 @@ export class ServerDaemonManager {
     const message = error instanceof Error ? error.message : String(error);
     if (cleanupError) {
       const cleanup = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
-      throw new Error(`${message} Cleanup also failed: ${cleanup}. Check \`canvas server status\` and \`canvas server logs\`.`);
+      throw new Error(`${message} Cleanup also failed: ${cleanup}. Check \`artifacts server status\` and \`artifacts server logs\`.`);
     }
     throw new Error(`${message} The created service was stopped.`);
   }
@@ -422,7 +436,7 @@ export class ServerDaemonManager {
       }
       await this.sleep(100);
     }
-    throw new Error(`Canvas server did not stop within 60 seconds. See ${this.paths.logPath}`);
+    throw new Error(`Artifact server did not stop within 60 seconds. See ${this.paths.logPath}`);
   }
 
   async uninstall(): Promise<ServerDaemonStatus> {

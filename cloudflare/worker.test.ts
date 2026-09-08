@@ -5,17 +5,17 @@ import { Miniflare } from "miniflare";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { chromium } from "playwright";
-import { ROUTING_CANVAS } from "../src/test/routing";
+import { ROUTING_ARTIFACT } from "../src/test/routing";
 
 let runtime: Miniflare;
 let runtimeOptions: ConstructorParameters<typeof Miniflare>[0];
 let client: Client;
 let origin: string;
-const source = 'import { Button, H1, Stack, useCanvasState } from "sidequery/canvas";\nexport default function Canvas() { const [n, setN] = useCanvasState("n", 0); return <Stack><H1>Hosted canvas</H1><Button onClick={() => setN(n+1)}>Count {n}</Button></Stack>; }\n';
-const counterClient = await readFile(new URL("../examples/counter.canvas.tsx", import.meta.url), "utf8");
-const counterServer = await readFile(new URL("../examples/counter.canvas.server.ts", import.meta.url), "utf8");
+const source = 'import { Button, H1, Stack, useArtifactState } from "sidequery/artifacts";\nexport default function Artifact() { const [n, setN] = useArtifactState("n", 0); return <Stack><H1>Hosted artifact</H1><Button onClick={() => setN(n+1)}>Count {n}</Button></Stack>; }\n';
+const counterClient = await readFile(new URL("../examples/counter.artifact.tsx", import.meta.url), "utf8");
+const counterServer = await readFile(new URL("../examples/counter.artifact.server.ts", import.meta.url), "utf8");
 const apiServer = `import { DurableObject } from "cloudflare:workers";
-export class CanvasServer extends DurableObject {
+export class ArtifactServer extends DurableObject {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === "/api/headers") return Response.json(Object.fromEntries(request.headers));
@@ -34,26 +34,26 @@ beforeAll(async () => {
     if (name.endsWith(".wasm")) modules[name] = { type: "wasm", contents: await readFile(join(modulesRoot, name)) };
   }
   runtimeOptions = { cf: false, port: 0, workers: [{ config: {
-    name: "canvas-app-test", type: "worker", compatibilityDate: "2026-09-06", compatibilityFlags: ["nodejs_compat"],
+    name: "artifact-app-test", type: "worker", compatibilityDate: "2026-09-06", compatibilityFlags: ["nodejs_compat"],
     manifest: { mainModule: "worker.js", modulesRoot, modules },
     env: {
       ENVIRONMENT: { type: "text", value: "local" },
-      LIBRARIES: { type: "durable-object", worker: "canvas-app-test", exportName: "CanvasLibrary" },
-      BACKENDS: { type: "durable-object", worker: "canvas-app-test", exportName: "CanvasBackend" },
-      LINKS: { type: "durable-object", worker: "canvas-app-test", exportName: "ArtifactLinks" },
-      SCRIPTS: { type: "durable-object", worker: "canvas-app-test", exportName: "ScriptLibrary" },
-      SCRIPT_BACKENDS: { type: "durable-object", worker: "canvas-app-test", exportName: "ScriptBackend" },
-      FILE_BACKENDS: { type: "durable-object", worker: "canvas-app-test", exportName: "CanvasFiles" },
-      FILES: { type: "r2", name: "canvas-test-files" },
+      LIBRARIES: { type: "durable-object", worker: "artifact-app-test", exportName: "ArtifactLibrary" },
+      BACKENDS: { type: "durable-object", worker: "artifact-app-test", exportName: "ArtifactBackend" },
+      LINKS: { type: "durable-object", worker: "artifact-app-test", exportName: "ArtifactLinks" },
+      SCRIPTS: { type: "durable-object", worker: "artifact-app-test", exportName: "ScriptLibrary" },
+      SCRIPT_BACKENDS: { type: "durable-object", worker: "artifact-app-test", exportName: "ScriptBackend" },
+      FILE_BACKENDS: { type: "durable-object", worker: "artifact-app-test", exportName: "ArtifactFiles" },
+      FILES: { type: "r2", name: "artifact-test-files" },
       LOADER: { type: "worker-loader" },
       ASSETS: { type: "assets" },
     },
-    exports: { CanvasFiles: { type: "durable-object", storage: "sqlite" }, ArtifactLinks: { type: "durable-object", storage: "sqlite" }, ScriptLibrary: { type: "durable-object", storage: "sqlite" }, ScriptBackend: { type: "durable-object", storage: "sqlite" }, CanvasLibrary: { type: "durable-object", storage: "sqlite" }, CanvasBackend: { type: "durable-object", storage: "sqlite" } },
+    exports: { ArtifactFiles: { type: "durable-object", storage: "sqlite" }, ArtifactLinks: { type: "durable-object", storage: "sqlite" }, ScriptLibrary: { type: "durable-object", storage: "sqlite" }, ScriptBackend: { type: "durable-object", storage: "sqlite" }, ArtifactLibrary: { type: "durable-object", storage: "sqlite" }, ArtifactBackend: { type: "durable-object", storage: "sqlite" } },
     assets: { directory: join(import.meta.dir, "../dist/cloudflare/assets"), hasUserWorker: true, runWorkerFirst: true, htmlHandling: "none" },
   }, dev: {} }] };
   runtime = new Miniflare(runtimeOptions);
   origin = (await runtime.ready).origin;
-  client = new Client({ name: "canvas-integration", version: "1" });
+  client = new Client({ name: "artifact-integration", version: "1" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`${origin}/mcp?workspace=test`)));
 }, 30000);
 afterAll(async () => { await client?.close(); await runtime?.dispose(); });
@@ -65,56 +65,56 @@ function payload(result: Awaited<ReturnType<Client["callTool"]>>) {
 
 test("official HTTP MCP client lists contracts, writes, edits, restores and retrieves raw history", async () => {
   const tools = (await client.listTools()).tools;
-  expect(tools.some(tool => tool.name === "canvas_write")).toBe(true);
-  expect(tools.some(tool => tool.name === "canvas_guide")).toBe(true);
-  const guide = await client.callTool({ name: "canvas_guide", arguments: {} });
+  expect(tools.some(tool => tool.name === "artifact_write")).toBe(true);
+  expect(tools.some(tool => tool.name === "artifact_guide")).toBe(true);
+  const guide = await client.callTool({ name: "artifact_guide", arguments: {} });
   expect(guide.isError).not.toBe(true);
   const guideText = (guide.content as { text: string }[])[0]!.text;
-  expect(guideText).toContain("sidequery/canvas");
+  expect(guideText).toContain("sidequery/artifacts");
   expect(tools.find(tool => tool.name === "script_guide")?.annotations?.readOnlyHint).toBe(true);
   const scriptGuide = await client.callTool({ name: "script_guide", arguments: {} });
   expect(scriptGuide.isError).not.toBe(true);
   expect((scriptGuide.content as { text: string }[])[0]!.text).toContain("Third-party dependencies");
-  expect((tools.find(tool => tool.name === "canvas_open")!.inputSchema.properties!.target as { enum: string[] }).enum).toEqual(["inline"]);
-  const result = await client.callTool({ name: "canvas_write", arguments: { name: "overview", contents: source } });
+  expect((tools.find(tool => tool.name === "artifact_open")!.inputSchema.properties!.target as { enum: string[] }).enum).toEqual(["inline"]);
+  const result = await client.callTool({ name: "artifact_write", arguments: { name: "overview", contents: source } });
   expect(result.isError).not.toBe(true);
   expect(payload(result)).toMatchObject({ applied: true, ok: true });
-  const canvas = (result._meta as { canvas: { js: string; versionId: string } }).canvas;
-  expect(canvas.js).toContain("Hosted canvas");
-  expect(JSON.stringify(result.content)).not.toContain("__herdrCanvasRuntime");
-  version = canvas.versionId;
-  const resource = await client.readResource({ uri: "ui://canvas/viewer.html" });
+  const artifact = (result._meta as { artifact: { js: string; versionId: string } }).artifact;
+  expect(artifact.js).toContain("Hosted artifact");
+  expect(JSON.stringify(result.content)).not.toContain("__artifactsRuntime");
+  version = artifact.versionId;
+  const resource = await client.readResource({ uri: "ui://artifacts/viewer.html" });
   expect(resource.contents[0]!.mimeType).toContain("text/html");
-  expect(payload(await client.callTool({ name: "canvas_read", arguments: { name: "overview" } })).source).toBe(source);
-  const failedEdit = await client.callTool({ name: "canvas_edit", arguments: { name: "overview", expected_hash: "0".repeat(64), edits: [{ old_text: "Hosted canvas", new_text: "Wrong" }] } });
+  expect(payload(await client.callTool({ name: "artifact_read", arguments: { name: "overview" } })).source).toBe(source);
+  const failedEdit = await client.callTool({ name: "artifact_edit", arguments: { name: "overview", expected_hash: "0".repeat(64), edits: [{ old_text: "Hosted artifact", new_text: "Wrong" }] } });
   expect(failedEdit.isError).toBe(true);
-  const edit = await client.callTool({ name: "canvas_edit", arguments: { name: "overview", edits: [{ old_text: "Hosted canvas", new_text: "Changed canvas" }] } });
+  const edit = await client.callTool({ name: "artifact_edit", arguments: { name: "overview", edits: [{ old_text: "Hosted artifact", new_text: "Changed artifact" }] } });
   expect(payload(edit).ok).toBe(true);
-  const restored = await client.callTool({ name: "canvas_restore", arguments: { version_id: version } });
+  const restored = await client.callTool({ name: "artifact_restore", arguments: { version_id: version } });
   expect(payload(restored)).toMatchObject({ restored: true, ok: true });
-  const historical = payload(await client.callTool({ name: "canvas_version", arguments: { version_id: version } }));
+  const historical = payload(await client.callTool({ name: "artifact_version", arguments: { version_id: version } }));
   expect(historical.source).toBe(source);
-  expect(payload(await client.callTool({ name: "canvas_history", arguments: { name: "overview" } })).versions.length).toBeGreaterThanOrEqual(3);
-  expect(payload(await client.callTool({ name: "canvas_history", arguments: { name: "overview", offset: 100 } }))).toMatchObject({ versions: [], next_offset: null });
-  expect(payload(await client.callTool({ name: "canvas_list", arguments: { offset: 100 } }))).toMatchObject({ canvases: [], next_offset: null });
-  expect(payload(await client.callTool({ name: "canvas_version", arguments: { version_id: version, events_offset: 100 } }))).toMatchObject({ events: [], events_offset: 100, next_events_offset: null });
-  await expect(client.callTool({ name: "canvas_write", arguments: { name: "bad" } })).rejects.toThrow("Invalid tool arguments");
-  await expect(client.callTool({ name: "canvas_open", arguments: { name: "overview", target: "herdr" } })).rejects.toThrow("Invalid tool arguments");
+  expect(payload(await client.callTool({ name: "artifact_history", arguments: { name: "overview" } })).versions.length).toBeGreaterThanOrEqual(3);
+  expect(payload(await client.callTool({ name: "artifact_history", arguments: { name: "overview", offset: 100 } }))).toMatchObject({ versions: [], next_offset: null });
+  expect(payload(await client.callTool({ name: "artifact_list", arguments: { offset: 100 } }))).toMatchObject({ artifacts: [], next_offset: null });
+  expect(payload(await client.callTool({ name: "artifact_version", arguments: { version_id: version, events_offset: 100 } }))).toMatchObject({ events: [], events_offset: 100, next_events_offset: null });
+  await expect(client.callTool({ name: "artifact_write", arguments: { name: "bad" } })).rejects.toThrow("Invalid tool arguments");
+  await expect(client.callTool({ name: "artifact_open", arguments: { name: "overview", target: "herdr" } })).rejects.toThrow("Invalid tool arguments");
 }, 60000);
 
 test("plugin HTTP and MCP routes expose catalog hints and validate requests", async () => {
   const tools = (await client.listTools()).tools;
   for (const name of ["plugins_list", "plugin_guide"]) expect(tools.find(tool => tool.name === name)?.annotations?.readOnlyHint).toBe(true);
-  expect(tools.find(tool => tool.name === "canvas_plugin_call")?.annotations?.readOnlyHint).toBe(false);
+  expect(tools.find(tool => tool.name === "artifact_plugin_call")?.annotations?.readOnlyHint).toBe(false);
   const list = await client.callTool({ name: "plugins_list", arguments: {} });
   expect(list.isError).not.toBe(true);
   expect(Array.isArray((list.structuredContent as { plugins: unknown[] }).plugins)).toBe(true);
   expect((await client.callTool({ name: "plugin_guide", arguments: {} })).isError).not.toBe(true);
   const call = { plugin: "missing-plugin-for-test", operation: "read", input: {} };
-  const missing = await client.callTool({ name: "canvas_plugin_call", arguments: call });
+  const missing = await client.callTool({ name: "artifact_plugin_call", arguments: call });
   expect(missing.isError).toBe(true);
   expect(JSON.stringify(missing)).toContain("Plugin operation not found");
-  await expect(client.callTool({ name: "canvas_plugin_call", arguments: { ...call, library: "team" } })).rejects.toThrow("Invalid tool arguments");
+  await expect(client.callTool({ name: "artifact_plugin_call", arguments: { ...call, library: "team" } })).rejects.toThrow("Invalid tool arguments");
   for (const library of ["private", "team"]) {
     const response = await fetch(`${origin}/api/plugins/call?library=${library}`, { method: "POST", body: JSON.stringify(call) });
     expect(response.status).toBe(404);
@@ -137,21 +137,21 @@ test("plugin HTTP and MCP routes expose catalog hints and validate requests", as
 });
 
 test("invalid drafts remain readable with diagnostics and no preview", async () => {
-  const result = await client.callTool({ name: "canvas_write", arguments: { name: "invalid", contents: 'const n: number = "bad"; export default function Canvas() { return <div>{n}</div>; }' } });
+  const result = await client.callTool({ name: "artifact_write", arguments: { name: "invalid", contents: 'const n: number = "bad"; export default function Artifact() { return <div>{n}</div>; }' } });
   expect(result.isError).toBe(true);
   expect(payload(result)).toMatchObject({ applied: true, ok: false });
   expect(result._meta).toBeUndefined();
-  expect(payload(await client.callTool({ name: "canvas_read", arguments: { name: "invalid" } })).source).toContain('"bad"');
+  expect(payload(await client.callTool({ name: "artifact_read", arguments: { name: "invalid" } })).source).toContain('"bad"');
 }, 30000);
 
-test("native canvas SQLite works through MCP and the gallery, persists across code changes, and restores paired source", async () => {
-  const written = await client.callTool({ name: "canvas_write", arguments: { name: "counter", contents: counterClient, server: counterServer } });
+test("native artifact SQLite works through MCP and the gallery, persists across code changes, and restores paired source", async () => {
+  const written = await client.callTool({ name: "artifact_write", arguments: { name: "counter", contents: counterClient, server: counterServer } });
   expect(written.isError).not.toBe(true);
-  const savedVersion = (written._meta as { canvas: { versionId: string; server: boolean } }).canvas;
+  const savedVersion = (written._meta as { artifact: { versionId: string; server: boolean } }).artifact;
   expect(savedVersion.server).toBe(true);
   expect(JSON.stringify(written.content)).not.toContain("create table");
   const callCounter = async (method = "GET", name = "counter") => {
-    const result = await client.callTool({ name: "canvas_request", arguments: { name, request: { path: "/counter", method } } });
+    const result = await client.callTool({ name: "artifact_request", arguments: { name, request: { path: "/counter", method } } });
     expect(result.isError).not.toBe(true);
     const response = (result.structuredContent as { response: { status: number; body: string } }).response;
     expect(response.status).toBe(200);
@@ -160,27 +160,27 @@ test("native canvas SQLite works through MCP and the gallery, persists across co
   expect((await callCounter()).value).toBe(0);
   expect((await callCounter("POST")).value).toBe(1);
   expect((await callCounter("POST")).lastUpdated).toBeString();
-  await client.callTool({ name: "canvas_write", arguments: { name: "other-counter", contents: counterClient, server: counterServer } });
+  await client.callTool({ name: "artifact_write", arguments: { name: "other-counter", contents: counterClient, server: counterServer } });
   expect((await callCounter("GET", "other-counter")).value).toBe(0);
   const otherWorkspace = new Client({ name: "other-workspace", version: "1" });
   try {
     await otherWorkspace.connect(new StreamableHTTPClientTransport(new URL(`${origin}/mcp?workspace=other`)));
-    expect((await otherWorkspace.callTool({ name: "canvas_write", arguments: { name: "counter", contents: counterClient, server: counterServer } })).isError).not.toBe(true);
-    const isolated = await otherWorkspace.callTool({ name: "canvas_request", arguments: { name: "counter", request: { path: "/counter" } } });
+    expect((await otherWorkspace.callTool({ name: "artifact_write", arguments: { name: "counter", contents: counterClient, server: counterServer } })).isError).not.toBe(true);
+    const isolated = await otherWorkspace.callTool({ name: "artifact_request", arguments: { name: "counter", request: { path: "/counter" } } });
     expect(isolated.isError).not.toBe(true);
     expect(JSON.parse(atob((isolated.structuredContent as { response: { body: string } }).response.body)).value).toBe(0);
   } finally { await otherWorkspace.close(); }
-  const edited = await client.callTool({ name: "canvas_edit", arguments: { name: "counter", part: "server", edits: [{ old_text: "value: row.value", new_text: "value: row.value, generation: 2" }] } });
+  const edited = await client.callTool({ name: "artifact_edit", arguments: { name: "counter", part: "server", edits: [{ old_text: "value: row.value", new_text: "value: row.value, generation: 2" }] } });
   expect(edited.isError).not.toBe(true);
   expect(await callCounter()).toMatchObject({ value: 2, generation: 2 });
-  const restored = await client.callTool({ name: "canvas_restore", arguments: { version_id: savedVersion.versionId } });
+  const restored = await client.callTool({ name: "artifact_restore", arguments: { version_id: savedVersion.versionId } });
   expect(restored.isError).not.toBe(true);
   expect(await callCounter()).toMatchObject({ value: 2 });
   expect((await callCounter()).generation).toBeUndefined();
-  const serverRead = payload(await client.callTool({ name: "canvas_read", arguments: { name: "counter", part: "server", start_line: 1, end_line: 1 } }));
+  const serverRead = payload(await client.callTool({ name: "artifact_read", arguments: { name: "counter", part: "server", start_line: 1, end_line: 1 } }));
   expect(serverRead.source).toBe('import { DurableObject } from "cloudflare:workers";\n');
   expect(serverRead.server_source).toBeUndefined();
-  const mismatch = await client.callTool({ name: "canvas_request", arguments: { name: "other-counter", version_id: savedVersion.versionId, request: { path: "/counter" } } });
+  const mismatch = await client.callTool({ name: "artifact_request", arguments: { name: "other-counter", version_id: savedVersion.versionId, request: { path: "/counter" } } });
   expect(mismatch.isError).toBe(true);
   const browser = await chromium.launch({ headless: true });
   try {
@@ -220,7 +220,7 @@ test("gallery renders interactive sandboxed previews and serves exact archived s
     await page.goto(`${origin}/?workspace=test`);
     await page.getByRole("button", { name: "overview", exact: true }).click();
     const frame = page.frameLocator("iframe");
-    await frame.getByRole("heading", { name: "Hosted canvas" }).waitFor();
+    await frame.getByRole("heading", { name: "Hosted artifact" }).waitFor();
     await frame.getByRole("button", { name: "Count 0" }).click();
     await frame.getByRole("button", { name: "Count 1" }).waitFor();
     expect(await page.locator("iframe").getAttribute("sandbox")).toBe("allow-scripts");
@@ -231,16 +231,16 @@ test("gallery renders interactive sandboxed previews and serves exact archived s
 
 test("all hosted surfaces fail closed off loopback, and mutations enforce origin and request bounds", async () => {
   expect((await fetch(`${origin}/api/gallery`, { headers: { Origin: "https://evil.example" } })).status).toBe(403);
-  expect((await fetch(`${origin}/api/canvas/request`, { method: "POST", headers: { Origin: "https://evil.example" }, body: "{}" })).status).toBe(403);
-  expect((await fetch(`${origin}/api/canvas/request`, { method: "POST", body: "{}" })).status).toBe(400);
-  expect((await fetch(`${origin}/api/canvas/request`, { method: "POST", body: " ".repeat(1024 * 1024 + 1) })).status).toBe(413);
+  expect((await fetch(`${origin}/api/artifact/request`, { method: "POST", headers: { Origin: "https://evil.example" }, body: "{}" })).status).toBe(403);
+  expect((await fetch(`${origin}/api/artifact/request`, { method: "POST", body: "{}" })).status).toBe(400);
+  expect((await fetch(`${origin}/api/artifact/request`, { method: "POST", body: " ".repeat(1024 * 1024 + 1) })).status).toBe(413);
   expect((await fetch(`${origin}/mcp`, { method: "POST", body: "invalid" })).status).toBe(400);
   expect((await fetch(`${origin}/mcp`, { method: "POST", body: " ".repeat(1024 * 1024 + 1) })).status).toBe(413);
   expect((await fetch(`${origin}/api/source?workspace=other&version=${version}`)).status).toBe(404);
   const production = new Miniflare({ cf: false, port: 0, workers: [{ ...runtimeOptions.workers![0]!, config: { ...runtimeOptions.workers![0]!.config, env: { ...runtimeOptions.workers![0]!.config.env, ENVIRONMENT: { type: "text", value: "production" } } } }] });
   try {
-  for (const path of ["/", "/index.html", "/gallery.js", "/mcp", "/api/gallery", "/api/source", "/gallery/preview", "/api/canvas/request", "/api/plugins/call"]) {
-    expect((await production.dispatchFetch(`https://canvas.example${path}`)).status).toBe(503);
+  for (const path of ["/", "/index.html", "/gallery.js", "/mcp", "/api/gallery", "/api/source", "/gallery/preview", "/api/artifact/request", "/api/plugins/call"]) {
+    expect((await production.dispatchFetch(`https://artifact.example${path}`)).status).toBe(503);
   }
   } finally { await production.dispose(); }
 });
@@ -250,9 +250,9 @@ test("verified users have isolated private libraries and can collaborate in the 
   const { Response: RuntimeResponse } = await import("miniflare");
   const keys = await generateKeyPair("RS256", { extractable: true });
   const jwks = { keys: [{ ...await exportJWK(keys.publicKey), kid: "test", alg: "RS256", use: "sig" }] };
-  const issuer = "https://canvas-test.cloudflareaccess.com";
+  const issuer = "https://artifact-test.cloudflareaccess.com";
   const sign = (sub: string) => new SignJWT({}).setProtectedHeader({ alg: "RS256", kid: "test" })
-    .setSubject(sub).setIssuer(issuer).setAudience("canvas-app").setIssuedAt().setExpirationTime("5m").sign(keys.privateKey);
+    .setSubject(sub).setIssuer(issuer).setAudience("artifact-app").setIssuedAt().setExpirationTime("5m").sign(keys.privateKey);
   const aliceToken = await sign("alice");
   const bobToken = await sign("bob");
   const production = new Miniflare({ cf: false, port: 0, workers: [{
@@ -260,8 +260,8 @@ test("verified users have isolated private libraries and can collaborate in the 
       ...runtimeOptions.workers![0]!.config,
       env: { ...runtimeOptions.workers![0]!.config.env,
         ENVIRONMENT: { type: "text", value: "production" },
-        ACCESS_TEAM_DOMAIN: { type: "text", value: "canvas-test.cloudflareaccess.com" },
-        ACCESS_AUD: { type: "text", value: "canvas-app" },
+        ACCESS_TEAM_DOMAIN: { type: "text", value: "artifact-test.cloudflareaccess.com" },
+        ACCESS_AUD: { type: "text", value: "artifact-app" },
       },
     },
     dev: { outboundService: { type: "fetcher", handler: request => {
@@ -284,7 +284,7 @@ test("verified users have isolated private libraries and can collaborate in the 
     const bob = await connect(bobToken, "private");
     const teamAlice = await connect(aliceToken, "team");
     const teamBob = await connect(bobToken, "team");
-    expect((await alice.callTool({ name: "canvas_write", arguments: { name: "private-api", slug: "private-api", contents: source, server: apiServer } })).isError).not.toBe(true);
+    expect((await alice.callTool({ name: "artifact_write", arguments: { name: "private-api", slug: "private-api", contents: source, server: apiServer } })).isError).not.toBe(true);
     expect((await fetch(`${address}/private-api/api/headers`)).status).toBe(401);
     expect((await fetch(`${address}/private-api/api/headers`, { headers: { "Cf-Access-Jwt-Assertion": bobToken } })).status).toBe(404);
     expect((await fetch(`${address}/private-api/api/headers`, { headers: { "Cf-Access-Jwt-Assertion": aliceToken, Origin: "https://evil.example" } })).status).toBe(403);
@@ -293,32 +293,32 @@ test("verified users have isolated private libraries and can collaborate in the 
     const privateHeaders = await privateApi.json() as Record<string, string>;
     expect(privateHeaders["x-kept"]).toBe("yes");
     for (const name of ["authorization", "cookie", "cf-access-jwt-assertion", "cf-access-client-id", "cf-access-client-secret"]) expect(privateHeaders[name]).toBeUndefined();
-    const privateResult = await alice.callTool({ name: "canvas_write", arguments: { name: "secret", contents: source } });
+    const privateResult = await alice.callTool({ name: "artifact_write", arguments: { name: "secret", contents: source } });
     expect(privateResult.isError).not.toBe(true);
-    const privateVersion = (privateResult._meta as { canvas: { versionId: string } }).canvas.versionId;
-    expect(payload(await bob.callTool({ name: "canvas_list", arguments: {} })).canvases).toEqual([]);
+    const privateVersion = (privateResult._meta as { artifact: { versionId: string } }).artifact.versionId;
+    expect(payload(await bob.callTool({ name: "artifact_list", arguments: {} })).artifacts).toEqual([]);
     for (const other of [bob, teamAlice, teamBob]) {
-      expect((await other.callTool({ name: "canvas_read", arguments: { name: "secret" } })).isError).toBe(true);
-      expect((await other.callTool({ name: "canvas_version", arguments: { version_id: privateVersion } })).isError).toBe(true);
-      expect((await other.callTool({ name: "canvas_restore", arguments: { version_id: privateVersion } })).isError).toBe(true);
+      expect((await other.callTool({ name: "artifact_read", arguments: { name: "secret" } })).isError).toBe(true);
+      expect((await other.callTool({ name: "artifact_version", arguments: { version_id: privateVersion } })).isError).toBe(true);
+      expect((await other.callTool({ name: "artifact_restore", arguments: { version_id: privateVersion } })).isError).toBe(true);
     }
-    const shared = await teamAlice.callTool({ name: "canvas_write", arguments: { name: "shared", contents: source } });
+    const shared = await teamAlice.callTool({ name: "artifact_write", arguments: { name: "shared", contents: source } });
     expect(shared.isError).not.toBe(true);
-    expect(payload(await teamBob.callTool({ name: "canvas_read", arguments: { name: "shared" } })).source).toBe(source);
-    expect((await teamBob.callTool({ name: "canvas_edit", arguments: { name: "shared", edits: [{ old_text: "Hosted canvas", new_text: "Team canvas" }] } })).isError).not.toBe(true);
-    expect(payload(await teamAlice.callTool({ name: "canvas_read", arguments: { name: "shared" } })).source).toContain("Team canvas");
-    expect((await alice.callTool({ name: "canvas_read", arguments: { name: "shared" } })).isError).toBe(true);
+    expect(payload(await teamBob.callTool({ name: "artifact_read", arguments: { name: "shared" } })).source).toBe(source);
+    expect((await teamBob.callTool({ name: "artifact_edit", arguments: { name: "shared", edits: [{ old_text: "Hosted artifact", new_text: "Team artifact" }] } })).isError).not.toBe(true);
+    expect(payload(await teamAlice.callTool({ name: "artifact_read", arguments: { name: "shared" } })).source).toContain("Team artifact");
+    expect((await alice.callTool({ name: "artifact_read", arguments: { name: "shared" } })).isError).toBe(true);
     for (const path of [`/api/source?version=${privateVersion}`, `/gallery/preview?version=${privateVersion}`, `/api/source?name=secret&subject=alice`, `/api/source?library=team&version=${privateVersion}`]) {
       expect((await fetch(address + path + "&workspace=test", { headers: { "Cf-Access-Jwt-Assertion": bobToken } })).status).toBe(404);
     }
     expect((await fetch(`${address}/api/gallery?library=alice`, { headers: { "Cf-Access-Jwt-Assertion": bobToken } })).status).toBe(400);
-    // The same canvas name must identify different databases across private
+    // The same artifact name must identify different databases across private
     // subjects, while both team members operate on one shared database.
     for (const remote of [alice, bob, teamAlice]) {
-      expect((await remote.callTool({ name: "canvas_write", arguments: { name: "database", contents: counterClient, server: counterServer } })).isError).not.toBe(true);
+      expect((await remote.callTool({ name: "artifact_write", arguments: { name: "database", contents: counterClient, server: counterServer } })).isError).not.toBe(true);
     }
     const files = async (remote: Client, request: Record<string, unknown>) => {
-      const result = await remote.callTool({ name: "canvas_files", arguments: { name: "database", request } });
+      const result = await remote.callTool({ name: "artifact_files", arguments: { name: "database", request } });
       expect(result.isError, JSON.stringify(result.content)).not.toBe(true);
       return (result.structuredContent as { result: any }).result;
     };
@@ -328,17 +328,17 @@ test("verified users have isolated private libraries and can collaborate in the 
     expect((await files(alice, { operation: "list" })).files).toHaveLength(1);
     expect((await files(bob, { operation: "list" })).files).toEqual([]);
     expect((await files(teamAlice, { operation: "list" })).files).toEqual([]);
-    expect((await bob.callTool({ name: "canvas_files", arguments: { name: "database", request: { operation: "download", id: privateUpload.file.id } } })).isError).toBe(true);
+    expect((await bob.callTool({ name: "artifact_files", arguments: { name: "database", request: { operation: "download", id: privateUpload.file.id } } })).isError).toBe(true);
     const teamUpload = await files(teamAlice, { operation: "upload", name: "team.txt", size: 3, type: "text/plain" });
     expect((await fetch(teamUpload.url, { method: "PUT", body: "two" })).status).toBe(201);
     expect((await files(teamBob, { operation: "list" })).files[0].id).toBe(teamUpload.file.id);
-    const otherWorkspace = await fetch(`${address}/api/tools?workspace=other`, { method: "POST", headers: { "Cf-Access-Jwt-Assertion": aliceToken }, body: JSON.stringify({ name: "canvas_write", arguments: { name: "database", contents: source } }) });
+    const otherWorkspace = await fetch(`${address}/api/tools?workspace=other`, { method: "POST", headers: { "Cf-Access-Jwt-Assertion": aliceToken }, body: JSON.stringify({ name: "artifact_write", arguments: { name: "database", contents: source } }) });
     expect(otherWorkspace.status).toBe(200);
-    const otherFiles = await fetch(`${address}/api/canvas/files?workspace=other`, { method: "POST", headers: { "Cf-Access-Jwt-Assertion": aliceToken }, body: JSON.stringify({ name: "database", request: { operation: "list" } }) });
+    const otherFiles = await fetch(`${address}/api/artifact/files?workspace=other`, { method: "POST", headers: { "Cf-Access-Jwt-Assertion": aliceToken }, body: JSON.stringify({ name: "database", request: { operation: "list" } }) });
     expect(await otherFiles.json()).toEqual({ result: { files: [] } });
-    expect((await fetch(`${address}/api/canvas/files?workspace=test`, { method: "POST", body: JSON.stringify({ name: "database", request: { operation: "list" } }) })).status).toBe(401);
+    expect((await fetch(`${address}/api/artifact/files?workspace=test`, { method: "POST", body: JSON.stringify({ name: "database", request: { operation: "list" } }) })).status).toBe(401);
     const database = async (remote: Client, method = "GET") => {
-      const result = await remote.callTool({ name: "canvas_request", arguments: { name: "database", request: { path: "/counter", method } } });
+      const result = await remote.callTool({ name: "artifact_request", arguments: { name: "database", request: { path: "/counter", method } } });
       expect(result.isError).not.toBe(true);
       const response = (result.structuredContent as { response: { status: number; body: string } }).response;
       expect(response.status).toBe(200);
@@ -352,7 +352,7 @@ test("verified users have isolated private libraries and can collaborate in the 
     expect((await database(teamAlice)).value).toBe(2);
     expect((await database(alice)).value).toBe(1);
     expect((await database(bob)).value).toBe(0);
-    expect((await bob.callTool({ name: "canvas_request", arguments: { version_id: privateVersion, request: { path: "/counter" } } })).isError).toBe(true);
+    expect((await bob.callTool({ name: "artifact_request", arguments: { version_id: privateVersion, request: { path: "/counter" } } })).isError).toBe(true);
     const script = 'export default {fetch(request: Request) { return Response.json({message:"owner script",authorization:request.headers.get("authorization")}); }}';
     expect((await alice.callTool({name:"script_write",arguments:{name:"private-handler",slug:"private-handler",contents:script}})).isError).not.toBe(true);
     expect((await fetch(address+"/private-handler")).status).toBe(401);
@@ -369,27 +369,27 @@ test("verified users have isolated private libraries and can collaborate in the 
     expect(external.status).toBe(200);
     expect(await external.json()).toMatchObject({authorization:"Bearer webhook-token"});
     expect((await fetch(address+"/api/gallery")).status).toBe(401);
-    expect((await alice.callTool({name:"artifact_link",arguments:{kind:"canvas",name:"secret",slug:"private-canvas"}})).isError).not.toBe(true);
-    expect((await fetch(address+"/private-canvas")).status).toBe(401);
-    expect((await fetch(address+"/private-canvas",{headers:{"Cf-Access-Jwt-Assertion":bobToken}})).status).toBe(404);
-    expect((await fetch(address+"/private-canvas",{headers:{"Cf-Access-Jwt-Assertion":aliceToken}})).status).toBe(200);
+    expect((await alice.callTool({name:"artifact_link",arguments:{kind:"artifact",name:"secret",slug:"private-artifact"}})).isError).not.toBe(true);
+    expect((await fetch(address+"/private-artifact")).status).toBe(401);
+    expect((await fetch(address+"/private-artifact",{headers:{"Cf-Access-Jwt-Assertion":bobToken}})).status).toBe(404);
+    expect((await fetch(address+"/private-artifact",{headers:{"Cf-Access-Jwt-Assertion":aliceToken}})).status).toBe(200);
     const pluginBody = JSON.stringify({ plugin: "missing-plugin-for-test", operation: "read", input: {} });
-    expect((await fetch(address+"/private-canvas/_canvas/plugins",{method:"POST",body:pluginBody})).status).toBe(401);
-    expect((await fetch(address+"/private-canvas/_canvas/plugins",{method:"POST",headers:{"Cf-Access-Jwt-Assertion":bobToken},body:pluginBody})).status).toBe(404);
-    const privatePlugin = await fetch(address+"/private-canvas/_canvas/plugins",{method:"POST",headers:{"Cf-Access-Jwt-Assertion":aliceToken},body:pluginBody});
+    expect((await fetch(address+"/private-artifact/_artifact/plugins",{method:"POST",body:pluginBody})).status).toBe(401);
+    expect((await fetch(address+"/private-artifact/_artifact/plugins",{method:"POST",headers:{"Cf-Access-Jwt-Assertion":bobToken},body:pluginBody})).status).toBe(404);
+    const privatePlugin = await fetch(address+"/private-artifact/_artifact/plugins",{method:"POST",headers:{"Cf-Access-Jwt-Assertion":aliceToken},body:pluginBody});
     expect(privatePlugin.status).toBe(404);
     expect(await privatePlugin.json()).toEqual({error:"Plugin operation not found"});
-    expect((await alice.callTool({name:"canvas_write",arguments:{name:"secret",slug:"private-canvas",access:"public",contents:"export default function {"}})).isError).toBe(true);
-    expect((await fetch(address+"/private-canvas")).status).toBe(401);
-    expect((await alice.callTool({name:"artifact_link",arguments:{kind:"canvas",name:"secret",slug:"private-canvas",access:"public"}})).isError).not.toBe(true);
-    expect((await fetch(address+"/private-canvas")).status).toBe(200);
+    expect((await alice.callTool({name:"artifact_write",arguments:{name:"secret",slug:"private-artifact",access:"public",contents:"export default function {"}})).isError).toBe(true);
+    expect((await fetch(address+"/private-artifact")).status).toBe(401);
+    expect((await alice.callTool({name:"artifact_link",arguments:{kind:"artifact",name:"secret",slug:"private-artifact",access:"public"}})).isError).not.toBe(true);
+    expect((await fetch(address+"/private-artifact")).status).toBe(200);
     for (const headers of [{}, {"Cf-Access-Jwt-Assertion":aliceToken}, {Cookie:"session=ambient"}]) {
-      expect((await fetch(address+"/private-canvas/_canvas/plugins",{method:"POST",headers,body:pluginBody})).status).toBe(401);
+      expect((await fetch(address+"/private-artifact/_artifact/plugins",{method:"POST",headers,body:pluginBody})).status).toBe(401);
     }
-    expect((await alice.callTool({name:"artifact_link",arguments:{kind:"canvas",name:"secret",slug:"private-canvas",access:"private"}})).isError).not.toBe(true);
-    expect((await fetch(address+"/private-canvas")).status).toBe(401);
+    expect((await alice.callTool({name:"artifact_link",arguments:{kind:"artifact",name:"secret",slug:"private-artifact",access:"private"}})).isError).not.toBe(true);
+    expect((await fetch(address+"/private-artifact")).status).toBe(401);
     // Restore a valid draft for the existing gallery assertion below.
-    expect((await alice.callTool({name:"canvas_write",arguments:{name:"secret",contents:source}})).isError).not.toBe(true);
+    expect((await alice.callTool({name:"artifact_write",arguments:{name:"secret",contents:source}})).isError).not.toBe(true);
     expect((await teamAlice.callTool({name:"script_write",arguments:{name:"shared-handler",slug:"shared-handler",contents:script}})).isError).not.toBe(true);
     expect((await fetch(address+"/shared-handler",{headers:{"Cf-Access-Jwt-Assertion":bobToken}})).status).toBe(200);
     expect((await alice.callTool({name:"script_write",arguments:{name:"untrusted-page",slug:"untrusted-page",access:"public",contents:"export default {fetch(){return new Response(\"<!doctype html><div id=\\\"result\\\">pending</div><script>\\n(async()=>{let cookieBlocked=false;try{document.cookie}catch{cookieBlocked=true}let storageBlocked=false;try{localStorage.getItem('session')}catch{storageBlocked=true}let requestBlocked=false;try{const r=await fetch('/api/gallery',{credentials:'include'});requestBlocked=r.status===403}catch{requestBlocked=true}document.querySelector('#result').textContent=JSON.stringify({cookieBlocked,storageBlocked,requestBlocked});})();\\n</script>\",{headers:{\"content-type\":\"text/html\"}})}}"}})).isError).not.toBe(true);
@@ -401,7 +401,7 @@ test("verified users have isolated private libraries and can collaborate in the 
       expect(await page.getByLabel("Library", { exact: true }).inputValue()).toBe("private");
       await page.getByLabel("Library", { exact: true }).selectOption("team");
       await page.getByRole("button", { name: "shared", exact: true }).click();
-      await page.frameLocator("iframe").getByRole("heading", { name: "Team canvas" }).waitFor();
+      await page.frameLocator("iframe").getByRole("heading", { name: "Team artifact" }).waitFor();
       expect(await page.getByRole("button", { name: "secret", exact: true }).count()).toBe(0);
       expect(new URL(page.url()).searchParams.get("library")).toBe("team");
       const isolated = await browser.newPage({extraHTTPHeaders:{"Cf-Access-Jwt-Assertion":aliceToken}});
@@ -472,8 +472,8 @@ test("standalone scripts serve arbitrary HTTP responses at chosen root slugs and
   expect(await source.text()).toBe(code);
 }, 60000);
 
-test("root canvas URLs render interactive backends and keep valid revisions through broken drafts", async () => {
-  const saved = await client.callTool({ name: "canvas_write", arguments: { name: "linked-counter", slug: "my-counter", access: "public", contents: counterClient, server: counterServer } });
+test("root artifact URLs render interactive backends and keep valid revisions through broken drafts", async () => {
+  const saved = await client.callTool({ name: "artifact_write", arguments: { name: "linked-counter", slug: "my-counter", access: "public", contents: counterClient, server: counterServer } });
   expect(saved.isError).not.toBe(true);
   expect(payload(saved).url).toBe(`${origin}/my-counter`);
   const browser = await chromium.launch({ headless: true });
@@ -483,21 +483,21 @@ test("root canvas URLs render interactive backends and keep valid revisions thro
     await page.frameLocator("iframe").getByText("Count: 0", {exact:true}).waitFor();
     await page.frameLocator("iframe").getByRole("button", {name:"Increment"}).click();
     await page.frameLocator("iframe").getByText("Count: 1", {exact:true}).waitFor();
-    const invalid = await client.callTool({ name: "canvas_write", arguments: { name: "linked-counter", contents: "export default function {" } });
+    const invalid = await client.callTool({ name: "artifact_write", arguments: { name: "linked-counter", contents: "export default function {" } });
     expect(invalid.isError).toBe(true);
     await page.reload();
     await page.frameLocator("iframe").getByText("Count: 1", {exact:true}).waitFor();
-    const fixed = await client.callTool({ name: "canvas_write", arguments: { name: "linked-counter", contents: counterClient.replace("Count:", "Total:") } });
+    const fixed = await client.callTool({ name: "artifact_write", arguments: { name: "linked-counter", contents: counterClient.replace("Count:", "Total:") } });
     expect(fixed.isError).not.toBe(true);
     await page.reload();
     await page.frameLocator("iframe").getByText("Total: 1", {exact:true}).waitFor();
-    const stolen = await client.callTool({ name: "artifact_link", arguments: { kind:"canvas",name:"linked-counter",slug:"my-handler" } });
+    const stolen = await client.callTool({ name: "artifact_link", arguments: { kind:"artifact",name:"linked-counter",slug:"my-handler" } });
     expect(stolen.isError).toBe(true);
   } finally { await browser.close(); }
-  const version = (saved._meta as {canvas:{versionId:string}}).canvas.versionId;
-  const mismatch=await fetch(`${origin}/my-counter/_canvas/request`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({version_id:version,request:{path:"/counter"}})});
+  const version = (saved._meta as {artifact:{versionId:string}}).artifact.versionId;
+  const mismatch=await fetch(`${origin}/my-counter/_artifact/request`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({version_id:version,request:{path:"/counter"}})});
   expect(mismatch.status).toBe(409);
-  expect((await fetch(`${origin}/my-counter/_canvas/request`,{method:"POST",headers:{Origin:"https://evil.example"},body:"{}"})).status).toBe(403);
+  expect((await fetch(`${origin}/my-counter/_artifact/request`,{method:"POST",headers:{Origin:"https://evil.example"},body:"{}"})).status).toBe(403);
 },60000);
 
 test("correcting initial invalid drafts retains the user-chosen slug and access", async () => {
@@ -510,18 +510,18 @@ test("correcting initial invalid drafts retains the user-chosen slug and access"
   expect(fixed.isError).not.toBe(true);
   expect(payload(fixed).url).toBe(`${origin}/chosen-human`);
   expect(await (await fetch(`${origin}/chosen-human`)).text()).toBe("corrected");
-  const badCanvas='export default function {';
-  const canvas = await client.callTool({name:"canvas_write",arguments:{name:"Human canvas",slug:"chosen-canvas",access:"public",contents:badCanvas}});
-  expect(canvas.isError).toBe(true);
-  expect(payload(canvas)).toMatchObject({slug:"chosen-canvas",access:"public"});
-  const corrected=await client.callTool({name:"canvas_edit",arguments:{name:"Human canvas",edits:[{old_text:badCanvas,new_text:source}]}});
+  const badArtifact='export default function {';
+  const artifact = await client.callTool({name:"artifact_write",arguments:{name:"Human artifact",slug:"chosen-artifact",access:"public",contents:badArtifact}});
+  expect(artifact.isError).toBe(true);
+  expect(payload(artifact)).toMatchObject({slug:"chosen-artifact",access:"public"});
+  const corrected=await client.callTool({name:"artifact_edit",arguments:{name:"Human artifact",edits:[{old_text:badArtifact,new_text:source}]}});
   expect(corrected.isError).not.toBe(true);
-  expect(payload(corrected).url).toBe(`${origin}/chosen-canvas`);
-  expect((await fetch(`${origin}/chosen-canvas`)).status).toBe(200);
+  expect(payload(corrected).url).toBe(`${origin}/chosen-artifact`);
+  expect((await fetch(`${origin}/chosen-artifact`)).status).toBe(200);
 });
 
-test("standalone canvas APIs preserve HTTP semantics and never fall back to the page shell", async () => {
-  const saved = await client.callTool({ name: "canvas_write", arguments: { name: "direct-api", slug: "direct-api", access: "public", contents: source, server: apiServer } });
+test("standalone artifact APIs preserve HTTP semantics and never fall back to the page shell", async () => {
+  const saved = await client.callTool({ name: "artifact_write", arguments: { name: "direct-api", slug: "direct-api", access: "public", contents: source, server: apiServer } });
   expect(saved.isError).not.toBe(true);
   const bytes = new Uint8Array([0, 255, 128, 10, 13, 42]);
   for (const path of ["/api", "/api/echo?value=%FF&value=two"]) {
@@ -548,13 +548,13 @@ test("standalone canvas APIs preserve HTTP semantics and never fall back to the 
   expect(await html.text()).toBe("<h1>API page</h1>");
   expect(html.headers.get("set-cookie")).toBeNull();
   expect(html.headers.get("content-security-policy")).toContain("sandbox allow-scripts allow-forms");
-  expect((await client.callTool({ name: "canvas_write", arguments: { name: "direct-api", contents: source, server: "export class CanvasServer { fetch( }" } })).isError).toBe(true);
+  expect((await client.callTool({ name: "artifact_write", arguments: { name: "direct-api", contents: source, server: "export class ArtifactServer { fetch( }" } })).isError).toBe(true);
   expect((await fetch(`${origin}/direct-api/api`)).status).toBe(201);
 
-  expect((await client.callTool({ name: "canvas_write", arguments: { name: "pages-only", slug: "pages-only", access: "public", contents: source } })).isError).not.toBe(true);
+  expect((await client.callTool({ name: "artifact_write", arguments: { name: "pages-only", slug: "pages-only", access: "public", contents: source } })).isError).not.toBe(true);
   const absent = await fetch(`${origin}/pages-only/api/missing`);
   expect(absent.status).toBe(404);
-  expect(await absent.json()).toEqual({ error: "Canvas has no server" });
+  expect(await absent.json()).toEqual({ error: "Artifact has no server" });
   const deep = await fetch(`${origin}/pages-only/projects/42?tab=detail`);
   expect(deep.status).toBe(200);
   expect(deep.headers.get("content-type")).toContain("text/html");
@@ -564,11 +564,11 @@ test("standalone canvas APIs preserve HTTP semantics and never fall back to the 
   expect(deepHead.headers.get("content-type")).toContain("text/html");
   expect(await deepHead.text()).toBe("");
   expect((await fetch(`${origin}/pages-only/projects/42`, { method: "POST" })).status).toBe(405);
-  for (const path of ["/_canvas", "/_canvas/unknown", "/_canvas/request/extra", "/_canvas/plugins/extra"]) expect((await fetch(`${origin}/pages-only${path}`)).status).toBe(404);
+  for (const path of ["/_artifact", "/_artifact/unknown", "/_artifact/request/extra", "/_artifact/plugins/extra"]) expect((await fetch(`${origin}/pages-only${path}`)).status).toBe(404);
 }, 60000);
 
-test("standalone nested canvas pages restore browser routes on direct load and refresh", async () => {
-  expect((await client.callTool({ name: "canvas_write", arguments: { name: "linked-routes", slug: "linked-routes", access: "public", contents: ROUTING_CANVAS } })).isError).not.toBe(true);
+test("standalone nested artifact pages restore browser routes on direct load and refresh", async () => {
+  expect((await client.callTool({ name: "artifact_write", arguments: { name: "linked-routes", slug: "linked-routes", access: "public", contents: ROUTING_ARTIFACT } })).isError).not.toBe(true);
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage();
@@ -587,17 +587,17 @@ test("standalone nested canvas pages restore browser routes on direct load and r
   } finally { await browser.close(); }
 }, 60000);
 
-test("canvas files use per-canvas storage through MCP and standalone controls", async () => {
+test("artifact files use per-artifact storage through MCP and standalone controls", async () => {
   const write = async (name: string) => {
-    const result = await client.callTool({ name: "canvas_write", arguments: { name, slug: name, contents: source } });
+    const result = await client.callTool({ name: "artifact_write", arguments: { name, slug: name, contents: source } });
     expect(result.isError, JSON.stringify(result.content)).not.toBe(true);
-    return (result._meta as { canvas: { versionId: string; files: boolean } }).canvas;
+    return (result._meta as { artifact: { versionId: string; files: boolean } }).artifact;
   };
   const a = await write("files-a");
   const b = await write("files-b");
   expect(a.files).toBe(true);
   const request = async (version: string, value: Record<string, unknown>) => {
-    const response = await client.callTool({ name: "canvas_files", arguments: { version_id: version, request: value } });
+    const response = await client.callTool({ name: "artifact_files", arguments: { version_id: version, request: value } });
     expect(response.isError, JSON.stringify(response.content)).not.toBe(true);
     return (response.structuredContent as { result: any }).result;
   };
@@ -608,28 +608,28 @@ test("canvas files use per-canvas storage through MCP and standalone controls", 
   expect((await request(b.versionId, { operation: "list" })).files).toEqual([]);
   const download = await request(a.versionId, { operation: "download", id: grant.file.id });
   expect(Buffer.from(await (await fetch(download.url)).arrayBuffer())).toEqual(bytes);
-  const wrongCanvas = await client.callTool({ name: "canvas_files", arguments: { name: "files-b", version_id: a.versionId, request: { operation: "list" } } });
-  expect(wrongCanvas.isError).toBe(true);
-  const otherFile = await client.callTool({ name: "canvas_files", arguments: { version_id: b.versionId, request: { operation: "download", id: grant.file.id } } });
+  const wrongArtifact = await client.callTool({ name: "artifact_files", arguments: { name: "files-b", version_id: a.versionId, request: { operation: "list" } } });
+  expect(wrongArtifact.isError).toBe(true);
+  const otherFile = await client.callTool({ name: "artifact_files", arguments: { version_id: b.versionId, request: { operation: "download", id: grant.file.id } } });
   expect(otherFile.isError).toBe(true);
   const renamed = await write("files-a");
   expect((await request(renamed.versionId, { operation: "list" })).files[0].id).toBe(grant.file.id);
-  expect((await client.callTool({ name: "artifact_link", arguments: { kind: "canvas", name: "files-a", slug: "files-public", access: "public" } })).isError).not.toBe(true);
-  const publicRequest = (value: Record<string, unknown>, version_id = renamed.versionId) => fetch(`${origin}/files-public/_canvas/files`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ version_id, request: value }) });
+  expect((await client.callTool({ name: "artifact_link", arguments: { kind: "artifact", name: "files-a", slug: "files-public", access: "public" } })).isError).not.toBe(true);
+  const publicRequest = (value: Record<string, unknown>, version_id = renamed.versionId) => fetch(`${origin}/files-public/_artifact/files`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ version_id, request: value }) });
   expect((await publicRequest({ operation: "list" })).status).toBe(200);
   expect((await publicRequest({ operation: "download", id: grant.file.id })).status).toBe(200);
   expect((await publicRequest({ operation: "upload", name: "bad", size: 1, type: "text/plain" })).status).toBe(403);
   expect((await publicRequest({ operation: "delete", id: grant.file.id })).status).toBe(403);
   expect((await publicRequest({ operation: "list" }, b.versionId)).status).toBe(409);
-  const forged = await fetch(`${origin}/api/canvas/files?workspace=test`, { method: "POST", headers: { Origin: "null" }, body: JSON.stringify({ name: "files-a", request: { operation: "list" } }) });
+  const forged = await fetch(`${origin}/api/artifact/files?workspace=test`, { method: "POST", headers: { Origin: "null" }, body: JSON.stringify({ name: "files-a", request: { operation: "list" } }) });
   expect(forged.status).toBe(403);
-  const resource = await client.readResource({ uri: "ui://canvas/viewer.html" });
+  const resource = await client.readResource({ uri: "ui://artifacts/viewer.html" });
   expect(JSON.stringify(resource)).toContain(`\"connectDomains\":[\"${origin}\"]`);
 }, 60_000);
 
 test("gallery and standalone file uploads and downloads work outside the sandboxed frame", async () => {
-  const contents = await Bun.file(new URL("../examples/files.canvas.tsx", import.meta.url)).text();
-  const created = await client.callTool({ name: "canvas_write", arguments: { name: "browser-files", slug: "browser-files", contents } });
+  const contents = await Bun.file(new URL("../examples/files.artifact.tsx", import.meta.url)).text();
+  const created = await client.callTool({ name: "artifact_write", arguments: { name: "browser-files", slug: "browser-files", contents } });
   expect(created.isError, JSON.stringify(created.content)).not.toBe(true);
   const browser = await chromium.launch({ headless: true });
   try {
@@ -638,7 +638,7 @@ test("gallery and standalone file uploads and downloads work outside the sandbox
     page.on("pageerror", error => errors.push(error.message));
     await page.goto(`${origin}/browser-files`);
     const frame = page.frameLocator("iframe");
-    await frame.getByRole("heading", { name: "Canvas files" }).waitFor();
+    await frame.getByRole("heading", { name: "Artifact files" }).waitFor();
     const bytes = Buffer.alloc(2 * 1024 * 1024, 193);
     await frame.getByLabel("Upload file").setInputFiles({ name: "browser.bin", mimeType: "application/octet-stream", buffer: bytes });
     const downloadButton = frame.getByRole("button", { name: "Download browser.bin", exact: true });
@@ -665,12 +665,12 @@ test("gallery and standalone file uploads and downloads work outside the sandbox
   } finally { await browser.close(); }
 }, 90_000);
 test("hosted remix tools create private independent artifacts and reject overwrites", async () => {
-  const original = payload(await client.callTool({name:"canvas_write",arguments:{name:"remix-original",contents:counterClient,server:counterServer,slug:"remix-original",access:"public"}}));
+  const original = payload(await client.callTool({name:"artifact_write",arguments:{name:"remix-original",contents:counterClient,server:counterServer,slug:"remix-original",access:"public"}}));
   expect(original.ok).toBe(true);
-  const copied = payload(await client.callTool({name:"canvas_remix",arguments:{name:"remix-original",new_name:"remix-copy"}}));
+  const copied = payload(await client.callTool({name:"artifact_remix",arguments:{name:"remix-original",new_name:"remix-copy"}}));
   expect(copied).toMatchObject({ok:true,remixed:true,name:"remix-copy",access:"private",slug:"remix-copy"});
   expect(copied.origin.source_version_id).toBeString();
-  expect((await client.callTool({name:"canvas_remix",arguments:{name:"remix-original",new_name:"remix-copy"}})).isError).toBe(true);
+  expect((await client.callTool({name:"artifact_remix",arguments:{name:"remix-original",new_name:"remix-copy"}})).isError).toBe(true);
   const script='export default {fetch(request: Request,env: ScriptEnv) { env.sql.exec("create table if not exists counter(n integer)"); env.sql.exec("insert into counter values (1)"); return Response.json({count:env.sql.exec("select count(*) as n from counter").one().n,secret:env.secrets.TOKEN ?? null}); }}';
   expect(payload(await client.callTool({name:"script_write",arguments:{name:"remix-script",contents:script,access:"public"}})).ok).toBe(true);
   await client.callTool({name:"script_secrets",arguments:{name:"remix-script",secrets:{TOKEN:"original-only"}}});
@@ -686,33 +686,33 @@ test("hosted remix tools create private independent artifacts and reject overwri
   expect((await client.callTool({name:"script_remix",arguments:{name:"remix-script",new_name:"remix-script-copy"}})).isError).toBe(true);
 }, 120000);
 
-test("canvas schedules retain validated revisions, keep host history isolated, and pause on server removal", async () => {
+test("artifact schedules retain validated revisions, keep host history isolated, and pause on server removal", async () => {
   const name = "scheduled-counter";
-  const write = await client.callTool({ name: "canvas_write", arguments: { name, contents: counterClient, server: counterServer } });
+  const write = await client.callTool({ name: "artifact_write", arguments: { name, contents: counterClient, server: counterServer } });
   expect(write.isError).not.toBe(true);
-  const version = (write._meta as { canvas: { versionId: string } }).canvas.versionId;
+  const version = (write._meta as { artifact: { versionId: string } }).artifact.versionId;
   const tool = async (nameOfTool: string, args: Record<string, unknown> = {}) => {
     const result = await client.callTool({ name: nameOfTool, arguments: { name, ...args } });
     expect(result.isError).not.toBe(true);
     return result.structuredContent as any;
   };
-  const saved = await tool("canvas_schedule", { action: "set", interval_seconds: 3600, request: { path: "/counter", method: "POST" } });
+  const saved = await tool("artifact_schedule", { action: "set", interval_seconds: 3600, request: { path: "/counter", method: "POST" } });
   expect(saved.schedule).toMatchObject({ paused: false, interval_seconds: 3600 });
-  await tool("canvas_schedule", { action: "pause" });
-  const invalid = await client.callTool({ name: "canvas_write", arguments: { name, contents: "export default function {" } });
+  await tool("artifact_schedule", { action: "pause" });
+  const invalid = await client.callTool({ name: "artifact_write", arguments: { name, contents: "export default function {" } });
   expect(invalid.isError).toBe(true);
-  await tool("canvas_schedule", { action: "run_now" });
-  const response = await tool("canvas_request", { version_id: version, request: { path: "/counter" } });
+  await tool("artifact_schedule", { action: "run_now" });
+  const response = await tool("artifact_request", { version_id: version, request: { path: "/counter" } });
   expect(JSON.parse(atob(response.response.body)).value).toBe(1);
-  const runs = (await tool("canvas_runs")).runs;
+  const runs = (await tool("artifact_runs")).runs;
   expect(runs).toEqual(expect.arrayContaining([expect.objectContaining({ revision: version, trigger: "manual", status: "succeeded", http_status: 200 })]));
-  // A canvas's own SQL database cannot inspect supervisor execution history.
+  // An artifact's own SQL database cannot inspect supervisor execution history.
   const inspectServer = `import { DurableObject } from "cloudflare:workers";
-export class CanvasServer extends DurableObject { fetch() { return Response.json(this.ctx.storage.sql.exec("select name from sqlite_master where name='execution_runs'").toArray()); } }`;
-  expect((await client.callTool({ name: "canvas_write", arguments: { name, contents: counterClient, server: inspectServer } })).isError).not.toBe(true);
-  const inspected = await tool("canvas_request", { request: { path: "/" } });
+export class ArtifactServer extends DurableObject { fetch() { return Response.json(this.ctx.storage.sql.exec("select name from sqlite_master where name='execution_runs'").toArray()); } }`;
+  expect((await client.callTool({ name: "artifact_write", arguments: { name, contents: counterClient, server: inspectServer } })).isError).not.toBe(true);
+  const inspected = await tool("artifact_request", { request: { path: "/" } });
   expect(JSON.parse(atob(inspected.response.body))).toEqual([]);
-  expect((await client.callTool({ name: "canvas_write", arguments: { name, contents: counterClient, server: null } })).isError).not.toBe(true);
-  expect((await tool("canvas_schedule")).schedule).toMatchObject({ paused: true, next_run_at: null });
-  expect((await client.callTool({ name: "canvas_schedule", arguments: { name, action: "resume" } })).isError).toBe(true);
+  expect((await client.callTool({ name: "artifact_write", arguments: { name, contents: counterClient, server: null } })).isError).not.toBe(true);
+  expect((await tool("artifact_schedule")).schedule).toMatchObject({ paused: true, next_run_at: null });
+  expect((await client.callTool({ name: "artifact_schedule", arguments: { name, action: "resume" } })).isError).toBe(true);
 }, 120000);

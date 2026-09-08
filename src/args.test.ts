@@ -7,10 +7,10 @@ test("parseArgs defaults to help", () => {
 });
 
 test("parseArgs captures flags and positionals", () => {
-  expect(parseArgs(["open", "billing", "--dir", "/tmp/canvases", "--no-open"])).toEqual({
+  expect(parseArgs(["open", "billing", "--dir", "/tmp/artifacts", "--no-open"])).toEqual({
     command: "open",
     positionals: ["billing"],
-    flags: { dir: "/tmp/canvases", "no-open": true },
+    flags: { dir: "/tmp/artifacts", "no-open": true },
   });
 });
 

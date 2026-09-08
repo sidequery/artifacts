@@ -3,23 +3,23 @@ import { DurableObject } from "cloudflare:workers";
 import type { ScriptLibrary } from "./scripts";
 import type { ArtifactLinks } from "./links";
 import { nativeRequest } from "./backend";
-import type { CanvasHttpRequest } from "../src/httpTypes";
+import type { ArtifactHttpRequest } from "../src/httpTypes";
 import { sha256 } from "./library";
 
 export type ScriptLog = { timestamp: string; level: string; message: string; run_id?: string };
 export type ScriptRequest = {code: string; hash: string; secrets: Record<string,string>; request: Request; trigger?: "http" | "manual" | "schedule"; run_id?: string};
 export type ScheduleIdentity = {libraryKey: string; workspace: string; name: string; origin: string};
-export type ScriptSchedule = ScheduleTiming & { paused: boolean; next_run_at: number | null; request: CanvasHttpRequest};
+export type ScriptSchedule = ScheduleTiming & { paused: boolean; next_run_at: number | null; request: ArtifactHttpRequest};
 export type ScriptRun = {id: string; revision: string; trigger: string; started_at: string; finished_at: string | null; duration_ms: number | null; status: string; http_status: number | null};
 type Env = { LOADER: WorkerLoader; SCRIPTS: DurableObjectNamespace<ScriptLibrary>; LINKS: DurableObjectNamespace<ArtifactLinks> };
 const runtimeConfig = { compatibilityDate: "2026-09-06", compatibilityFlags: ["nodejs_compat"], limits: { cpuMs: 30000, subRequests: 50 } };
 declare abstract class ScriptFacet extends DurableObject { takeLogs(): ScriptLog[]; }
-const RUN_HEADER = "x-canvas-internal-run";
+const RUN_HEADER = "x-artifact-internal-run";
 
 // Each script has its own isolate and native SQLite facet. Only the explicit
 // script secrets are supplied; the application's environment is never copied.
 const logging = `import { AsyncLocalStorage } from "node:async_hooks";
-const secrets = __CANVAS_SCRIPT_SECRETS__;
+const secrets = __ARTIFACTS_SCRIPT_SECRETS__;
 export const execution = new AsyncLocalStorage();
 let logs = [];
 const clean = (value, secrets) => {
@@ -80,7 +80,7 @@ export class ScriptBackend extends DurableObject<Env> {
     const hash=this.cacheKey(input);
     return this.env.LOADER.get(hash,async()=>({
       ...runtimeConfig,
-      mainModule:"adapter.js",modules:{"adapter.js":adapter,"logging.js":logging.replace("__CANVAS_SCRIPT_SECRETS__", () => JSON.stringify(input.secrets)),"user.js":input.code},
+      mainModule:"adapter.js",modules:{"adapter.js":adapter,"logging.js":logging.replace("__ARTIFACTS_SCRIPT_SECRETS__", () => JSON.stringify(input.secrets)),"user.js":input.code},
       env:{secrets:input.secrets},
     }));
   }
@@ -133,7 +133,7 @@ export class ScriptBackend extends DurableObject<Env> {
     if (!Number.isSafeInteger(limit)||limit<1||limit>100) throw new Error("limit must be between 1 and 100");
     return this.ctx.storage.sql.exec<ScriptRun>("select * from execution_runs order by started_at desc,rowid desc limit ?",limit).toArray();
   }
-  async schedule(input: {identity?: ScheduleIdentity; interval_seconds?: number; cron?: string; timezone?: string; request?: CanvasHttpRequest; action?: "get"|"set"|"pause"|"resume"|"run_now"} = {}): Promise<ScriptSchedule|null> {
+  async schedule(input: {identity?: ScheduleIdentity; interval_seconds?: number; cron?: string; timezone?: string; request?: ArtifactHttpRequest; action?: "get"|"set"|"pause"|"resume"|"run_now"} = {}): Promise<ScriptSchedule|null> {
     const action=input.action??"get";
     if (!["get","set","pause","resume","run_now"].includes(action)) throw new Error("Unknown schedule action");
     if (action==="get") return await this.ctx.storage.get<ScriptSchedule>("schedule")??null;

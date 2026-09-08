@@ -1,31 +1,31 @@
 import { expect, spyOn, test } from "bun:test";
 import { readFileSync, readdirSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { compileCanvas } from "./compile";
-import { CanvasHistory } from "./history";
-import { createCanvasServer } from "./serve";
-import { CanvasService } from "./service";
-import { tempDir, VALID_CANVAS, writeCanvas } from "./test/fixtures";
+import { compileArtifact } from "./compile";
+import { ArtifactHistory } from "./history";
+import { createArtifactServer } from "./serve";
+import { ArtifactService } from "./service";
+import { tempDir, VALID_ARTIFACT, writeArtifact } from "./test/fixtures";
 
 function bridge(html: string) {
-  return JSON.parse(html.match(/window\.__herdrCanvas = (.*);<\/script>/)![1]);
+  return JSON.parse(html.match(/window\.__artifacts = (.*);<\/script>/)![1]);
 }
 function bundlePath(html: string) { return html.match(/src="([^\"]+bundle\.js[^\"]*)"/)![1]; }
 
 test("direct edits create revisions; page bundles are pinned even if source changes before the JS request", async () => {
   const dir = tempDir();
-  const path = writeCanvas(dir, "overview", VALID_CANVAS);
+  const path = writeArtifact(dir, "overview", VALID_ARTIFACT);
   const dbPath = join(dir, "history.sqlite");
-  const server = await createCanvasServer({ canvasesDir: dir, historyPath: dbPath });
-  const history = new CanvasHistory(dbPath);
+  const server = await createArtifactServer({ artifactsDir: dir, historyPath: dbPath });
+  const history = new ArtifactHistory(dbPath);
   try {
     const first = await (await fetch(`${server.url}/c/overview`)).text();
     const firstVersion = bridge(first).versionId;
-    writeFileSync(path, VALID_CANVAS.replaceAll("Overview", "EditedScene"));
+    writeFileSync(path, VALID_ARTIFACT.replaceAll("Overview", "EditedScene"));
     const oldJS = await (await fetch(server.url + bundlePath(first))).text();
     expect(oldJS).toContain("Overview");
     expect(oldJS).not.toContain("EditedScene");
-    expect(history.version(firstVersion)?.source).toBe(VALID_CANVAS);
+    expect(history.version(firstVersion)?.source).toBe(VALID_ARTIFACT);
     const second = await (await fetch(`${server.url}/c/overview`)).text();
     expect(bridge(second).versionId).not.toBe(firstVersion);
     expect(await (await fetch(server.url + bundlePath(second))).text()).toContain("EditedScene");
@@ -37,19 +37,19 @@ test("direct edits create revisions; page bundles are pinned even if source chan
 
 test("compile uses the exact captured source even when the file changes during compilation", async () => {
   const dir = tempDir();
-  const path = writeCanvas(dir, "overview", VALID_CANVAS);
+  const path = writeArtifact(dir, "overview", VALID_ARTIFACT);
   const dbPath = join(dir, "history.sqlite");
-  const server = await createCanvasServer({
-    canvasesDir: dir, historyPath: dbPath,
+  const server = await createArtifactServer({
+    artifactsDir: dir, historyPath: dbPath,
     compile: async (file, source) => {
-      writeFileSync(path, VALID_CANVAS.replaceAll("Overview", "RacingEdit"));
-      return compileCanvas(file, source);
+      writeFileSync(path, VALID_ARTIFACT.replaceAll("Overview", "RacingEdit"));
+      return compileArtifact(file, source);
     },
   });
-  const history = new CanvasHistory(dbPath);
+  const history = new ArtifactHistory(dbPath);
   try {
     const html = await (await fetch(`${server.url}/c/overview`)).text();
-    expect(history.version(bridge(html).versionId)?.source).toBe(VALID_CANVAS);
+    expect(history.version(bridge(html).versionId)?.source).toBe(VALID_ARTIFACT);
     const js = await (await fetch(server.url + bundlePath(html))).text();
     expect(js).toContain("Overview");
     expect(js).not.toContain("RacingEdit");
@@ -58,11 +58,11 @@ test("compile uses the exact captured source even when the file changes during c
 
 test("archived raw source reopens after deletion and server closure with the selected initial state", async () => {
   const dir = tempDir();
-  const path = writeCanvas(dir, "overview", VALID_CANVAS);
+  const path = writeArtifact(dir, "overview", VALID_ARTIFACT);
   const dbPath = join(dir, "history.sqlite");
-  const opts = { canvasesDir: dir, historyPath: dbPath };
-  let server = await createCanvasServer(opts);
-  const history = new CanvasHistory(dbPath);
+  const opts = { artifactsDir: dir, historyPath: dbPath };
+  let server = await createArtifactServer(opts);
+  const history = new ArtifactHistory(dbPath);
   try {
     const statePath = path.replace(".tsx", ".data.json");
     writeFileSync(statePath, JSON.stringify({ label: "</script><script>unwanted()</script>", count: 1 }));
@@ -71,7 +71,7 @@ test("archived raw source reopens after deletion and server closure with the sel
     await fetch(`${server.url}/c/overview`);
     server.stop();
     unlinkSync(path); // Disposable test fixture; history must outlive its source file.
-    server = await createCanvasServer(opts);
+    server = await createArtifactServer(opts);
     const response = await fetch(`${server.url}/v/${original.versionId}?event=${original.eventId}`);
     expect(response.status).toBe(200);
     const html = await response.text();
@@ -91,11 +91,11 @@ test("archived raw source reopens after deletion and server closure with the sel
 
 test("failed compilations are not recorded as served and versions cannot cross workspace boundaries", async () => {
   const dir = tempDir();
-  writeCanvas(dir, "bad", "export default function ( broken");
+  writeArtifact(dir, "bad", "export default function ( broken");
   const dbPath = join(dir, "history.sqlite");
-  const history = new CanvasHistory(dbPath);
-  const other = history.capture({ workspace: dir + "-other", name: "private", sourcePath: join(dir, "private.canvas.tsx"), source: VALID_CANVAS, runtime: "test" });
-  const server = await createCanvasServer({ canvasesDir: dir, historyPath: dbPath });
+  const history = new ArtifactHistory(dbPath);
+  const other = history.capture({ workspace: dir + "-other", name: "private", sourcePath: join(dir, "private.artifact.tsx"), source: VALID_ARTIFACT, runtime: "test" });
+  const server = await createArtifactServer({ artifactsDir: dir, historyPath: dbPath });
   try {
     expect((await fetch(`${server.url}/c/bad`)).status).toBe(400);
     expect(history.list(dir)).toHaveLength(0);
@@ -106,11 +106,11 @@ test("failed compilations are not recorded as served and versions cannot cross w
 
 test("restore preserves unserved drafts, creates a new revision, retains UI state, and works after deletion", () => {
   const dir = tempDir();
-  const path = writeCanvas(dir, "overview", VALID_CANVAS);
+  const path = writeArtifact(dir, "overview", VALID_ARTIFACT);
   const dbPath = join(dir, "history.sqlite");
-  const history = new CanvasHistory(dbPath);
-  const original = history.capture({ workspace: dir, name: "overview", sourcePath: path, source: VALID_CANVAS, runtime: "test" });
-  const service = new CanvasService({ canvasesDir: dir, env: { HERDR_CANVAS_HISTORY_DB: dbPath } });
+  const history = new ArtifactHistory(dbPath);
+  const original = history.capture({ workspace: dir, name: "overview", sourcePath: path, source: VALID_ARTIFACT, runtime: "test" });
+  const service = new ArtifactService({ artifactsDir: dir, env: { ARTIFACTS_HISTORY_DB: dbPath } });
   try {
     writeFileSync(path, "unfinished draft");
     const statePath = path.replace(".tsx", ".data.json");
@@ -118,34 +118,34 @@ test("restore preserves unserved drafts, creates a new revision, retains UI stat
     const restored = service.restore(original.id);
     expect(restored.ok).toBe(true);
     expect(restored.revision).toBe(3);
-    expect(readFileSync(path, "utf8")).toBe(VALID_CANVAS);
+    expect(readFileSync(path, "utf8")).toBe(VALID_ARTIFACT);
     expect(history.version(restored.versionId)?.restored_from).toBe(original.id);
     const draft = (history.list(dir) as Array<{ version_id: string; reason: string }>).find(row => row.reason === "before-restore")!;
     expect(history.version(draft.version_id)?.source).toBe("unfinished draft");
     expect(readFileSync(statePath, "utf8")).toBe('{"count":9}');
     unlinkSync(path);
     expect(service.restore(original.id).revision).toBe(4);
-    expect(readFileSync(path, "utf8")).toBe(VALID_CANVAS);
+    expect(readFileSync(path, "utf8")).toBe(VALID_ARTIFACT);
     expect(history.list(dir)).toHaveLength(4);
   } finally { history.close(); }
 }, { timeout: 30_000 });
 
 test("restore detects an edit made after its preservation snapshot and leaves that edit untouched", () => {
   const dir = tempDir();
-  const path = writeCanvas(dir, "overview", VALID_CANVAS);
+  const path = writeArtifact(dir, "overview", VALID_ARTIFACT);
   const dbPath = join(dir, "history.sqlite");
-  const archive = new CanvasHistory(dbPath);
-  const version = archive.capture({ workspace: dir, name: "overview", sourcePath: path, source: VALID_CANVAS, runtime: "test" });
+  const archive = new ArtifactHistory(dbPath);
+  const version = archive.capture({ workspace: dir, name: "overview", sourcePath: path, source: VALID_ARTIFACT, runtime: "test" });
   writeFileSync(path, "first unserved draft");
-  const capture = CanvasHistory.prototype.capture;
-  const spy = spyOn(CanvasHistory.prototype, "capture").mockImplementation(function (this: CanvasHistory, input) {
+  const capture = ArtifactHistory.prototype.capture;
+  const spy = spyOn(ArtifactHistory.prototype, "capture").mockImplementation(function (this: ArtifactHistory, input) {
     const result = capture.call(this, input);
     if (input.reason === "before-restore") writeFileSync(path, "concurrent editor change");
     return result;
   });
   try {
-    const service = new CanvasService({ canvasesDir: dir, env: { HERDR_CANVAS_HISTORY_DB: dbPath } });
-    expect(() => service.restore(version.id)).toThrow("canvas changed during restore");
+    const service = new ArtifactService({ artifactsDir: dir, env: { ARTIFACTS_HISTORY_DB: dbPath } });
+    expect(() => service.restore(version.id)).toThrow("artifact changed during restore");
     expect(readFileSync(path, "utf8")).toBe("concurrent editor change");
     expect(archive.list(dir)).toHaveLength(2);
     expect(readdirSync(dir).filter(name => name.endsWith(".tmp"))).toEqual([]);
@@ -154,33 +154,33 @@ test("restore detects an edit made after its preservation snapshot and leaves th
 
 test("live serving and restore reject symlinked sources without modifying the external target", async () => {
   const dir = tempDir();
-  const outside = writeCanvas(tempDir(), "outside", VALID_CANVAS);
-  const path = join(dir, "overview.canvas.tsx");
+  const outside = writeArtifact(tempDir(), "outside", VALID_ARTIFACT);
+  const path = join(dir, "overview.artifact.tsx");
   symlinkSync(outside, path);
   const dbPath = join(dir, "history.sqlite");
-  const archive = new CanvasHistory(dbPath);
+  const archive = new ArtifactHistory(dbPath);
   const target = archive.capture({ workspace: dir, name: "overview", sourcePath: path, source: "different source", runtime: "test" });
-  const server = await createCanvasServer({ canvasesDir: dir, historyPath: dbPath });
+  const server = await createArtifactServer({ artifactsDir: dir, historyPath: dbPath });
   try {
     expect((await fetch(`${server.url}/c/overview`)).status).toBe(400);
     expect(archive.events(target.id)).toHaveLength(0);
-    const service = new CanvasService({ canvasesDir: dir, env: { HERDR_CANVAS_HISTORY_DB: dbPath } });
+    const service = new ArtifactService({ artifactsDir: dir, env: { ARTIFACTS_HISTORY_DB: dbPath } });
     expect(() => service.restore(target.id)).toThrow("not a symlink");
-    expect(readFileSync(outside, "utf8")).toBe(VALID_CANVAS);
+    expect(readFileSync(outside, "utf8")).toBe(VALID_ARTIFACT);
   } finally { server.stop(); archive.close(); }
 });
 
 test("SDK changes invalidate memory bundles and each serve records the actual runtime", async () => {
   const dir = tempDir();
-  writeCanvas(dir, "overview", VALID_CANVAS);
+  writeArtifact(dir, "overview", VALID_ARTIFACT);
   const dbPath = join(dir, "history.sqlite");
   let runtime = "sdk-a";
   let builds = 0;
-  const server = await createCanvasServer({
-    canvasesDir: dir, historyPath: dbPath, runtimeIdentity: () => runtime,
+  const server = await createArtifactServer({
+    artifactsDir: dir, historyPath: dbPath, runtimeIdentity: () => runtime,
     compile: async () => { builds++; return { ok: true, js: `export default '${runtime}';`, diagnostics: [] }; },
   });
-  const archive = new CanvasHistory(dbPath);
+  const archive = new ArtifactHistory(dbPath);
   try {
     const first = await (await fetch(`${server.url}/c/overview`)).text();
     runtime = "sdk-b";
@@ -195,3 +195,33 @@ test("SDK changes invalidate memory bundles and each serve records the actual ru
     expect((await fetch(`${server.url}/v/${bridge(first).versionId}/bundle.js?runtime=expired`)).status).toBe(409);
   } finally { server.stop(); archive.close(); }
 });
+
+test("legacy source, project, state and history stay paired through serving and edits", async () => {
+  const dir = tempDir(), path = join(dir, "legacy.canvas.tsx"), dbPath = join(dir, "history.sqlite");
+  writeFileSync(path, VALID_ARTIFACT);
+  writeFileSync(`${path}.project.json`, JSON.stringify({ files: { "note.json": "{}" }, dependencies: {}, lock: {} }));
+  writeFileSync(join(dir, "legacy.canvas.data.json"), JSON.stringify({ count: 7 }));
+  const service = new ArtifactService({ artifactsDir: dir, env: { HERDR_CANVAS_HISTORY_DB: dbPath } });
+  expect(service.list()[0]?.path).toBe(path);
+  expect(service.readRange("legacy").project.files["note.json"]).toBe("{}");
+  const server = await createArtifactServer({ artifactsDir: dir, historyPath: dbPath });
+  const history = new ArtifactHistory(dbPath);
+  try {
+    const response = await fetch(`${server.url}/c/legacy`);
+    expect(response.status).toBe(200);
+    const first = bridge(await response.text());
+    expect(first.state.count).toBe(7);
+    expect(history.version(first.versionId)?.source_path).toBe(path);
+    await fetch(`${server.url}/c/legacy/state`, { method: "PUT", body: JSON.stringify({ key: "count", value: 8 }) });
+    expect(JSON.parse(readFileSync(join(dir, "legacy.canvas.data.json"), "utf8")).count).toBe(8);
+    service.edit("legacy", [{ old_text: "<H1>Overview</H1>", new_text: "<H1>Legacy Edit</H1>" }]);
+    expect(readFileSync(path, "utf8")).toContain("Legacy Edit");
+    expect(service.restore(first.versionId).path).toBe(path);
+    unlinkSync(path);
+    expect(service.restore(first.versionId).path).toBe(path);
+    expect(readFileSync(path, "utf8")).toBe(VALID_ARTIFACT);
+    expect(readdirSync(dir)).not.toContain("legacy.artifact.tsx");
+    expect(readdirSync(dir)).not.toContain("legacy.artifact.data.json");
+    expect(service.readRange("legacy").project.files["note.json"]).toBe("{}");
+  } finally { server.stop(); history.close(); }
+}, 30_000);

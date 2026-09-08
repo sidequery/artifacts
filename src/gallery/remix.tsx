@@ -12,7 +12,7 @@ export function RemixPanel({ artifact, version, onSaved, onCancel }: {
     event.preventDefault();
     setBusy(true); setError("");
     try {
-      await galleryTool(artifact.workspace, `${artifact.kind ?? "canvas"}_remix`, {
+      await galleryTool(artifact.workspace, `${artifact.kind ?? "artifact"}_remix`, {
         ...(version === "working" ? { name: artifact.name } : { version_id: version }), new_name: name,
       });
       await onSaved(name);

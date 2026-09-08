@@ -5,24 +5,24 @@ import {
   ListResourceTemplatesRequestSchema, ReadResourceRequestSchema,
   ErrorCode, McpError,
 } from "@modelcontextprotocol/sdk/types.js";
-import { CANVAS_APP_URI, CANVAS_RESOURCE } from "../src/mcp/app-contract";
+import { ARTIFACTS_APP_URI, ARTIFACTS_RESOURCE } from "../src/mcp/app-contract";
 import shell from "../dist/cloudflare/mcp-app.json";
 import * as validators from "../dist/cloudflare/tool-validators.js";
 import { CLOUD_MCP_TOOLS } from "./tool-contract";
-import type { CloudCanvasService } from "./service";
+import type { CloudArtifactService } from "./service";
 
-export async function handleCloudMcp(request: Request, service: CloudCanvasService, parsedBody?: unknown): Promise<Response> {
+export async function handleCloudMcp(request: Request, service: CloudArtifactService, parsedBody?: unknown): Promise<Response> {
   // Low-level SDK registration lets local and hosted transports share the same
   // JSON schemas, with argument validators generated from them at build time.
-  const server = new Server({ name: "canvas", version: "0.1.0" }, { capabilities: { tools: {}, resources: {} } });
+  const server = new Server({ name: "artifacts", version: "0.1.0" }, { capabilities: { tools: {}, resources: {} } });
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: CLOUD_MCP_TOOLS }));
-  const resource = service.fileStorage ? { ...CANVAS_RESOURCE, _meta: { ui: { ...CANVAS_RESOURCE._meta.ui,
-    csp: { ...CANVAS_RESOURCE._meta.ui.csp, connectDomains: [service.fileStorage.origin] },
-  } } } : CANVAS_RESOURCE;
+  const resource = service.fileStorage ? { ...ARTIFACTS_RESOURCE, _meta: { ui: { ...ARTIFACTS_RESOURCE._meta.ui,
+    csp: { ...ARTIFACTS_RESOURCE._meta.ui.csp, connectDomains: [service.fileStorage.origin] },
+  } } } : ARTIFACTS_RESOURCE;
   server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: [resource] }));
   server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({ resourceTemplates: [] }));
   server.setRequestHandler(ReadResourceRequestSchema, async ({ params }) => {
-    if (params.uri !== CANVAS_APP_URI) throw new McpError(ErrorCode.InvalidParams, "Unknown resource");
+    if (params.uri !== ARTIFACTS_APP_URI) throw new McpError(ErrorCode.InvalidParams, "Unknown resource");
     return { contents: [{ ...resource, text: shell }] };
   });
   server.setRequestHandler(CallToolRequestSchema, async ({ params }) => {

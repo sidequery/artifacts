@@ -7,14 +7,14 @@ import * as ReactDOM from "react-dom";
 import * as ReactDOMClient from "react-dom/client";
 import * as JSX from "react/jsx-runtime";
 import * as JSXDev from "react/jsx-dev-runtime";
-import type { CanvasPlugin } from "../src/plugins/config";
+import type { ArtifactPlugin } from "../src/plugins/config";
 import type { BrowserPlugins } from "../src/plugins/types";
 import { PLUGIN_ROOT, SDK_ENTRY } from "../src/paths";
 
-const shared = ["react-router", "react", "react-dom", "react-dom/client", "react/jsx-runtime", "react/jsx-dev-runtime", "sidequery/canvas", "herdr/canvas", "cursor/canvas", "@sidequery/canvas"];
+const shared = ["react-router", "react", "react-dom", "react-dom/client", "react/jsx-runtime", "react/jsx-dev-runtime", "sidequery/artifacts", "@sidequery/artifacts", "sidequery/canvas", "@sidequery/canvas", "herdr/canvas", "cursor/canvas"];
 
 /** Only browser entries enter this graph. Configuration and handlers are never bundled. */
-export async function prepareBrowserPlugins(plugins: readonly CanvasPlugin[], configDir: string): Promise<BrowserPlugins> {
+export async function prepareBrowserPlugins(plugins: readonly ArtifactPlugin[], configDir: string): Promise<BrowserPlugins> {
   const result: BrowserPlugins = { modules: {}, files: {}, paths: {} };
   const browserPlugins = plugins.filter(plugin => plugin.browser);
   if (!browserPlugins.length) return result;
@@ -35,19 +35,19 @@ export async function prepareBrowserPlugins(plugins: readonly CanvasPlugin[], co
     ["react-dom/client", "reactDomClient", ReactDOMClient],
     ["react/jsx-runtime", "jsx", JSX], ["react/jsx-dev-runtime", "jsxDev", JSXDev],
   ] as const) {
-    result.modules[specifier] = `const namespace = globalThis.__herdrCanvasRuntime.${namespace};\nexport default namespace;\n` +
+    result.modules[specifier] = `const namespace = globalThis.__artifactsRuntime.${namespace};\nexport default namespace;\n` +
       Object.keys(exports).filter(name => name !== "default" && /^[\w$]+$/.test(name)).sort()
         .map(name => `export const ${name} = namespace.${name};`).join("\n");
   }
   return result;
 }
 
-function collectTypes(plugin: CanvasPlugin, configDir: string, output: BrowserPlugins) {
+function collectTypes(plugin: ArtifactPlugin, configDir: string, output: BrowserPlugins) {
   const options: ts.CompilerOptions = {
     target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler,
     jsx: ts.JsxEmit.ReactJSX, declaration: true, emitDeclarationOnly: true, allowJs: true,
     skipLibCheck: true, esModuleInterop: true, types: [], customConditions: ["browser"], baseUrl: PLUGIN_ROOT,
-    paths: Object.fromEntries(shared.filter(name => name.endsWith("/canvas")).map(name => [name, [SDK_ENTRY]])),
+    paths: Object.fromEntries(shared.filter(name => /\/(artifacts|canvas)$/.test(name)).map(name => [name, [SDK_ENTRY]])),
   };
   const host = ts.createCompilerHost(options);
   const resolveType = (specifier: string, containing: string) => ts.resolveModuleName(specifier, containing, options, host).resolvedModule;

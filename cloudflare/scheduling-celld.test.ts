@@ -16,7 +16,7 @@ async function start(){
 async function stop(){if(!child||child.exitCode!==null)return;child.kill("SIGINT");await child.exited;child=undefined;}
 beforeAll(async()=>{
   if(!enabled)return;
-  directory=await mkdtemp(join(tmpdir(),"canvas-schedule-celld-"));
+  directory=await mkdtemp(join(tmpdir(),"artifact-schedule-celld-"));
   binary=process.env.CELLD_BIN??await ensureCelldRuntime({dataRoot:join(directory,"runtime")});
   const listener=Bun.listen({hostname:"127.0.0.1",port:0,socket:{data(){}}});url=`http://127.0.0.1:${listener.port}`;listener.stop(true);
   const bundle=await Bun.build({entrypoints:[join(import.meta.dir,"scripts-test-worker.ts")],target:"browser",format:"esm",external:["cloudflare:workers","node:*","fs","fs/promises"]});
@@ -29,11 +29,11 @@ afterAll(async()=>{await stop();if(directory)await rm(directory,{recursive:true,
 async function call(path:string,input:unknown={}){const response=await fetch(`${url}/${path}?library=scheduled`,{method:"POST",body:JSON.stringify(input)});const value=await response.json() as any;if(!response.ok)throw new Error(JSON.stringify(value)+logs);return value.result;}
 (enabled?test:test.skip)("celld persists schedules and run history across process restart and delivers native alarms",async()=>{
   const identity={workspace:"default",name:"handler"};
-  const code=`export default {fetch(request,env){if(request.headers.get("x-canvas-internal-run")!=="caller-value")return new Response("header changed",{status:422});env.sql.exec("create table if not exists count(n integer)");env.sql.exec("insert into count values(1)");console.log("tick");return new Response("ok")}}`;
+  const code=`export default {fetch(request,env){if(request.headers.get("x-artifact-internal-run")!=="caller-value")return new Response("header changed",{status:422});env.sql.exec("create table if not exists count(n integer)");env.sql.exec("insert into count values(1)");console.log("tick");return new Response("ok")}}`;
   const draft=await call("writeDraft",{...identity,source:code});
   const active=await call("activate",{...identity,source_hash:draft.source_hash,code});
   await call("link",{hash:active.hash});
-  await call("backend/schedule",{action:"set",identity:{...identity,libraryKey:"scheduled",origin:url},cron:"* * * * *",timezone:"UTC",request:{path:"/tick",method:"POST",headers:[["x-canvas-internal-run","caller-value"]]}});
+  await call("backend/schedule",{action:"set",identity:{...identity,libraryKey:"scheduled",origin:url},cron:"* * * * *",timezone:"UTC",request:{path:"/tick",method:"POST",headers:[["x-artifact-internal-run","caller-value"]]}});
   await call("backend/schedule",{action:"pause"});
   await call("backend/schedule",{action:"run_now"});
   expect((await call("backend/runs"))[0]).toMatchObject({status:"succeeded",trigger:"manual"});

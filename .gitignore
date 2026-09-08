@@ -1,12 +1,12 @@
 node_modules/
-.herdr-canvas/
+.artifacts/
 *.log
 .DS_Store
 .agents/worklog.md
 
 # Local artifacts and state; keep reusable samples in examples/.
-/canvases/
-*.canvas.data.json
+/artifacts/
+*.artifact.data.json
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
@@ -24,3 +24,8 @@ node_modules/
 .celld/
 /wrangler.celld.jsonc
 *.tgz
+
+# Compatibility: keep existing local Canvas files and state ignored.
+.herdr-canvas/
+/canvases/
+*.canvas.data.json

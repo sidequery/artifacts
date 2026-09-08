@@ -4,17 +4,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Miniflare, Response as MiniflareResponse } from "miniflare";
 import { chromium } from "playwright";
-import { typecheckCanvas } from "../src/typecheck";
-import { HOOKS_CANVAS } from "../src/test/fixtures";
+import { typecheckArtifact } from "../src/typecheck";
+import { HOOKS_ARTIFACT } from "../src/test/fixtures";
 import type { Diagnostic } from "../src/diagnostics";
 
 let runtime: Miniflare;
 let temporary: string;
 const outbound: string[] = [];
-const example = await readFile(new URL("../examples/overview.canvas.tsx", import.meta.url), "utf8");
+const example = await readFile(new URL("../examples/overview.artifact.tsx", import.meta.url), "utf8");
 type Result = { ok?: boolean; js?: string; diagnostics: Diagnostic[] };
 beforeAll(async () => {
-  temporary = await mkdtemp(join(tmpdir(), "canvas-workerd-"));
+  temporary = await mkdtemp(join(tmpdir(), "artifact-workerd-"));
   const modulesRoot = join(import.meta.dir, "../dist/worker");
   const modules: Record<string, { type: "esm" | "wasm"; contents: string | Uint8Array<ArrayBuffer> }> = {};
   for (const name of await readdir(modulesRoot)) {
@@ -25,7 +25,7 @@ beforeAll(async () => {
     cf: false, port: 0,
     workers: [{
       config: {
-        name: "canvas-compiler-test", type: "worker",
+        name: "artifact-compiler-test", type: "worker",
         compatibilityDate: "2026-09-06", compatibilityFlags: ["nodejs_compat"],
         manifest: { mainModule: "dev.js", modulesRoot, modules },
       },
@@ -47,13 +47,13 @@ async function call(source: string, operation = "compile"): Promise<Result> {
   return response.json() as Promise<Result>;
 }
 
-test("compiles the real SDK in workerd without network and renders an interactive canvas", async () => {
+test("compiles the real SDK in workerd without network and renders an interactive artifact", async () => {
   const health = await (await runtime.dispatchFetch("http://localhost/health")).json() as { runtime: string };
   expect(health.runtime).toBe("Cloudflare-Workers");
-  const source = `import { Button, H1, Stack, useCanvasState } from "sidequery/canvas";
-export default function Canvas() {
-  const [count, setCount] = useCanvasState("count", 0);
-  return <Stack><H1>Worker canvas</H1><Button onClick={() => setCount(count + 1)}>Count {count}</Button></Stack>;
+  const source = `import { Button, H1, Stack, useArtifactState } from "sidequery/artifacts";
+export default function Artifact() {
+  const [count, setCount] = useArtifactState("count", 0);
+  return <Stack><H1>Worker artifact</H1><Button onClick={() => setCount(count + 1)}>Count {count}</Button></Stack>;
 }`;
   const started = performance.now();
   const result = await call(source);
@@ -70,7 +70,7 @@ export default function Canvas() {
       (element as HTMLIFrameElement).srcdoc = `<div id="root"></div><script type="module">${js.replace(/<\/script/gi, "<\\/script")}</script>`;
     }, result.js!);
     const frame = page.frameLocator("iframe");
-    await frame.getByRole("heading", { name: "Worker canvas" }).waitFor();
+    await frame.getByRole("heading", { name: "Worker artifact" }).waitFor();
     await frame.getByRole("button", { name: "Count 0" }).click();
     await frame.getByRole("button", { name: "Count 1" }).waitFor();
     expect(errors).toEqual([]);
@@ -81,17 +81,17 @@ export default function Canvas() {
 test("checks examples, canonical and legacy SDK imports, semantic errors and forbidden imports like the local compiler", async () => {
   const cases = [
     example,
-    example.replaceAll("sidequery/canvas", "herdr/canvas"),
-    example.replaceAll("sidequery/canvas", "cursor/canvas"),
-    'import { H1 } from "sidequery/canvas";\nconst value: number = "wrong";\nexport default function Canvas() { return <H1>{value}</H1>; }',
-    'import { Button } from "sidequery/canvas";\nexport default function Canvas() { return <Button tone="not-a-tone">Bad</Button>; }',
-    'import { Missing } from "sidequery/canvas";\nexport default function Canvas() { return <Missing />; }',
-    'import thing from "missing-package";\nexport default function Canvas() { return <div>{thing}</div>; }',
+    example.replaceAll("sidequery/artifacts", "herdr/canvas"),
+    example.replaceAll("sidequery/artifacts", "cursor/canvas"),
+    'import { H1 } from "sidequery/artifacts";\nconst value: number = "wrong";\nexport default function Artifact() { return <H1>{value}</H1>; }',
+    'import { Button } from "sidequery/artifacts";\nexport default function Artifact() { return <Button tone="not-a-tone">Bad</Button>; }',
+    'import { Missing } from "sidequery/artifacts";\nexport default function Artifact() { return <Missing />; }',
+    'import thing from "missing-package";\nexport default function Artifact() { return <div>{thing}</div>; }',
   ];
   for (const [index, source] of cases.entries()) {
-    const path = join(temporary, `${index}.canvas.tsx`);
+    const path = join(temporary, `${index}.artifact.tsx`);
     await writeFile(path, source);
-    const local = typecheckCanvas(path);
+    const local = typecheckArtifact(path);
     const remote = await call(source, "typecheck");
     const comparable = (diagnostics: Diagnostic[]) => diagnostics.map(({ message, line, column }) => ({ message, line, column }));
     expect(comparable(remote.diagnostics)).toEqual(comparable(local));
@@ -104,7 +104,7 @@ test("checks examples, canonical and legacy SDK imports, semantic errors and for
 
 test("repeated and concurrent compilations keep source separate", async () => {
   const started = performance.now();
-  const outputs = await Promise.all(["alpha", "beta", "gamma"].map(label => call(`import { H1 } from "sidequery/canvas";\nexport default function Canvas() { return <H1>${label}-unique</H1>; }`)));
+  const outputs = await Promise.all(["alpha", "beta", "gamma"].map(label => call(`import { H1 } from "sidequery/artifacts";\nexport default function Artifact() { return <H1>${label}-unique</H1>; }`)));
   for (const [index, result] of outputs.entries()) {
     expect(result.diagnostics).toEqual([]);
     expect(result.ok).toBe(true);
@@ -122,7 +122,7 @@ test("bounds source input", async () => {
 
 test("compiles native Durable Object server APIs with semantic diagnostics and keeps client imports isolated", async () => {
   const source = `import { DurableObject } from "cloudflare:workers";
-export class CanvasServer extends DurableObject {
+export class ArtifactServer extends DurableObject {
   fetch(request: Request) {
     this.ctx.storage.sql.exec("create table if not exists counter (n integer)");
     return Response.json(this.ctx.storage.sql.exec("select count(*) as n from counter").toArray());
@@ -135,15 +135,15 @@ export class CanvasServer extends DurableObject {
   for (const valid of [
     source.replace('import { DurableObject }', 'import { DurableObject as NativeDO }').replace('extends DurableObject', 'extends NativeDO'),
     source.replace('import { DurableObject } from "cloudflare:workers";', 'import * as workers from "cloudflare:workers";').replace('extends DurableObject', 'extends workers.DurableObject'),
-    source.replace('export class CanvasServer extends DurableObject', 'class LocalBase extends DurableObject {}\nexport class CanvasServer extends LocalBase'),
+    source.replace('export class ArtifactServer extends DurableObject', 'class LocalBase extends DurableObject {}\nexport class ArtifactServer extends LocalBase'),
   ]) {
     expect((await call(valid, "typecheck-server")).diagnostics).toEqual([]);
     expect((await call(valid, "compile-server")).ok).toBe(true);
   }
   for (const invalidClass of [
-    'export class CanvasServer { fetch() { return new Response("ok"); } }',
-    'import { DurableObject } from "cloudflare:workers"; export default class CanvasServer extends DurableObject {}',
-    'import { DurableObject } from "cloudflare:workers"; class CanvasServer extends DurableObject {}',
+    'export class ArtifactServer { fetch() { return new Response("ok"); } }',
+    'import { DurableObject } from "cloudflare:workers"; export default class ArtifactServer extends DurableObject {}',
+    'import { DurableObject } from "cloudflare:workers"; class ArtifactServer extends DurableObject {}',
   ]) {
     const checked = await call(invalidClass, "typecheck-server");
     expect(checked.diagnostics.some(diagnostic => diagnostic.message.includes("extending DurableObject"))).toBe(true);
@@ -154,16 +154,16 @@ export class CanvasServer extends DurableObject {
   const invalid = await call(source.replace("sql.exec", "sql.missingMethod"), "compile-server");
   expect(invalid.ok).toBe(false);
   expect(invalid.diagnostics[0]?.message).toContain("missingMethod");
-  const client = await call('import { DurableObject } from "cloudflare:workers"; export default function Canvas() { return <div />; }');
+  const client = await call('import { DurableObject } from "cloudflare:workers"; export default function Artifact() { return <div />; }');
   expect(client.ok).toBe(false);
-  const next = await call('import { H1 } from "sidequery/canvas"; export default function Canvas() { return <H1>Still works</H1>; }');
+  const next = await call('import { H1 } from "sidequery/artifacts"; export default function Artifact() { return <H1>Still works</H1>; }');
   expect(next.ok).toBe(true);
   expect(outbound).toEqual([]);
 }, 60000);
 
 test("a transient server compiler queue overload can be retried", async () => {
   const sources = Array.from({ length: 12 }, (_, index) => `import { DurableObject } from "cloudflare:workers";
-export class CanvasServer extends DurableObject { fetch() { return new Response("${index}"); } }`);
+export class ArtifactServer extends DurableObject { fetch() { return new Response("${index}"); } }`);
   const overloaded = await Promise.all(sources.map(item => call(item, "compile-server")));
   const last = overloaded.at(-1)!;
   expect(last.ok).toBe(false);
@@ -176,8 +176,8 @@ export class CanvasServer extends DurableObject { fetch() { return new Response(
 test("ordinary hooks render and update through canonical and legacy hosted SDK imports", async () => {
   const browser = await chromium.launch({ headless: true });
   try {
-    for (const specifier of ["sidequery/canvas", "herdr/canvas", "cursor/canvas"]) {
-      const result = await call(HOOKS_CANVAS.replaceAll("sidequery/canvas", specifier));
+    for (const specifier of ["sidequery/artifacts","@sidequery/artifacts","sidequery/canvas","@sidequery/canvas","herdr/canvas","cursor/canvas"]) {
+      const result = await call(HOOKS_ARTIFACT.replaceAll("sidequery/artifacts", specifier));
       expect(result.diagnostics).toEqual([]);
       expect(result.ok).toBe(true);
       const page = await browser.newPage();
@@ -214,7 +214,7 @@ test("scripts compile arbitrary Workers handlers and reject missing handlers, in
     'const count: number = "wrong"; export default {fetch() {return new Response(String(count));}};',
     'import missing from "missing-package"; export default {fetch() {return new Response(missing);}};',
   ]) expect((await call(source,"compile-script")).ok).toBe(false);
-  expect((await call('import { H1 } from "sidequery/canvas"; export default function Canvas() { return <H1>After script</H1>; }')).ok).toBe(true);
+  expect((await call('import { H1 } from "sidequery/artifacts"; export default function Artifact() { return <H1>After script</H1>; }')).ok).toBe(true);
 },60000);
 
 test("a prebundled third-party Hono handler compiles and serves through the script runtime", async () => {
@@ -283,13 +283,13 @@ test("a prebundled third-party Hono handler compiles and serves through the scri
 }, 60000);
 
 // Build the fixture deployment, then run this gated integration test:
-// CANVAS_PLUGINS_CONFIG=src/test/plugins/config.ts bun run build:cloudflare-compiler
-// CANVAS_PLUGIN_TEST=1 bun test cloudflare/compiler.test.ts --test-name-pattern 'deployment browser plugin' --timeout 60000
+// ARTIFACTS_PLUGINS_CONFIG=src/test/plugins/config.ts bun run build:cloudflare-compiler
+// ARTIFACTS_PLUGIN_TEST=1 bun test cloudflare/compiler.test.ts --test-name-pattern 'deployment browser plugin' --timeout 60000
 // Restore the default deployment afterward with: bun run build:cloudflare-compiler
-test.skipIf(process.env.CANVAS_PLUGIN_TEST !== "1")("deployment browser plugin compiles, checks types, and shares React hooks in workerd", async () => {
+test.skipIf(process.env.ARTIFACTS_PLUGIN_TEST !== "1")("deployment browser plugin compiles, checks types, and shares React hooks in workerd", async () => {
   const source = `import { PluginCounter, type Label } from "@test/counter";
 const label: Label = { prefix: "Plugin" };
-export default function Canvas() { return <PluginCounter {...label} />; }`;
+export default function Artifact() { return <PluginCounter {...label} />; }`;
   expect((await call(source, "typecheck")).diagnostics).toEqual([]);
   const invalidSdkType = source.replace("type Label", "type Label, type Tone").replace("const label", 'const tone: Tone = "invalid-tone"; const label');
   expect((await call(invalidSdkType, "typecheck")).diagnostics.some(item => item.message.includes("invalid-tone"))).toBe(true);
@@ -331,7 +331,7 @@ test("compiles archived multi-file projects and typed packages without network",
     "node_modules/tiny-example/index.js":"export const answer = 42;",
     "node_modules/tiny-example/index.d.ts":"export const answer: number;",
   }};
-  const source = 'import {greeting} from "./lib/greeting"; import {answer} from "tiny-example"; export default function Canvas(){return <div>{greeting} {answer}</div>}';
+  const source = 'import {greeting} from "./lib/greeting"; import {answer} from "tiny-example"; export default function Artifact(){return <div>{greeting} {answer}</div>}';
   const result=await callProject(source,project);
   expect(result.diagnostics).toEqual([]); expect(result.ok).toBe(true); expect(result.js).toContain("project-hello");
   const script=await callProject('import {greeting} from "./lib/greeting"; import {answer} from "tiny-example"; export default {fetch(){return new Response(greeting+answer)}}',project,"compile-script");
@@ -348,7 +348,7 @@ test("compiles archived multi-file projects and typed packages without network",
 },60000);
 
 test("package components use the host React hook runtime",async()=>{
- const result=await callProject('import {Counter} from "counter-package"; export default function Canvas(){return <Counter/>}',{dependencies:{"counter-package":"1.0.0"},lock:{
+ const result=await callProject('import {Counter} from "counter-package"; export default function Artifact(){return <Counter/>}',{dependencies:{"counter-package":"1.0.0"},lock:{
    "node_modules/counter-package/package.json":JSON.stringify({name:"counter-package",version:"1.0.0",main:"index.js",types:"index.d.ts"}),
    "node_modules/counter-package/index.js":'import {useState,createElement} from "react"; export function Counter(){const [n,setN]=useState(0); return createElement("button",{onClick:()=>setN(n+1)},"Package count "+n)}',
    "node_modules/counter-package/index.d.ts":'export function Counter(): import("react").ReactElement;',
@@ -359,10 +359,42 @@ test("package components use the host React hook runtime",async()=>{
  expect(outbound).toEqual([]);
 },60000);
 
-test.skipIf(process.env.CANVAS_PACKAGE_INTEGRATION !== "1")("compiles an integrity-verified Hono dependency snapshot without compiler network",async()=>{
+test.skipIf(process.env.ARTIFACTS_PACKAGE_INTEGRATION !== "1")("compiles an integrity-verified Hono dependency snapshot without compiler network",async()=>{
   const {resolveProject}=await import("./project");
   const project=await resolveProject({dependencies:{hono:"4.13.7"},files:{"lib/message.ts":"export const message = 'hello-locked-hono';"}});
   const result=await callProject('import {Hono} from "hono"; import {message} from "./lib/message"; const app=new Hono(); app.get("/",c=>c.text(message)); export default app;',project,"compile-script");
   expect(result.diagnostics).toEqual([]); expect(result.ok).toBe(true); expect(result.js).toContain("hello-locked-hono");
   expect(outbound).toEqual([]);
 },120000);
+
+test("historical Canvas SDK source compiles through every legacy hosted import", async () => {
+  for (const specifier of ["sidequery/canvas", "@sidequery/canvas", "herdr/canvas", "cursor/canvas"]) {
+    const result = await call(`import { useCanvasState, canvasFetch, canvasFiles, MAX_CANVAS_FILE_BYTES, type SetCanvasState } from "${specifier}";
+export default function HistoricalCanvas() {
+  const [count, setCount]: [number, SetCanvasState<number>] = useCanvasState("count", 0);
+  return <button onClick={() => setCount(count + 1)}>{count} {typeof canvasFetch} {typeof canvasFiles} {MAX_CANVAS_FILE_BYTES}</button>;
+}`);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.ok).toBe(true);
+  }
+}, 60000);
+
+test("legacy server class exports compile to canonical ArtifactServer", async () => {
+  for (const declaration of [
+    "export class CanvasServer extends DurableObject {}",
+    "class HistoricalServer extends DurableObject {}; export { HistoricalServer as CanvasServer };",
+    "export class CanvasServer extends DurableObject {}; export class ArtifactServer extends DurableObject {}",
+  ]) {
+    const result = await call('import { DurableObject } from "cloudflare:workers"; ' + declaration, "compile-server");
+    expect(result.diagnostics).toEqual([]);
+    expect(result.ok).toBe(true);
+    expect(result.js).toMatch(/export\s*\{[^}]*\bArtifactServer\b/);
+  }
+  for (const source of [
+    'export class CanvasServer {}',
+    'import { DurableObject } from "cloudflare:workers"; export default class CanvasServer extends DurableObject {}',
+    'import { DurableObject } from "cloudflare:workers"; export class CanvasServer extends DurableObject {}; export class ArtifactServer {}',
+  ]) {
+    expect((await call(source, "compile-server")).ok).toBe(false);
+  }
+}, 60000);

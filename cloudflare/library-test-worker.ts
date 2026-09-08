@@ -1,4 +1,4 @@
-export { CanvasLibrary } from "./library";
+export { ArtifactLibrary } from "./library";
 
 type LibraryStub = Record<string, (input: unknown) => Promise<unknown>>;
 type Env = { LIBRARY: { getByName(name: string): LibraryStub } };

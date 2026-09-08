@@ -9,7 +9,7 @@ import {
 
 import { Link as RouterLink, type LinkProps } from "react-router";
 import { useHostTheme } from "./hooks";
-import { canvasTypography, toneColor, type Tone } from "./tokens";
+import { artifactTypography, toneColor, type Tone } from "./tokens";
 
 const NestedText = createContext(false);
 
@@ -130,7 +130,7 @@ export function Text({
             margin: Tag === "p" ? 0 : undefined,
             color: theme.text[tone],
             fontFamily: "ui-sans-serif, system-ui, sans-serif",
-            ...(size === "small" ? canvasTypography.small : canvasTypography.body),
+            ...(size === "small" ? artifactTypography.small : artifactTypography.body),
             fontWeight: weights[weight],
             fontStyle: italic ? "italic" : undefined,
             overflow: truncate ? "hidden" : undefined,
@@ -156,7 +156,7 @@ export function H1({ children, style }: { children?: ReactNode; style?: CSSPrope
           margin: 0,
           color: theme.text.primary,
           fontFamily: "ui-sans-serif, system-ui, sans-serif",
-          ...canvasTypography.h1,
+          ...artifactTypography.h1,
         },
         style,
       )}
@@ -175,7 +175,7 @@ export function H2({ children, style }: { children?: ReactNode; style?: CSSPrope
           margin: 0,
           color: theme.text.primary,
           fontFamily: "ui-sans-serif, system-ui, sans-serif",
-          ...canvasTypography.h2,
+          ...artifactTypography.h2,
         },
         style,
       )}
@@ -194,7 +194,7 @@ export function H3({ children, style }: { children?: ReactNode; style?: CSSPrope
           margin: 0,
           color: theme.text.primary,
           fontFamily: "ui-sans-serif, system-ui, sans-serif",
-          ...canvasTypography.h3,
+          ...artifactTypography.h3,
         },
         style,
       )}

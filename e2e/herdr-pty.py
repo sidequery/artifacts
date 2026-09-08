@@ -12,7 +12,7 @@ import time
 
 
 def main() -> int:
-    session = sys.argv[1] if len(sys.argv) > 1 else "canvas-e2e"
+    session = sys.argv[1] if len(sys.argv) > 1 else "artifact-e2e"
     os.environ.setdefault("TERM", "xterm-256color")
     os.environ.setdefault("SHELL", "/bin/bash")
 

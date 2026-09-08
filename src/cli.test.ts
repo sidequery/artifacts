@@ -3,11 +3,11 @@ import { join } from "node:path";
 import { unlinkSync, readFileSync } from "node:fs";
 
 import { PLUGIN_ROOT } from "./paths";
-import { VALID_CANVAS, tempDir, writeCanvas } from "./test/fixtures";
-import { CanvasHistory } from "./history";
-import { createCanvasServer } from "./serve";
+import { VALID_ARTIFACT, tempDir, writeArtifact } from "./test/fixtures";
+import { ArtifactHistory } from "./history";
+import { createArtifactServer } from "./serve";
 import { handleMcpRequest } from "./mcp/local-tools";
-import { CanvasService } from "./service";
+import { ArtifactService } from "./service";
 import { parseArgs } from "./args";
 import { runServerCommand } from "./cli";
 
@@ -63,22 +63,22 @@ test("server CLI dispatches lifecycle commands and foreground readiness", async 
   })).rejects.toThrow("shutdown cleanup failed");
 });
 
-test("CLI list and typecheck work against a temp canvases dir", async () => {
+test("CLI list and typecheck work against a temp artifacts dir", async () => {
   const dir = tempDir();
-  writeCanvas(dir, "overview", VALID_CANVAS);
+  writeArtifact(dir, "overview", VALID_ARTIFACT);
   const list = await runCli(["list", "--dir", dir]);
   expect(list.exitCode).toBe(0);
-  const listed = JSON.parse(list.stdout) as { canvases: Array<{ id: string }> };
-  expect(listed.canvases.map((item) => item.id)).toEqual(["overview"]);
+  const listed = JSON.parse(list.stdout) as { artifacts: Array<{ id: string }> };
+  expect(listed.artifacts.map((item) => item.id)).toEqual(["overview"]);
 
   const check = await runCli(["typecheck", "overview", "--dir", dir]);
   expect(check.exitCode).toBe(0);
-  expect(JSON.parse(check.stdout).check).toBe("Canvas TypeScript check: no errors");
+  expect(JSON.parse(check.stdout).check).toBe("Artifact TypeScript check: no errors");
 }, { timeout: 30_000 });
 
-test("CLI compile bundles a valid canvas", async () => {
+test("CLI compile bundles a valid artifact", async () => {
   const dir = tempDir();
-  writeCanvas(dir, "overview", VALID_CANVAS);
+  writeArtifact(dir, "overview", VALID_ARTIFACT);
   const compiled = await runCli(["compile", "overview", "--dir", dir]);
   expect(compiled.exitCode).toBe(0);
   const payload = JSON.parse(compiled.stdout) as { ok: boolean; bytes: number };
@@ -86,14 +86,14 @@ test("CLI compile bundles a valid canvas", async () => {
   expect(payload.bytes).toBeGreaterThan(100);
 });
 
-test("CLI open uses the plugin canvas name fallback and prefers an explicit name", async () => {
+test("CLI open uses the plugin artifact name fallback and prefers an explicit name", async () => {
   const dir = tempDir();
-  const fallbackPath = writeCanvas(dir, "fallback", VALID_CANVAS);
-  const explicitPath = writeCanvas(dir, "explicit", VALID_CANVAS);
+  const fallbackPath = writeArtifact(dir, "fallback", VALID_ARTIFACT);
+  const explicitPath = writeArtifact(dir, "explicit", VALID_ARTIFACT);
   const dbPath = join(dir, "history.sqlite");
-  const server = await createCanvasServer({ canvasesDir: dir, historyPath: dbPath });
+  const server = await createArtifactServer({ artifactsDir: dir, historyPath: dbPath });
   const common = ["--dir", dir, "--history-db", dbPath, "--no-open"];
-  const env = { HERDR_CANVAS_NAME: "fallback", HERDR_CANVAS_SERVER_URL: server.url };
+  const env = { ARTIFACTS_NAME: "fallback", ARTIFACTS_SERVER_URL: server.url };
   try {
     const fallback = await runCli(["open", ...common], env);
     expect(fallback.exitCode).toBe(0);
@@ -104,30 +104,30 @@ test("CLI open uses the plugin canvas name fallback and prefers an explicit name
     for (const versionFlags of [["--version"], ["--version="]]) {
       const invalidVersion = await runCli(["open", ...versionFlags, ...common], env);
       expect(invalidVersion.exitCode).toBe(1);
-      expect(invalidVersion.stderr).toContain("provide a canvas name or --version ID");
+      expect(invalidVersion.stderr).toContain("provide an artifact name or --version ID");
     }
   } finally { server.stop(); }
 }, { timeout: 30_000 });
 
-test("CLI history, show, open --version and restore work for an archived canvas whose file was deleted", async () => {
+test("CLI history, show, open --version and restore work for an archived artifact whose file was deleted", async () => {
   const dir = tempDir();
-  const path = writeCanvas(dir, "overview", VALID_CANVAS);
+  const path = writeArtifact(dir, "overview", VALID_ARTIFACT);
   const dbPath = join(dir, "history.sqlite");
-  const history = new CanvasHistory(dbPath);
-  const version = history.capture({ workspace: dir, name: "overview", sourcePath: path, source: VALID_CANVAS, runtime: "test" });
+  const history = new ArtifactHistory(dbPath);
+  const version = history.capture({ workspace: dir, name: "overview", sourcePath: path, source: VALID_ARTIFACT, runtime: "test" });
   const eventId = history.served(version.id, { count: 3 }, "live");
   history.close();
   unlinkSync(path);
   const common = ["--dir", dir, "--history-db", dbPath];
-  const server = await createCanvasServer({ canvasesDir: dir, historyPath: dbPath });
+  const server = await createArtifactServer({ artifactsDir: dir, historyPath: dbPath });
   try {
     const listing = await runCli(["history", "overview", ...common]);
     expect(listing.exitCode).toBe(0);
     expect(JSON.parse(listing.stdout).versions[0].version_id).toBe(version.id);
     const shown = await runCli(["show", version.id, ...common]);
-    expect(JSON.parse(shown.stdout).source).toBe(VALID_CANVAS);
-    expect((await runCli(["show", version.id, "--source", ...common])).stdout).toBe(VALID_CANVAS);
-    const reopened = await runCli(["open", "--version", version.id, "--event", eventId, ...common, "--no-open"], { HERDR_CANVAS_SERVER_URL: server.url, HERDR_CANVAS_NAME: "unrelated" });
+    expect(JSON.parse(shown.stdout).source).toBe(VALID_ARTIFACT);
+    expect((await runCli(["show", version.id, "--source", ...common])).stdout).toBe(VALID_ARTIFACT);
+    const reopened = await runCli(["open", "--version", version.id, "--event", eventId, ...common, "--no-open"], { ARTIFACTS_SERVER_URL: server.url, ARTIFACTS_NAME: "unrelated" });
     expect(reopened.exitCode).toBe(0);
     const url = JSON.parse(reopened.stdout).url;
     expect(url).toBe(`${server.url}/v/${version.id}?event=${eventId}`);
@@ -138,47 +138,47 @@ test("CLI history, show, open --version and restore work for an archived canvas 
     const restored = await runCli(["restore", version.id, ...common]);
     expect(restored.exitCode).toBe(0);
     expect(JSON.parse(restored.stdout)).toMatchObject({ restored: true, revision: 2 });
-    expect(readFileSync(path, "utf8")).toBe(VALID_CANVAS);
+    expect(readFileSync(path, "utf8")).toBe(VALID_ARTIFACT);
   } finally { server.stop(); }
 }, { timeout: 30_000 });
 
 test("CLI and MCP read/edit share range, batch, stale-source and diagnostic contracts", async () => {
   const cliDir = tempDir();
   const mcpDir = tempDir();
-  writeCanvas(cliDir, "overview", VALID_CANVAS);
-  writeCanvas(mcpDir, "overview", VALID_CANVAS);
-  const service = new CanvasService({ canvasesDir: mcpDir, env: { HERDR_CANVAS_HISTORY_DB: join(mcpDir, "history.sqlite") } });
+  writeArtifact(cliDir, "overview", VALID_ARTIFACT);
+  writeArtifact(mcpDir, "overview", VALID_ARTIFACT);
+  const service = new ArtifactService({ artifactsDir: mcpDir, env: { ARTIFACTS_HISTORY_DB: join(mcpDir, "history.sqlite") } });
   const call = async (name: string, args: Record<string, unknown>) => {
     const response = await handleMcpRequest({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: { name: "overview", ...args } } }, service);
     return response!;
   };
   const payload = (response: Awaited<ReturnType<typeof call>>) => JSON.parse((response.result as { content: Array<{ text: string }> }).content[0]!.text);
   const cliRead = await runCli(["read", "overview", "--start-line", "5", "--end-line", "7", "--dir", cliDir]);
-  const mcpRead = payload(await call("canvas_read", { start_line: 5, end_line: 7 }));
+  const mcpRead = payload(await call("artifact_read", { start_line: 5, end_line: 7 }));
   const cliSource = JSON.parse(cliRead.stdout);
   expect(cliRead.exitCode).toBe(0);
   expect({ ...cliSource, path: undefined }).toEqual({ ...mcpRead, path: undefined });
   const edit = { edits: [{ old_text: "<H1>Overview</H1>", new_text: "<H1>Edited</H1>" }], expected_hash: cliSource.source_hash };
   const cliEdit = await runCli(["edit", "overview", "--stdin", "--dir", cliDir], {}, JSON.stringify(edit));
-  const mcpEdit = await call("canvas_edit", edit);
+  const mcpEdit = await call("artifact_edit", edit);
   expect(cliEdit.exitCode).toBe(0);
   expect({ ...JSON.parse(cliEdit.stdout), path: undefined }).toEqual({ ...payload(mcpEdit), path: undefined });
   expect(JSON.parse(cliEdit.stdout)).not.toHaveProperty("source");
   expect((await runCli(["edit", "overview", "--stdin", "--dir", cliDir], {}, JSON.stringify(edit))).exitCode).toBe(1);
-  expect((await call("canvas_edit", edit)).error?.message).toContain("changed since read");
+  expect((await call("artifact_edit", edit)).error?.message).toContain("changed since read");
   const bad = { edits: [{ old_text: "gap={16}", new_text: 'gap="wide"' }] };
   const editsPath = join(cliDir, "edits.json");
   await Bun.write(editsPath, JSON.stringify(bad));
   const cliBad = await runCli(["edit", "overview", "--file", editsPath, "--dir", cliDir]);
-  const mcpBad = await call("canvas_edit", bad);
+  const mcpBad = await call("artifact_edit", bad);
   expect(cliBad.exitCode).toBe(1);
   expect(JSON.parse(cliBad.stdout)).toMatchObject({ ok: false, applied: true });
   expect(mcpBad.result).toMatchObject({ isError: true });
   expect(payload(mcpBad)).toMatchObject({ ok: false, applied: true });
-  expect(service.read("overview")).toBe(readFileSync(join(cliDir, "overview.canvas.tsx"), "utf8"));
+  expect(service.read("overview")).toBe(readFileSync(join(cliDir, "overview.artifact.tsx"), "utf8"));
   expect((await runCli(["read", "overview", "--start-line", "--dir", cliDir])).exitCode).toBe(1);
-  expect((await call("canvas_read", { start_line: "5" })).error).toBeDefined();
-  expect((await call("canvas_edit", { edits: [{ old_text: "Edited", new_text: null }] })).error).toBeDefined();
+  expect((await call("artifact_read", { start_line: "5" })).error).toBeDefined();
+  expect((await call("artifact_edit", { edits: [{ old_text: "Edited", new_text: null }] })).error).toBeDefined();
   expect((await runCli(["edit", "overview", "--stdin", "--dir", cliDir], {}, "null")).exitCode).toBe(1);
 }, { timeout: 60_000 });
 

@@ -27,13 +27,13 @@ function reservePort(): number {
 }
 
 async function startNativeServer(
-  canvas: string,
+  artifact: string,
   consumer: string,
   stateDir: string,
   port: number,
   env: Record<string, string | undefined>,
 ) {
-  const child = Bun.spawn([process.execPath, canvas, "server", "--port", String(port), "--state-dir", stateDir], {
+  const child = Bun.spawn([process.execPath, artifact, "server", "--port", String(port), "--state-dir", stateDir], {
     // Match service-manager environments: no interactive Bun/Node PATH entries.
     cwd: consumer, env: { ...env, PATH: "/usr/bin:/bin" }, stdin: "ignore", stdout: "pipe", stderr: "pipe",
   });
@@ -99,12 +99,12 @@ async function readyUrl(child: ReturnType<typeof Bun.spawn>, timeoutMilliseconds
 }
 
 test("published tarball runs the CLI, gallery, and stdio MCP outside a checkout", async () => {
-  const temporary = mkdtempSync(join(tmpdir(), "sidequery-canvas-package-"));
+  const temporary = mkdtempSync(join(tmpdir(), "sidequery-artifacts-package-"));
   const archiveDirectory = join(temporary, "archive");
   const consumer = join(temporary, "consumer");
   const clientDirectory = join(temporary, "mcp-client");
   const home = join(temporary, "home");
-  const canvases = join(consumer, "canvases");
+  const artifacts = join(consumer, "artifacts");
   const history = join(consumer, "history.sqlite");
   mkdirSync(archiveDirectory, { recursive: true });
   mkdirSync(consumer, { recursive: true });
@@ -116,16 +116,16 @@ test("published tarball runs the CLI, gallery, and stdio MCP outside a checkout"
     XDG_CACHE_HOME: join(temporary, "cache"),
     XDG_DATA_HOME: join(temporary, "data"),
     BUN_INSTALL_CACHE_DIR: join(temporary, "bun-cache"),
-    CANVAS_DATA_HOME: join(temporary, "canvas-data"),
+    ARTIFACTS_DATA_HOME: join(temporary, "artifact-data"),
     HERDR_PLUGIN_STATE_DIR: join(temporary, "herdr-state"),
   };
   let gallery: ReturnType<typeof Bun.spawn> | undefined;
   try {
     // Release jobs supply the exact archive that will be published.
-    const archive = process.env.CANVAS_PACKAGE_ARCHIVE
-      ? resolve(process.env.CANVAS_PACKAGE_ARCHIVE)
-      : join(archiveDirectory, `sidequery-canvas-${(await Bun.file(join(root, "package.json")).json()).version}.tgz`);
-    if (!process.env.CANVAS_PACKAGE_ARCHIVE) {
+    const archive = process.env.ARTIFACTS_PACKAGE_ARCHIVE
+      ? resolve(process.env.ARTIFACTS_PACKAGE_ARCHIVE)
+      : join(archiveDirectory, `sidequery-artifacts-${(await Bun.file(join(root, "package.json")).json()).version}.tgz`);
+    if (!process.env.ARTIFACTS_PACKAGE_ARCHIVE) {
       await run([
         process.execPath, "pm", "pack", "--ignore-scripts", "--destination", archiveDirectory,
       ], root, isolatedEnv);
@@ -144,17 +144,17 @@ test("published tarball runs the CLI, gallery, and stdio MCP outside a checkout"
       private: true,
       type: "module",
       dependencies: {
-        "@sidequery/canvas": `file:${archive}`,
+        "@sidequery/artifacts": `file:${archive}`,
       },
     }, null, 2));
     await run([process.execPath, "install", "--ignore-scripts"], consumer, isolatedEnv);
     await run([process.execPath, "-e", `
-      import { definePlugins } from "@sidequery/canvas/plugins";
-      import { pluginCall, canvasFiles } from "@sidequery/canvas";
-      import { runtimeIdentity } from "./node_modules/@sidequery/canvas/src/history.ts";
+      import { definePlugins } from "@sidequery/artifacts/plugins";
+      import { pluginCall, artifactFiles } from "@sidequery/artifacts";
+      import { runtimeIdentity } from "./node_modules/@sidequery/artifacts/src/history.ts";
       if (definePlugins([]).length !== 0 || typeof pluginCall !== "function") throw new Error("Plugin exports are missing");
-      if (typeof canvasFiles.upload !== "function" || typeof canvasFiles.download !== "function") throw new Error("File exports are missing");
-      const registry = "./node_modules/@sidequery/canvas/dist/cloudflare/plugin-browser.json";
+      if (typeof artifactFiles.upload !== "function" || typeof artifactFiles.download !== "function") throw new Error("File exports are missing");
+      const registry = "./node_modules/@sidequery/artifacts/dist/cloudflare/plugin-browser.json";
       const original = await Bun.file(registry).text();
       const before = runtimeIdentity();
       await Bun.write(registry, JSON.stringify({modules:{fixture:"export const value=1;"},files:{},paths:{}}));
@@ -164,19 +164,19 @@ test("published tarball runs the CLI, gallery, and stdio MCP outside a checkout"
     `], consumer, isolatedEnv);
 
 
-    const source = join(consumer, "package-smoke.canvas.tsx");
-    await Bun.write(source, `import { Card, H1, Text } from "sidequery/canvas";\nexport default function PackageSmoke() { return <Card><H1>Package smoke</H1><Text>Installed tarball</Text></Card>; }\n`);
-    const canvas = join(consumer, "node_modules", ".bin", "canvas");
-    const args = ["--dir", canvases, "--history-db", history];
-    const written = JSON.parse((await run([canvas, "write", "package-smoke", "--file", source, ...args], consumer, isolatedEnv)).stdout);
+    const source = join(consumer, "package-smoke.artifact.tsx");
+    await Bun.write(source, `import { Card, H1, Text } from "sidequery/artifacts";\nexport default function PackageSmoke() { return <Card><H1>Package smoke</H1><Text>Installed tarball</Text></Card>; }\n`);
+    const artifact = join(consumer, "node_modules", ".bin", "artifacts");
+    const args = ["--dir", artifacts, "--history-db", history];
+    const written = JSON.parse((await run([artifact, "write", "package-smoke", "--file", source, ...args], consumer, isolatedEnv)).stdout);
     expect(written.ok).toBe(true);
-    const checked = JSON.parse((await run([canvas, "typecheck", "package-smoke", ...args], consumer, isolatedEnv)).stdout);
+    const checked = JSON.parse((await run([artifact, "typecheck", "package-smoke", ...args], consumer, isolatedEnv)).stdout);
     expect(checked.diagnostics).toEqual([]);
-    const compiled = JSON.parse((await run([canvas, "compile", "package-smoke", ...args], consumer, isolatedEnv)).stdout);
+    const compiled = JSON.parse((await run([artifact, "compile", "package-smoke", ...args], consumer, isolatedEnv)).stdout);
     expect(compiled.ok).toBe(true);
     expect(compiled.bytes).toBeGreaterThan(1_000);
 
-    gallery = Bun.spawn([canvas, "web", "--port", "0", ...args], {
+    gallery = Bun.spawn([artifact, "web", "--port", "0", ...args], {
       cwd: consumer,
       env: isolatedEnv,
       stdin: "ignore",
@@ -192,7 +192,7 @@ test("published tarball runs the CLI, gallery, and stdio MCP outside a checkout"
     gallery = undefined;
 
     // Keep the official client in a sibling project, so dependency hoisting can
-    // never hide a missing Canvas runtime dependency.
+    // never hide a missing Artifact runtime dependency.
     await Bun.write(join(clientDirectory, "package.json"), JSON.stringify({
       private: true,
       type: "module",
@@ -205,19 +205,19 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 const client = new Client({ name: "package-smoke", version: "1" });
 const transport = new StdioClientTransport({
-  command: ${JSON.stringify(canvas)},
-  args: ["mcp", "--dir", ${JSON.stringify(canvases)}, "--history-db", ${JSON.stringify(history)}],
+  command: ${JSON.stringify(artifact)},
+  args: ["mcp", "--dir", ${JSON.stringify(artifacts)}, "--history-db", ${JSON.stringify(history)}],
   env: Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === "string")),
   stderr: "pipe",
 });
 try {
   await client.connect(transport);
   const tools = await client.listTools();
-  if (!tools.tools.some(tool => tool.name === "canvas_read")) throw new Error("canvas_read tool missing");
-  const result = await client.callTool({ name: "canvas_read", arguments: { name: "package-smoke" } });
+  if (!tools.tools.some(tool => tool.name === "artifact_read")) throw new Error("artifact_read tool missing");
+  const result = await client.callTool({ name: "artifact_read", arguments: { name: "package-smoke" } });
   if (result.isError || !JSON.stringify(result.content).includes("Package smoke")) throw new Error("installed MCP read failed");
-  const opened = await client.callTool({ name: "canvas_open", arguments: { name: "package-smoke" } });
-  if (opened.isError || !opened._meta?.canvas) throw new Error("installed MCP preview failed");
+  const opened = await client.callTool({ name: "artifact_open", arguments: { name: "package-smoke" } });
+  if (opened.isError || !opened._meta?.artifact) throw new Error("installed MCP preview failed");
 } finally { await client.close(); }
 `);
     await run([process.execPath, "run", mcpSmoke], clientDirectory, isolatedEnv);
@@ -232,7 +232,7 @@ try {
             : undefined;
       if (!target) throw new Error(`CELLD_PACKAGE_INTEGRATION is unsupported on ${process.platform}/${process.arch}`);
       if (process.env.CELLD_BIN) {
-        const managedBinary = join(isolatedEnv.CANVAS_DATA_HOME, "runtimes", "celld", "0.4.1", target, "celld");
+        const managedBinary = join(isolatedEnv.ARTIFACTS_DATA_HOME, "runtimes", "celld", "0.4.1", target, "celld");
         mkdirSync(dirname(managedBinary), { recursive: true });
         copyFileSync(process.env.CELLD_BIN, managedBinary);
         chmodSync(managedBinary, 0o700);
@@ -247,22 +247,22 @@ const client = new Client({ name: "native-package-smoke", version: "1" });
 try {
   await client.connect(new StreamableHTTPClientTransport(new URL(origin + "/mcp")));
   if (mode === "write") {
-    const written = await client.callTool({ name: "canvas_write", arguments: {
+    const written = await client.callTool({ name: "artifact_write", arguments: {
       name: "native-counter",
-      contents: 'import { Text } from "sidequery/canvas"; export default function Counter() { return <Text>Native counter</Text>; }',
-      server: 'import { DurableObject } from "cloudflare:workers"; export class CanvasServer extends DurableObject { fetch(request: Request): Response { this.ctx.storage.sql.exec("create table if not exists counter (id integer primary key, value integer not null)"); this.ctx.storage.sql.exec("insert or ignore into counter values (1, 0)"); if (request.method === "POST") this.ctx.storage.sql.exec("update counter set value = value + 1 where id = 1"); return Response.json(this.ctx.storage.sql.exec<{ value: number }>("select value from counter where id = 1").one()); } }',
+      contents: 'import { Text } from "sidequery/artifacts"; export default function Counter() { return <Text>Native counter</Text>; }',
+      server: 'import { DurableObject } from "cloudflare:workers"; export class ArtifactServer extends DurableObject { fetch(request: Request): Response { this.ctx.storage.sql.exec("create table if not exists counter (id integer primary key, value integer not null)"); this.ctx.storage.sql.exec("insert or ignore into counter values (1, 0)"); if (request.method === "POST") this.ctx.storage.sql.exec("update counter set value = value + 1 where id = 1"); return Response.json(this.ctx.storage.sql.exec<{ value: number }>("select value from counter where id = 1").one()); } }',
     } });
-    if (written.isError) throw new Error("native canvas_write failed: " + JSON.stringify(written.content));
+    if (written.isError) throw new Error("native artifact_write failed: " + JSON.stringify(written.content));
   }
-  const result = await client.callTool({ name: "canvas_request", arguments: {
+  const result = await client.callTool({ name: "artifact_request", arguments: {
     name: "native-counter", request: { path: "/counter", method: mode === "write" ? "POST" : "GET", headers: [] },
   } });
-  if (result.isError) throw new Error("native canvas_request failed: " + JSON.stringify(result.content));
+  if (result.isError) throw new Error("native artifact_request failed: " + JSON.stringify(result.content));
   const response = result.structuredContent.response;
   if (response.status !== 200) throw new Error("native response status " + response.status);
   const files = async request => {
-    const result = await client.callTool({ name: "canvas_files", arguments: { name: "native-counter", request } });
-    if (result.isError) throw new Error("native canvas_files failed: " + JSON.stringify(result.content));
+    const result = await client.callTool({ name: "artifact_files", arguments: { name: "native-counter", request } });
+    if (result.isError) throw new Error("native artifact_files failed: " + JSON.stringify(result.content));
     return result.structuredContent.result;
   };
   const bytes = Buffer.alloc(1024 * 1024, 171);
@@ -281,10 +281,10 @@ try {
 `);
       const stateDir = join(temporary, "native-state");
       const firstPort = reservePort();
-      const first = await startNativeServer(canvas, consumer, stateDir, firstPort, isolatedEnv);
+      const first = await startNativeServer(artifact, consumer, stateDir, firstPort, isolatedEnv);
       try {
         const locked = await execute([
-          canvas, "server", "--port", String(reservePort()), "--state-dir", stateDir,
+          artifact, "server", "--port", String(reservePort()), "--state-dir", stateDir,
         ], consumer, isolatedEnv);
         expect(locked.code).not.toBe(0);
         expect(locked.stderr).toContain("already using");
@@ -296,7 +296,7 @@ try {
         await stopNativeServer(first);
       }
 
-      const restarted = await startNativeServer(canvas, consumer, stateDir, reservePort(), isolatedEnv);
+      const restarted = await startNativeServer(artifact, consumer, stateDir, reservePort(), isolatedEnv);
       try {
         const persisted = JSON.parse((await run([
           process.execPath, "run", httpSmoke, restarted.url, "read",

@@ -1,10 +1,10 @@
-import { CloudCanvasService, type HostedArtifacts } from "./service";
-import { CanvasLibrary } from "./library";
+import { CloudArtifactService, type HostedArtifacts } from "./service";
+import { ArtifactLibrary } from "./library";
 import { ArtifactLinks } from "./links";
 import type { DurableObjectNamespace } from "@cloudflare/workers-types";
 
-export { CanvasLibrary, ArtifactLinks };
-type Env = { LIBRARY: DurableObjectNamespace<CanvasLibrary>; LINKS: DurableObjectNamespace<ArtifactLinks> };
+export { ArtifactLibrary, ArtifactLinks };
+type Env = { LIBRARY: DurableObjectNamespace<ArtifactLibrary>; LINKS: DurableObjectNamespace<ArtifactLinks> };
 
 // The integration harness replaces compiler.ts with an instrumented compiler.
 // Storage, revision activation and all service read/write paths remain real.
@@ -27,7 +27,7 @@ export default {
       const library = env.LIBRARY.getByName(libraryKey);
       const links = env.LINKS.getByName("deployment");
       const backends = { getByName: (key: string) => ({ activate: async (input: unknown) => { activeRevisions.set(key, input); }, request: async (input: { code: string; hash: string }) => ({ status: 200, headers: [], body: btoa(JSON.stringify({ key, ...input })) }) }) };
-      const service = new CloudCanvasService(library, workspace, backends as never, libraryKey, { links, origin: url.origin } as HostedArtifacts);
+      const service = new CloudArtifactService(library, workspace, backends as never, libraryKey, { links, origin: url.origin } as HostedArtifacts);
       const input = await request.json() as Record<string, any>;
       if (url.pathname === "/activated") return Response.json(activeRevisions.get(JSON.stringify([libraryKey, workspace, input.name])) ?? null);
       if (url.pathname === "/tool") return Response.json(await service.callTool(input.name, input.arguments));

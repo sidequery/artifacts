@@ -1,15 +1,15 @@
 import { afterEach, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
-import { canvasDataRoot, celldArtifact, ensureCelldRuntime } from "./celld-runtime";
+import { artifactDataRoot, celldArtifact, ensureCelldRuntime } from "./celld-runtime";
 
 const directories: string[] = [];
 afterEach(async () => { for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true }); });
 async function fixture() {
-  const dataRoot = await mkdtemp(join(tmpdir(), "canvas-runtime-test-"));
+  const dataRoot = await mkdtemp(join(tmpdir(), "artifact-runtime-test-"));
   directories.push(dataRoot);
   const binary = Buffer.from("#!/bin/sh\nprintf 'celld 0.4.1\\n'\n");
   const compressed = gzipSync(binary);
@@ -24,10 +24,10 @@ test("selects only released native platforms and keeps app data outside the chec
   for (const [platform, arch] of [["darwin", "x64"], ["win32", "x64"], ["linux", "riscv64"]]) {
     expect(() => celldArtifact(platform, arch)).toThrow("does not support");
   }
-  expect(canvasDataRoot({}, "darwin", "/users/test")).toBe("/users/test/Library/Application Support/sidequery-canvas");
-  expect(canvasDataRoot({}, "linux", "/users/test")).toBe("/users/test/.local/share/sidequery-canvas");
-  expect(canvasDataRoot({ XDG_DATA_HOME: "/data" }, "linux", "/users/test")).toBe("/data/sidequery-canvas");
-  expect(canvasDataRoot({ CANVAS_DATA_HOME: "/custom" }, "darwin", "/users/test")).toBe("/custom");
+  expect(artifactDataRoot({}, "darwin", "/users/test")).toBe("/users/test/Library/Application Support/sidequery-artifacts");
+  expect(artifactDataRoot({}, "linux", "/users/test")).toBe("/users/test/.local/share/sidequery-artifacts");
+  expect(artifactDataRoot({ XDG_DATA_HOME: "/data" }, "linux", "/users/test")).toBe("/data/sidequery-artifacts");
+  expect(artifactDataRoot({ ARTIFACTS_DATA_HOME: "/custom" }, "darwin", "/users/test")).toBe("/custom");
 });
 
 test("downloads a verified executable once, works offline thereafter, and repairs executable mode", async () => {
@@ -67,4 +67,15 @@ test("cancellation does not download or install", async () => {
   const f = await fixture();
   const signal = AbortSignal.abort(new Error("cancelled"));
   await expect(ensureCelldRuntime({ ...f, signal, fetch: (async () => { throw new Error("must not fetch"); }) })).rejects.toThrow("cancelled");
+});
+
+test("native data root reuses the original server state and honors new overrides first", async () => {
+  const f = await fixture(), home = f.dataRoot, base = join(home, ".local", "share");
+  const legacy = join(base, "sidequery-canvas"), current = join(base, "sidequery-artifacts");
+  await mkdir(join(legacy, "server"), { recursive: true });
+  expect(artifactDataRoot({}, "linux", home)).toBe(legacy);
+  expect(artifactDataRoot({ CANVAS_DATA_HOME: legacy }, "linux", home)).toBe(legacy);
+  expect(artifactDataRoot({ CANVAS_DATA_HOME: legacy, ARTIFACTS_DATA_HOME: current }, "linux", home)).toBe(current);
+  await mkdir(current);
+  expect(artifactDataRoot({}, "linux", home)).toBe(current);
 });

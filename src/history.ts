@@ -8,12 +8,14 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { PLUGIN_ROOT } from "./paths";
 
-export function historyPath(env: NodeJS.ProcessEnv = process.env): string {
-  if (env.HERDR_CANVAS_HISTORY_DB) return resolve(env.HERDR_CANVAS_HISTORY_DB);
-  const root = process.platform === "darwin"
-    ? join(homedir(), "Library", "Application Support")
-    : env.XDG_DATA_HOME || join(homedir(), ".local", "share");
-  return join(root, "herdr-canvas", "history.sqlite");
+export function historyPath(env: NodeJS.ProcessEnv = process.env, platform: string = process.platform, home = homedir()): string {
+  if (env.ARTIFACTS_HISTORY_DB || env.HERDR_CANVAS_HISTORY_DB) return resolve(env.ARTIFACTS_HISTORY_DB || env.HERDR_CANVAS_HISTORY_DB!);
+  const root = platform === "darwin"
+    ? join(home, "Library", "Application Support")
+    : env.XDG_DATA_HOME || join(home, ".local", "share");
+  const current = join(root, "artifacts", "history.sqlite");
+  const legacy = join(root, "herdr-canvas", "history.sqlite");
+  return !existsSync(current) && existsSync(legacy) ? legacy : current;
 }
 
 export function hash(value: string): string {
@@ -50,14 +52,14 @@ export function runtimeIdentity(): string {
 export type { Version, ServeEvent, HistoryEntry } from "./historyTypes";
 import type { Version, ServeEvent, HistoryEntry } from "./historyTypes";
 
-export class CanvasHistory {
+export class ArtifactHistory {
   readonly db: Database;
   constructor(readonly path = historyPath()) {
     mkdirSync(dirname(path), { recursive: true });
     this.db = new Database(path, { create: true, strict: true });
     this.db.exec("pragma busy_timeout = 5000; pragma journal_mode = wal; pragma foreign_keys = on;");
     const version = (this.db.query("pragma user_version").get() as { user_version: number }).user_version;
-    if (version > 1) { this.db.close(); throw new Error("Canvas history database is newer than this application"); }
+    if (version > 1) { this.db.close(); throw new Error("Artifact history database is newer than this application"); }
     this.db.transaction(() => {
       this.db.exec(`
         create table if not exists artifacts (

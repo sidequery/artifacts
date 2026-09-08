@@ -17,10 +17,10 @@ import { tempDir } from "../test/fixtures";
 const ok = (stdout = ""): CommandResult => ({ exitCode: 0, stdout, stderr: "" });
 const missing = (): CommandResult => ({ exitCode: 1, stdout: "", stderr: "not found" });
 
-test("generated supervisor definitions preserve exact paths and only forward Canvas data home", () => {
+test("generated supervisor definitions preserve exact paths and only forward Artifact data home", () => {
   const root = join(tempDir(), 'space "quote" 100% $cash');
   const home = join(root, "home");
-  const paths = serverDaemonPaths({ CANVAS_DATA_HOME: root, SECRET_TOKEN: "must-not-leak" }, "darwin", home);
+  const paths = serverDaemonPaths({ ARTIFACTS_DATA_HOME: root, SECRET_TOKEN: "must-not-leak" }, "darwin", home);
   const input = {
     execPath: join(root, "bin", "bun$runtime"),
     cliEntry: join(root, "package", "src", "cli.ts"),
@@ -30,13 +30,13 @@ test("generated supervisor definitions preserve exact paths and only forward Can
   const plist = launchdPlist(input);
   expect(plist).toContain(`<string>${paths.launchdLabel}</string>`);
   expect(plist).toContain("space &quot;quote&quot; 100% $cash");
-  expect(plist).toContain("<key>CANVAS_DATA_HOME</key>");
+  expect(plist).toContain("<key>ARTIFACTS_DATA_HOME</key>");
   expect(plist).toContain("<key>ExitTimeOut</key>");
   expect(plist).not.toContain("SECRET_TOKEN");
   expect(plist).not.toContain("must-not-leak");
 
   const unit = systemdUnit(input);
-  expect(unit).toContain('Environment="CANVAS_DATA_HOME=');
+  expect(unit).toContain('Environment="ARTIFACTS_DATA_HOME=');
   expect(unit).toContain("100%% $cash");
   expect(unit).toContain("bun$runtime");
   expect(unit).toContain('ExecStart=:"/usr/bin/env" "--" ');
@@ -50,7 +50,7 @@ test("generated supervisor definitions preserve exact paths and only forward Can
 test.skipIf(process.platform !== "linux" || !Bun.which("systemd-analyze"))("systemd accepts the generated unit with special path characters", async () => {
   const root = join(tempDir(), 'space "quote" 100% $cash');
   await mkdir(root, { recursive: true });
-  const paths = serverDaemonPaths({ CANVAS_DATA_HOME: root }, "linux", root);
+  const paths = serverDaemonPaths({ ARTIFACTS_DATA_HOME: root }, "linux", root);
   const path = join(root, paths.systemdUnit);
   await Bun.write(path, systemdUnit({ execPath: "/bin/true", cliEntry: join(root, "cli.ts"), port: 4786, paths }));
   const child = Bun.spawn(["systemd-analyze", "verify", path], { stdout: "pipe", stderr: "pipe" });
@@ -62,9 +62,9 @@ test.skipIf(process.platform !== "linux" || !Bun.which("systemd-analyze"))("syst
 
 test("service identity is stable per data root and separates custom roots", () => {
   const home = tempDir();
-  const first = serverDaemonPaths({ CANVAS_DATA_HOME: join(home, "one") }, "darwin", home);
-  const again = serverDaemonPaths({ CANVAS_DATA_HOME: join(home, "one") }, "darwin", home);
-  const second = serverDaemonPaths({ CANVAS_DATA_HOME: join(home, "two") }, "darwin", home);
+  const first = serverDaemonPaths({ ARTIFACTS_DATA_HOME: join(home, "one") }, "darwin", home);
+  const again = serverDaemonPaths({ ARTIFACTS_DATA_HOME: join(home, "one") }, "darwin", home);
+  const second = serverDaemonPaths({ ARTIFACTS_DATA_HOME: join(home, "two") }, "darwin", home);
   expect(first.launchdLabel).toBe(again.launchdLabel);
   expect(first.launchdLabel).not.toBe(second.launchdLabel);
   expect(first.systemdUnit).not.toBe(second.systemdUnit);
@@ -74,7 +74,7 @@ test("service identity is stable per data root and separates custom roots", () =
 test("launchd lifecycle keeps manual start transient and makes login opt-in reversible", async () => {
   const root = tempDir();
   const home = join(root, "home");
-  const paths = serverDaemonPaths({ CANVAS_DATA_HOME: join(root, "data") }, "darwin", home);
+  const paths = serverDaemonPaths({ ARTIFACTS_DATA_HOME: join(root, "data") }, "darwin", home);
   let loaded = false;
   let pid: number | undefined;
   const calls: string[] = [];
@@ -96,7 +96,7 @@ test("launchd lifecycle keeps manual start transient and makes login opt-in reve
     throw new Error(`unexpected launchctl ${args.join(" ")}`);
   };
   const manager = new ServerDaemonManager({
-    env: { CANVAS_DATA_HOME: paths.dataRoot }, platform: "darwin", home, uid: 501,
+    env: { ARTIFACTS_DATA_HOME: paths.dataRoot }, platform: "darwin", home, uid: 501,
     execPath: join(root, "bun"), cliEntry: join(root, "installed", "src", "cli.ts"),
     runCommand, healthCheck: async url => url === "http://127.0.0.1:4786",
     prepareRuntime: async dataRoot => { expect(dataRoot).toBe(paths.dataRoot); },
@@ -124,7 +124,7 @@ test("stop unloads a launchd job even when its process has no PID", async () => 
   let loaded = true;
   let bootouts = 0;
   const manager = new ServerDaemonManager({
-    env: { CANVAS_DATA_HOME: join(root, "data") }, platform: "darwin", home: join(root, "home"), uid: 501,
+    env: { ARTIFACTS_DATA_HOME: join(root, "data") }, platform: "darwin", home: join(root, "home"), uid: 501,
     runCommand: async (_command, args) => {
       if (args[0] === "print") return loaded ? ok("state = waiting\n") : missing();
       if (args[0] === "bootout") { loaded = false; bootouts += 1; return ok(); }
@@ -139,12 +139,12 @@ test("stop unloads a launchd job even when its process has no PID", async () => 
 
 test("systemd status parses keyed properties in any order and requires matching readiness PID", async () => {
   const root = tempDir();
-  const paths = serverDaemonPaths({ CANVAS_DATA_HOME: join(root, "data") }, "linux", join(root, "home"));
+  const paths = serverDaemonPaths({ ARTIFACTS_DATA_HOME: join(root, "data") }, "linux", join(root, "home"));
   await writeServerReady(paths.readyPath, { pid: 88, port: 4786, url: "http://127.0.0.1:4786", stateDir: paths.stateDir });
   await Bun.write(paths.configPath, JSON.stringify({ port: 4786, stateDir: paths.stateDir }));
   let healthCalls = 0;
   const manager = new ServerDaemonManager({
-    env: { CANVAS_DATA_HOME: paths.dataRoot }, platform: "linux", home: join(root, "home"),
+    env: { ARTIFACTS_DATA_HOME: paths.dataRoot }, platform: "linux", home: join(root, "home"),
     runCommand: async (_command, args) => args.includes("is-enabled")
       ? ok("enabled\n")
       : ok("MainPID=88\nLoadState=loaded\nActiveState=active\n"),
@@ -163,7 +163,7 @@ test("systemd status parses keyed properties in any order and requires matching 
 test("systemd manual start, stop, login enable and uninstall use distinct lifecycle actions", async () => {
   const root = tempDir();
   const home = join(root, "home");
-  const paths = serverDaemonPaths({ CANVAS_DATA_HOME: join(root, "data") }, "linux", home);
+  const paths = serverDaemonPaths({ ARTIFACTS_DATA_HOME: join(root, "data") }, "linux", home);
   let active = false;
   let enabled = false;
   let pid = 0;
@@ -190,7 +190,7 @@ test("systemd manual start, stop, login enable and uninstall use distinct lifecy
     throw new Error(`unexpected systemctl ${args.join(" ")}`);
   };
   const manager = new ServerDaemonManager({
-    env: { CANVAS_DATA_HOME: paths.dataRoot }, platform: "linux", home,
+    env: { ARTIFACTS_DATA_HOME: paths.dataRoot }, platform: "linux", home,
     runCommand, healthCheck: async () => true, prepareRuntime: async () => {},
     portAvailable: () => true, sleep: async () => {},
   });
@@ -210,7 +210,7 @@ test("startup reports a supervisor cleanup failure instead of claiming it stoppe
   let loaded = false;
   let now = 0;
   const manager = new ServerDaemonManager({
-    env: { CANVAS_DATA_HOME: join(root, "data") }, platform: "darwin", home: join(root, "home"), uid: 501,
+    env: { ARTIFACTS_DATA_HOME: join(root, "data") }, platform: "darwin", home: join(root, "home"), uid: 501,
     runCommand: async (_command, args) => {
       if (args[0] === "print") return loaded ? ok("state = waiting\n") : missing();
       if (args[0] === "bootstrap") { loaded = true; return ok(); }
@@ -227,7 +227,7 @@ test("startup reports a supervisor cleanup failure instead of claiming it stoppe
 test("logs returns only a bounded tail", async () => {
   const root = tempDir();
   const manager = new ServerDaemonManager({
-    env: { CANVAS_DATA_HOME: join(root, "data") }, platform: "darwin", home: join(root, "home"),
+    env: { ARTIFACTS_DATA_HOME: join(root, "data") }, platform: "darwin", home: join(root, "home"),
     runCommand: async () => missing(), prepareRuntime: async () => {}, portAvailable: () => true,
   });
   await mkdir(manager.paths.daemonDir, { recursive: true });
@@ -239,4 +239,27 @@ test("logs returns only a bounded tail", async () => {
 
 test("unsupported supervisors report the required service managers", () => {
   expect(() => new ServerDaemonManager({ platform: "win32" })).toThrow("background services require macOS launchd or Linux systemd");
+});
+
+test("existing Canvas supervisor identities remain addressable on both platforms", async () => {
+  for (const platform of ["darwin", "linux"] as const) {
+    const home = tempDir(), env = { ARTIFACTS_DATA_HOME: join(home, "data") };
+    const fresh = serverDaemonPaths(env, platform, home);
+    expect(fresh.launchdLabel).toStartWith("com.sidequery.artifacts.server.");
+    expect(fresh.systemdUnit).toStartWith("sidequery-artifacts-server-");
+    const legacyLabel = fresh.launchdLabel.replace(".artifacts.", ".canvas.");
+    const legacyUnit = fresh.systemdUnit.replace("-artifacts-", "-canvas-");
+    const definition = platform === "darwin" ? fresh.launchdRuntimePath.replace(".artifacts.", ".canvas.") : fresh.systemdPath.replace("-artifacts-", "-canvas-");
+    await Bun.write(definition, "existing service definition");
+    const reused = serverDaemonPaths(env, platform, home);
+    expect(reused.stateDir).toBe(fresh.stateDir);
+    const calls: string[] = [];
+    const manager = new ServerDaemonManager({ env, platform, home, uid: 501, runCommand: async (command, args) => {
+      calls.push([command, ...args].join(" "));
+      return missing();
+    } });
+    await manager.status();
+    expect(calls.join("\n")).toContain(platform === "darwin" ? legacyLabel : legacyUnit);
+    expect(platform === "darwin" ? reused.launchdLabel : reused.systemdUnit).toBe(platform === "darwin" ? legacyLabel : legacyUnit);
+  }
 });

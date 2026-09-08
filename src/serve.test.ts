@@ -1,13 +1,13 @@
 import { expect, test } from "bun:test";
 import { join } from "node:path";
 
-import { createCanvasServer } from "./serve";
-import { VALID_CANVAS, tempDir, writeCanvas } from "./test/fixtures";
+import { createArtifactServer } from "./serve";
+import { VALID_ARTIFACT, tempDir, writeArtifact } from "./test/fixtures";
 
-test("createCanvasServer serves compiled canvas HTML and JS", async () => {
+test("createArtifactServer serves compiled artifact HTML and JS", async () => {
   const dir = tempDir();
-  writeCanvas(dir, "overview", VALID_CANVAS);
-  const server = await createCanvasServer({ canvasesDir: dir, historyPath: join(dir, "history.sqlite") });
+  writeArtifact(dir, "overview", VALID_ARTIFACT);
+  const server = await createArtifactServer({ artifactsDir: dir, historyPath: join(dir, "history.sqlite") });
   try {
     const health = await fetch(`${server.url}/health`);
     expect(health.ok).toBe(true);
@@ -16,7 +16,7 @@ test("createCanvasServer serves compiled canvas HTML and JS", async () => {
     expect(page.status).toBe(200);
     const html = await page.text();
     expect(html).toContain("bundle.js");
-    expect(html).toContain("__herdrCanvas");
+    expect(html).toContain("__artifacts");
 
     const js = await fetch(`${server.url}/c/overview/bundle.js`);
     expect(js.status).toBe(200);
@@ -30,10 +30,10 @@ test("createCanvasServer serves compiled canvas HTML and JS", async () => {
   }
 });
 
-test("createCanvasServer persists canvas state", async () => {
+test("createArtifactServer persists artifact state", async () => {
   const dir = tempDir();
-  writeCanvas(dir, "overview", VALID_CANVAS);
-  const server = await createCanvasServer({ canvasesDir: dir, historyPath: join(dir, "history.sqlite") });
+  writeArtifact(dir, "overview", VALID_ARTIFACT);
+  const server = await createArtifactServer({ artifactsDir: dir, historyPath: join(dir, "history.sqlite") });
   try {
     const put = await fetch(`${server.url}/c/overview/state`, {
       method: "PUT",

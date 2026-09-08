@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   package:
-    if: github.repository == 'sidequery/canvas' && github.ref == 'refs/heads/main'
+    if: github.repository == 'sidequery/artifacts' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -31,23 +31,23 @@ jobs:
         env:
           RELEASE_VERSION: ${{ inputs.version }}
         run: |
-          bun -e 'const p = await Bun.file("package.json").json(); if (p.name !== "@sidequery/canvas" || p.version !== process.env.RELEASE_VERSION) throw new Error("Release input must match @sidequery/canvas package.json version");'
+          bun -e 'const p = await Bun.file("package.json").json(); if (p.name !== "@sidequery/artifacts" || p.version !== process.env.RELEASE_VERSION) throw new Error("Release input must match @sidequery/artifacts package.json version");'
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun run test
       - run: bun run build:package
       - run: bun run typecheck:cloudflare
       - name: Pack once
-        run: bun pm pack --ignore-scripts --filename "$RUNNER_TEMP/canvas.tgz"
+        run: bun pm pack --ignore-scripts --filename "$RUNNER_TEMP/artifacts.tgz"
       - name: Test release archive including native server persistence
         env:
-          CANVAS_PACKAGE_ARCHIVE: ${{ runner.temp }}/canvas.tgz
+          ARTIFACTS_PACKAGE_ARCHIVE: ${{ runner.temp }}/artifacts.tgz
           CELLD_PACKAGE_INTEGRATION: '1'
         run: bun test scripts/package.integration.test.ts --timeout 360000
       - uses: actions/upload-artifact@v4
         with:
           name: npm-package
-          path: ${{ runner.temp }}/canvas.tgz
+          path: ${{ runner.temp }}/artifacts.tgz
           if-no-files-found: error
           retention-days: 7
 
@@ -68,4 +68,4 @@ jobs:
           name: npm-package
           path: release
       # npm CLI performs the OIDC exchange. No NPM_TOKEN or NODE_AUTH_TOKEN.
-      - run: npm publish ./release/canvas.tgz --access public --ignore-scripts
+      - run: npm publish ./release/artifacts.tgz --access public --ignore-scripts

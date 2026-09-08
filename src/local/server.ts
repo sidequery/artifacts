@@ -2,23 +2,23 @@ import { Database } from "bun:sqlite";
 import { createRequire } from "node:module";
 import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { canvasDataRoot, ensureCelldRuntime } from "./celld-runtime";
+import { artifactDataRoot, ensureCelldRuntime } from "./celld-runtime";
 import { PLUGIN_ROOT } from "../paths";
 
 export async function runCelldServer(options: { port?: number; stateDir?: string; signal: AbortSignal; onReady?: (url: string) => void | Promise<void> }): Promise<void> {
   const port = options.port ?? 4786;
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("server --port must be an integer between 1 and 65535");
-  const dataRoot = canvasDataRoot();
+  const dataRoot = artifactDataRoot();
   const project = resolve(options.stateDir ?? join(dataRoot, "server"));
   let template: Record<string, any>;
   try { template = JSON.parse(await readFile(join(PLUGIN_ROOT, "dist/celld/wrangler.jsonc"), "utf8")); }
-  catch { throw new Error("Packaged Canvas server assets are missing. From a source checkout, run bun run build:package first."); }
+  catch { throw new Error("Packaged Artifact server assets are missing. From a source checkout, run bun run build:package first."); }
   await mkdir(project, { recursive: true, mode: 0o700 });
   // A held SQLite write transaction excludes a second launcher and releases on
   // process death, so stale PID files cannot prevent recovery after a crash.
   const lock = new Database(join(project, "server-lock.sqlite"), { create: true });
   try { lock.exec("begin exclusive"); }
-  catch { lock.close(); throw new Error(`A Canvas server is already using ${project}`); }
+  catch { lock.close(); throw new Error(`An Artifact server is already using ${project}`); }
   let child: ReturnType<typeof Bun.spawn> | undefined;
   let drained: Promise<unknown> | undefined;
   let stopping: Promise<void> | undefined;

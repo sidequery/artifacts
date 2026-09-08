@@ -4,7 +4,7 @@ import {galleryTool} from "./hosted";
 type Schedule = {interval_seconds?:number;cron?:string;timezone?:string;paused:boolean;next_run_at:number|null;request:{path:string;method:string;headers:[string,string][];body?:string}};
 type Run = {id:string;revision:string;trigger:string;started_at:string;duration_ms:number|null;status:string;http_status:number|null};
 const unpack=(value:unknown):any=>typeof value==="string"?JSON.parse(value):value;
-export function ExecutionControls({workspace,name,kind="script"}:{workspace:string;name:string;kind?:"script"|"canvas"}) {
+export function ExecutionControls({workspace,name,kind="script"}:{workspace:string;name:string;kind?:"script"|"artifact"}) {
   const [schedule,setSchedule]=useState<Schedule|null>(null),[loaded,setLoaded]=useState(false);
   const [mode,setMode]=useState("interval"),[interval,setInterval]=useState("3600"),[cron,setCron]=useState("0 * * * *"),[timezone,setTimezone]=useState("UTC");
   const [path,setPath]=useState("/"),[method,setMethod]=useState("GET"),[headers,setHeaders]=useState("[]"),[body,setBody]=useState("");

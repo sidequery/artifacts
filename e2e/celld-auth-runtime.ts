@@ -139,7 +139,7 @@ export async function startCelldAuthRuntime({ port, bindings }: RuntimeOptions):
   if (!existsSync(join(appDirectory, "worker.js"))) throw new Error("missing dist/worker-app/worker.js; run bun run build:cloudflare");
   if (!existsSync(assetsDirectory)) throw new Error("missing dist/cloudflare/assets; run bun run build:cloudflare");
 
-  const project = await mkdtemp(join(tmpdir(), "canvas-celld-auth-"));
+  const project = await mkdtemp(join(tmpdir(), "artifact-celld-auth-"));
   const configPath = join(project, "wrangler.jsonc");
   const origin = `http://127.0.0.1:${port}`;
   let runtime: RunningCelld | undefined;
@@ -153,7 +153,7 @@ export async function startCelldAuthRuntime({ port, bindings }: RuntimeOptions):
     const config = await prepareCelldConfig(resolve(root, "wrangler.jsonc"), configPath);
     config.d1_databases = [{
       binding: "AUTH_DB",
-      database_name: "canvas-auth",
+      database_name: "artifact-auth",
       migrations_dir: "cloudflare/migrations",
     }];
     config.vars = { ...(config.vars as Record<string, unknown> | undefined), ...bindings };

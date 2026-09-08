@@ -5,23 +5,23 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { CLI_ENTRY } from "../paths";
-import { createCanvasServer, type CanvasServer } from "../serve";
+import { createArtifactServer, type ArtifactServer } from "../serve";
 import { historyPath } from "../history";
 
 export type DaemonState = {
   pid: number;
   port: number;
   url: string;
-  canvasesDir: string;
+  artifactsDir: string;
   historyDb: string;
 };
 
 export type SpawnDaemon = (args: string[], statePath: string) => { pid: number };
 export type HealthCheck = (url: string) => Promise<boolean>;
 
-export function daemonStatePath(canvasesDir: string, env: NodeJS.ProcessEnv = process.env): string {
-  const root = env.HERDR_PLUGIN_STATE_DIR ?? join(tmpdir(), "herdr-canvas");
-  const id = createHash("sha256").update(`${canvasesDir}\0${historyPath(env)}`).digest("hex").slice(0, 12);
+export function daemonStatePath(artifactsDir: string, env: NodeJS.ProcessEnv = process.env): string {
+  const root = env.HERDR_PLUGIN_STATE_DIR ?? join(tmpdir(), "artifacts");
+  const id = createHash("sha256").update(`${artifactsDir}\0${historyPath(env)}`).digest("hex").slice(0, 12);
   return join(root, id, "state.json");
 }
 
@@ -50,20 +50,20 @@ export async function isHealthy(url: string): Promise<boolean> {
   }
 }
 
-export async function ensureCanvasServer(opts: {
-  canvasesDir: string;
+export async function ensureArtifactServer(opts: {
+  artifactsDir: string;
   port?: number;
   env?: NodeJS.ProcessEnv;
   spawn?: SpawnDaemon;
   health?: HealthCheck;
   inProcess?: boolean;
-}): Promise<{ server?: CanvasServer; url: string; reused: boolean }> {
+}): Promise<{ server?: ArtifactServer; url: string; reused: boolean }> {
   const env = opts.env ?? process.env;
-  if (env.HERDR_CANVAS_SERVER_URL) {
-    return { url: env.HERDR_CANVAS_SERVER_URL, reused: true };
+  if (env.ARTIFACTS_SERVER_URL) {
+    return { url: env.ARTIFACTS_SERVER_URL, reused: true };
   }
 
-  const statePath = daemonStatePath(opts.canvasesDir, env);
+  const statePath = daemonStatePath(opts.artifactsDir, env);
   const existing = readDaemonState(statePath);
   const health = opts.health ?? isHealthy;
   if (existing && existing.historyDb === historyPath(env) && (await health(existing.url))) {
@@ -71,8 +71,8 @@ export async function ensureCanvasServer(opts: {
   }
 
   if (opts.inProcess) {
-    const server = await createCanvasServer({
-      canvasesDir: opts.canvasesDir,
+    const server = await createArtifactServer({
+      artifactsDir: opts.artifactsDir,
       port: opts.port ?? 0,
       env,
     });
@@ -80,7 +80,7 @@ export async function ensureCanvasServer(opts: {
       pid: process.pid,
       port: server.port,
       url: server.url,
-      canvasesDir: opts.canvasesDir,
+      artifactsDir: opts.artifactsDir,
       historyDb: historyPath(env),
     });
     return { server, url: server.url, reused: false };
@@ -108,7 +108,7 @@ export async function ensureCanvasServer(opts: {
       CLI_ENTRY,
       "serve",
       "--dir",
-      opts.canvasesDir,
+      opts.artifactsDir,
       "--port",
       String(opts.port ?? 0),
       "--daemon",
@@ -124,5 +124,5 @@ export async function ensureCanvasServer(opts: {
     await Bun.sleep(100);
   }
 
-  throw new Error("failed to start herdr-canvas server");
+  throw new Error("failed to start artifacts server");
 }

@@ -2,11 +2,11 @@ import type { ScriptSchedule } from "./script-backend";
 import { resolveProject } from "./project";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { createHash } from "node:crypto";
-import type { CanvasEdit } from "./library";
+import type { ArtifactEdit } from "./library";
 import type { ArtifactService } from "./artifact-service";
 import type { LinkUpdate } from "./links";
-import type { CanvasHttpRequest } from "../src/httpTypes";
-import { formatCanvasCheck } from "../src/diagnostics";
+import type { ArtifactHttpRequest } from "../src/httpTypes";
+import { formatArtifactCheck } from "../src/diagnostics";
 import { nativeRequest } from "./backend";
 import { compileScriptSource } from "./compiler";
 import { scriptResponse } from "./script-service-http";
@@ -75,7 +75,7 @@ export class CloudScriptService {
         const link = await hosted.links.find(this.artifacts.target("script", name));
         if (!link?.script_hash) throw new Error("Script has no validated URL revision");
         const active = await scripts.active({ ...input, hash: link.script_hash });
-        const incoming = nativeRequest(args.request as CanvasHttpRequest);
+        const incoming = nativeRequest(args.request as ArtifactHttpRequest);
         const request = new Request(new URL(new URL(incoming.url).pathname + new URL(incoming.url).search, hosted.origin), incoming);
         const response = await hosted.scriptBackends.getByName(JSON.stringify([this.artifacts.libraryKey, this.artifacts.workspace, this.artifacts.target("script", name).name])).request({ ...active, request, trigger: "manual" });
         const envelope = await scriptResponse(response, incoming.method);
@@ -103,7 +103,7 @@ export class CloudScriptService {
         const previous = tool === "script_write" && args.project !== undefined ? await scripts.readRange(input).catch(error => { if (error instanceof Error && error.message.includes("script not found")) return undefined; throw error; }) : undefined;
         const project = tool === "script_write" && args.project !== undefined ? await resolveProject(args.project, previous?.project) : undefined;
         const mutation = tool === "script_remix" ? await scripts.remix({workspace:this.artifacts.workspace,name:args.name as string | undefined,version_id:args.version_id as string | undefined,new_name:args.new_name as string}) : tool === "script_write" ? await scripts.writeDraft({ ...input, source: args.contents as string, project })
-          : tool === "script_edit" ? await scripts.editDraft({ ...input, file: args.file as string | undefined, edits: args.edits as CanvasEdit[], expected_hash: args.expected_hash as string | undefined })
+          : tool === "script_edit" ? await scripts.editDraft({ ...input, file: args.file as string | undefined, edits: args.edits as ArtifactEdit[], expected_hash: args.expected_hash as string | undefined })
           : await scripts.restore({ workspace: this.artifacts.workspace, id: args.version_id as string });
         generation ??= await hosted.links.begin(target);
         await hosted.links.stage(target, generation, settings);
@@ -133,7 +133,7 @@ export class CloudScriptService {
           }
         }
         const { source, project: snapshotProject, ...summary } = mutation;
-        const payload = { ...summary, ...await this.artifacts.linkDetails(target), applied: true, ok: compiled.ok, check: formatCanvasCheck(compiled.diagnostics), diagnostics: compiled.diagnostics };
+        const payload = { ...summary, ...await this.artifacts.linkDetails(target), applied: true, ok: compiled.ok, check: formatArtifactCheck(compiled.diagnostics), diagnostics: compiled.diagnostics };
         return { ...text(payload, !compiled.ok), structuredContent: payload };
       }
       default: throw new Error("Unknown script tool");

@@ -1,6 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 
-export type ArtifactTarget = { libraryKey: string; workspace: string; kind: "canvas" | "script"; name: string };
+export type ArtifactTarget = { libraryKey: string; workspace: string; kind: "artifact" | "script"; name: string };
 export type LinkUpdate = { slug?: string; access?: "private" | "public"; version_id?: string; script_hash?: string };
 export type ArtifactLink = ArtifactTarget & LinkUpdate & { slug: string; access: "private" | "public"; generation: number };
 const reserved = new Set(["api", "mcp", "gallery", "health", "sign-in", "consent"]);
@@ -10,7 +10,13 @@ export function validateSlug(value: unknown): string {
   }
   return value;
 }
-function key(target: ArtifactTarget) { return JSON.stringify([target.libraryKey, target.workspace, target.kind, target.name]); }
+// Persist the original kind in keys so links, pending writes, and generations share their existing identity.
+function key(target: ArtifactTarget) { return JSON.stringify([target.libraryKey, target.workspace, target.kind === "artifact" ? "canvas" : target.kind, target.name]); }
+function readLink(value: string): ArtifactLink {
+  const link = JSON.parse(value);
+  if (link.kind === "canvas") link.kind = "artifact";
+  return link;
+}
 /** Deployment-wide names; ownership is resolved before accessing any library. */
 export class ArtifactLinks extends DurableObject<unknown> {
   constructor(ctx: DurableObjectState, env: unknown) {
@@ -21,11 +27,11 @@ export class ArtifactLinks extends DurableObject<unknown> {
   }
   get(slug: string): ArtifactLink | null {
     const row = this.ctx.storage.sql.exec<{ value: string }>("select value from links where slug = ?", slug).toArray()[0];
-    return row ? JSON.parse(row.value) : null;
+    return row ? readLink(row.value) : null;
   }
   find(target: ArtifactTarget): ArtifactLink | null {
     const row = this.ctx.storage.sql.exec<{ value: string }>("select value from links where target = ?", key(target)).toArray()[0];
-    return row ? JSON.parse(row.value) : null;
+    return row ? readLink(row.value) : null;
   }
   check(target: ArtifactTarget, candidate: string): string {
     const slug = validateSlug(candidate);

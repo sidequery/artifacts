@@ -91,7 +91,7 @@ function SignIn() {
   };
 
   return (
-    <AuthCard title="Sign in to Canvas" description="Use your team's configured identity provider.">
+    <AuthCard title="Sign in to Artifacts" description="Use your team's configured identity provider.">
       {state.status === "loading" ? <p className="state" role="status">Loading sign-in options…</p> : null}
       {state.status === "error" ? <p className="state" role="alert">{state.error}</p> : null}
       {state.status === "ready" && state.providers.length === 0 ? <p className="state" role="alert">No sign-in provider is configured.</p> : null}
@@ -147,8 +147,8 @@ function Consent() {
   const appName = client?.client_name?.trim();
   return (
     <AuthCard
-      title="Allow access to Canvas?"
-      description={<>{appName ? <span className="client-name">{appName}</span> : "An application"} will be able to read and modify your personal canvases, shared team canvases, and their stored data.</>}
+      title="Allow access to Artifacts?"
+      description={<>{appName ? <span className="client-name">{appName}</span> : "An application"} will be able to read and modify your personal artifacts, shared team artifacts, and their stored data.</>}
     >
       <div className="actions">
         <button type="button" disabled={pending !== null} onClick={() => void decide(false)}>{pending === "deny" ? "Denying…" : "Deny"}</button>
@@ -163,7 +163,7 @@ function AuthCard({ title, description, children }: { title: string; description
   return (
     <main className="auth-shell">
       <section className="auth-card">
-        <p className="eyebrow">Canvas</p>
+        <p className="eyebrow">Artifacts</p>
         <h1>{title}</h1>
         <div className="description">{description}</div>
         {children}

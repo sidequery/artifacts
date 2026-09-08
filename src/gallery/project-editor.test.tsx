@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { editableProject, ProjectEditor } from "./project-editor";
 
 const project = { files: { "lib/helper.ts": "export const value = 1;" }, dependencies: { "lodash-es": "4.17.21" } };
-const entries = [{ id: "client", label: "Canvas source", source: "client" }, { id: "server", label: "Server source", source: "server" }];
+const entries = [{ id: "client", label: "Artifact source", source: "client" }, { id: "server", label: "Server source", source: "server" }];
 const props = { entries, project, onProjectChange: () => {}, onEntryChange: () => {}, onValidityChange: () => {} };
 
 test("authoring snapshot retains every helper and dependency without uploading vendor lock files", () => {
@@ -15,7 +15,7 @@ test("authoring snapshot retains every helper and dependency without uploading v
   expect(() => editableProject({ files: { "lib/helper.ts": null }, dependencies: {} })).toThrow("Invalid project files");
 });
 
-test("project source picker exposes both canvas entrypoints and stored helpers", () => {
+test("project source picker exposes both artifact entrypoints and stored helpers", () => {
   const markup = renderToStaticMarkup(<ProjectEditor {...props} />);
   expect(markup).toContain('value="client"');
   expect(markup).toContain('value="server"');

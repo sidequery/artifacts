@@ -1,15 +1,15 @@
 import { expect, test } from "bun:test";
 
-import { formatCanvasCheck } from "./diagnostics";
+import { formatArtifactCheck } from "./diagnostics";
 
-test("formatCanvasCheck reports no errors", () => {
-  expect(formatCanvasCheck([])).toBe("Canvas TypeScript check: no errors");
+test("formatArtifactCheck reports no errors", () => {
+  expect(formatArtifactCheck([])).toBe("Artifact TypeScript check: no errors");
 });
 
-test("formatCanvasCheck counts errors", () => {
+test("formatArtifactCheck counts errors", () => {
   expect(
-    formatCanvasCheck([
-      { severity: "error", message: "nope", file: "a.canvas.tsx", line: 3, column: 1 },
+    formatArtifactCheck([
+      { severity: "error", message: "nope", file: "a.artifact.tsx", line: 3, column: 1 },
     ]),
-  ).toContain("Canvas TypeScript check: 1 error");
+  ).toContain("Artifact TypeScript check: 1 error");
 });

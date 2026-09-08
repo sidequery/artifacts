@@ -1,7 +1,7 @@
-import { CanvasFiles as BaseCanvasFiles, TRANSFER_PATH } from "./files";
+import { ArtifactFiles as BaseArtifactFiles, TRANSFER_PATH } from "./files";
 import type { FilesEnv } from "./files";
-import type { CanvasFileRequest } from "../src/sdk/files";
-export class CanvasFiles extends BaseCanvasFiles {
+import type { ArtifactFileRequest } from "../src/sdk/files";
+export class ArtifactFiles extends BaseArtifactFiles {
   private armDeleteFailure: () => void;
 
   constructor(ctx: DurableObjectState, env: FilesEnv) {
@@ -27,7 +27,7 @@ export class CanvasFiles extends BaseCanvasFiles {
   async runCleanup() { await super.alarm(); }
 }
 
-type Env = { FILE_BACKENDS: DurableObjectNamespace<CanvasFiles> };
+type Env = { FILE_BACKENDS: DurableObjectNamespace<ArtifactFiles> };
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -45,7 +45,7 @@ export default {
         await stub.runCleanup();
         return Response.json({ ok: true });
       }
-      return Response.json(await stub.request(await request.json() as CanvasFileRequest));
+      return Response.json(await stub.request(await request.json() as ArtifactFileRequest));
     } catch (error) {
       return Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 });
     }

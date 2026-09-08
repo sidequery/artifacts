@@ -1,11 +1,11 @@
 import type { HostBridge } from "../sdk/hooks";
-import type { CanvasHttpRequest, CanvasHttpResponse } from "../sdk/server";
+import type { ArtifactHttpRequest, ArtifactHttpResponse } from "../sdk/server";
 
-const bridge = (window as Window & { __herdrCanvas?: HostBridge & { serverVersionId?: string; filesVersionId?: string; plugins?: boolean } }).__herdrCanvas;
+const bridge = (window as Window & { __artifacts?: HostBridge & { serverVersionId?: string; filesVersionId?: string; plugins?: boolean } }).__artifacts;
 if (bridge?.serverVersionId && window.parent !== window) {
-  const pending = new Map<string, { resolve: (value: CanvasHttpResponse) => void; reject: (error: Error) => void; timeout: ReturnType<typeof setTimeout> }>();
+  const pending = new Map<string, { resolve: (value: ArtifactHttpResponse) => void; reject: (error: Error) => void; timeout: ReturnType<typeof setTimeout> }>();
   window.addEventListener("message", event => {
-    if (event.source !== window.parent || event.data?.type !== "canvas/http-response") return;
+    if (event.source !== window.parent || event.data?.type !== "artifact/http-response") return;
     const item = pending.get(event.data.id);
     if (!item) return;
     clearTimeout(item.timeout);
@@ -13,22 +13,22 @@ if (bridge?.serverVersionId && window.parent !== window) {
     if (event.data.error) item.reject(new Error(String(event.data.error)));
     else item.resolve(event.data.response);
   });
-  bridge.onRequest = (request: CanvasHttpRequest) => new Promise((resolve, reject) => {
-    if (pending.size >= 16) return reject(new Error("Too many pending canvas requests"));
+  bridge.onRequest = (request: ArtifactHttpRequest) => new Promise((resolve, reject) => {
+    if (pending.size >= 16) return reject(new Error("Too many pending artifact requests"));
     const id = crypto.randomUUID();
     const timeout = setTimeout(() => {
       pending.delete(id);
-      reject(new Error("Canvas server request timed out"));
+      reject(new Error("Artifact server request timed out"));
     }, 30000);
     pending.set(id, { resolve, reject, timeout });
-    window.parent.postMessage({ type: "canvas/http-request", id, versionId: bridge.serverVersionId, request }, "*");
+    window.parent.postMessage({ type: "artifact/http-request", id, versionId: bridge.serverVersionId, request }, "*");
   });
 }
 
 if (bridge?.plugins && window.parent !== window) {
   const pending = new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void; timeout: ReturnType<typeof setTimeout> }>();
   window.addEventListener("message", event => {
-    if (event.source !== window.parent || event.data?.type !== "canvas/plugin-response") return;
+    if (event.source !== window.parent || event.data?.type !== "artifact/plugin-response") return;
     const item = pending.get(event.data.id);
     if (!item) return;
     clearTimeout(item.timeout);
@@ -41,7 +41,7 @@ if (bridge?.plugins && window.parent !== window) {
     const id = crypto.randomUUID();
     const timeout = setTimeout(() => { pending.delete(id); reject(new Error("Plugin call timed out")); }, 30000);
     pending.set(id, { resolve, reject, timeout });
-    window.parent.postMessage({ type: "canvas/plugin-request", id, request }, "*");
+    window.parent.postMessage({ type: "artifact/plugin-request", id, request }, "*");
   });
 }
 
@@ -57,12 +57,12 @@ if (bridge?.filesVersionId && window.parent !== window) {
     else item.resolve(event.data.result);
   });
   const send = (type: string, responseType: string, value: Record<string, unknown>) => new Promise<unknown>((resolve, reject) => {
-    if (pending.size >= 16) return reject(new Error("Too many pending canvas file requests"));
+    if (pending.size >= 16) return reject(new Error("Too many pending artifact file requests"));
     const id = crypto.randomUUID();
-    const timeout = setTimeout(() => { pending.delete(id); reject(new Error("Canvas file request timed out")); }, 30000);
+    const timeout = setTimeout(() => { pending.delete(id); reject(new Error("Artifact file request timed out")); }, 30000);
     pending.set(id, { responseType, resolve, reject, timeout });
     window.parent.postMessage({ type, id, versionId: bridge.filesVersionId, ...value }, "*");
   });
-  bridge.onFileRequest = request => send("canvas/files-request", "canvas/files-response", { request });
-  bridge.onFileDownload = async url => { await send("canvas/file-download", "canvas/file-download-response", { url }); };
+  bridge.onFileRequest = request => send("artifact/files-request", "artifact/files-response", { request });
+  bridge.onFileDownload = async url => { await send("artifact/file-download", "artifact/file-download-response", { url }); };
 }

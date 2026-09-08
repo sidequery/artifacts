@@ -105,7 +105,7 @@ test("remix copies an immutable source revision, never secrets or activation, an
 });
 
 test("run history records HTTP outcomes and correlates concurrent logs without exposing host tables",async()=>{
-  const code=`export default {async fetch(request,env){const tag=await request.text(); console.log('before',tag); await fetch('https://upstream.example'); console.log('after',tag); const host=env.sql.exec("select name from sqlite_master where name='execution_runs'").toArray();return Response.json({host,internal:request.headers.get("x-canvas-internal-run")});}}`;
+  const code=`export default {async fetch(request,env){const tag=await request.text(); console.log('before',tag); await fetch('https://upstream.example'); console.log('after',tag); const host=env.sql.exec("select name from sqlite_master where name='execution_runs'").toArray();return Response.json({host,internal:request.headers.get("x-artifact-internal-run")});}}`;
   const responses=await Promise.all([run(code,{},"history","first"),run(code,{},"history","second")]);
   for(const response of responses) expect(await response.json()).toEqual({host:[],internal:null});
   const runs=await call("backend/runs",{},"history");

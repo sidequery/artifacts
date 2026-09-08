@@ -7,12 +7,33 @@
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
-    "types": ["bun"],
+    "types": [
+      "bun"
+    ],
     "paths": {
-      "sidequery/canvas": ["./src/sdk/index.ts"],
-      "herdr/canvas": ["./src/sdk/index.ts"],
-      "cursor/canvas": ["./src/sdk/index.ts"]
+      "sidequery/artifacts": [
+        "./src/sdk/index.ts"
+      ],
+      "@sidequery/artifacts": [
+        "./src/sdk/index.ts"
+      ],
+      "sidequery/canvas": [
+        "./src/sdk/index.ts"
+      ],
+      "@sidequery/canvas": [
+        "./src/sdk/index.ts"
+      ],
+      "herdr/canvas": [
+        "./src/sdk/index.ts"
+      ],
+      "cursor/canvas": [
+        "./src/sdk/index.ts"
+      ]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.d.ts"]
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "src/**/*.d.ts"
+  ]
 }

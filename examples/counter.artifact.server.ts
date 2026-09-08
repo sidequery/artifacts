@@ -1,6 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 
-export class CanvasServer extends DurableObject {
+export class ArtifactServer extends DurableObject {
   fetch(request: Request): Response {
     if (new URL(request.url).pathname !== "/counter") return new Response("Not found", { status: 404 });
     if (request.method !== "GET" && request.method !== "POST") return new Response("Method not allowed", { status: 405 });

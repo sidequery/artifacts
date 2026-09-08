@@ -6,12 +6,12 @@ export type Diagnostic = {
   column?: number;
 };
 
-export function formatCanvasCheck(diagnostics: Diagnostic[]): string {
+export function formatArtifactCheck(diagnostics: Diagnostic[]): string {
   const errors = diagnostics.filter((diagnostic) => diagnostic.severity === "error");
   if (errors.length === 0) {
-    return "Canvas TypeScript check: no errors";
+    return "Artifact TypeScript check: no errors";
   }
-  const header = `Canvas TypeScript check: ${errors.length} error${errors.length === 1 ? "" : "s"}`;
+  const header = `Artifact TypeScript check: ${errors.length} error${errors.length === 1 ? "" : "s"}`;
   const body = errors.map(formatDiagnosticLine);
   return [header, ...body].join("\n");
 }

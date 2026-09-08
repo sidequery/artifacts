@@ -32,9 +32,9 @@ export function createHerdrClient(env: NodeJS.ProcessEnv = process.env): HerdrCl
 
 export type PanePlacement = "split" | "tab" | "zoomed" | "overlay";
 
-export function canvasPaneOpenArgs(
-  canvasPath: string,
-  canvasesDir: string,
+export function artifactPaneOpenArgs(
+  artifactPath: string,
+  artifactsDir: string,
   opts: {
     placement?: PanePlacement;
     direction?: "right" | "down";
@@ -52,20 +52,20 @@ export function canvasPaneOpenArgs(
     "pane",
     "open",
     "--plugin",
-    "herdr.canvas",
+    "herdr.artifacts",
     "--entrypoint",
-    "canvas",
+    "artifacts",
     "--placement",
     placement,
     "--env",
-    `HERDR_CANVAS_PATH=${canvasPath}`,
+    `ARTIFACTS_PATH=${artifactPath}`,
     "--env",
-    `HERDR_CANVAS_DIR=${canvasesDir}`,
+    `ARTIFACTS_DIR=${artifactsDir}`,
   ];
   for (const [key, value] of Object.entries({
-    HERDR_CANVAS_HISTORY_DB: opts.historyPath,
-    HERDR_CANVAS_VERSION: opts.versionId ?? "",
-    HERDR_CANVAS_EVENT: opts.eventId ?? "",
+    ARTIFACTS_HISTORY_DB: opts.historyPath,
+    ARTIFACTS_VERSION: opts.versionId ?? "",
+    ARTIFACTS_EVENT: opts.eventId ?? "",
   })) {
     if (value !== undefined) args.push("--env", `${key}=${value}`);
   }

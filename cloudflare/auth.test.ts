@@ -2,9 +2,9 @@ import { beforeAll, expect, test } from "bun:test";
 import { SignJWT, exportJWK, generateKeyPair, type FetchImplementation, type KeyLike } from "jose";
 import { createAuthenticator, type AuthEnvironment, type Identity } from "./auth";
 
-const domain = "canvas-team.cloudflareaccess.com";
+const domain = "artifact-team.cloudflareaccess.com";
 const issuer = `https://${domain}`;
-const audience = "canvas-access-audience";
+const audience = "artifact-access-audience";
 const keyId = "access-test-key";
 const env: AuthEnvironment = { ACCESS_TEAM_DOMAIN: domain, ACCESS_AUD: audience };
 let privateKey: KeyLike;
@@ -25,7 +25,7 @@ beforeAll(async () => {
   authenticate = createAuthenticator(fetchJwks);
 });
 
-function request(assertion?: string, url = "https://canvas.example.com/mcp"): Request {
+function request(assertion?: string, url = "https://artifact.example.com/mcp"): Request {
   return new Request(url, assertion ? { headers: { "Cf-Access-Jwt-Assertion": assertion } } : undefined);
 }
 
@@ -80,8 +80,8 @@ test("requires the assertion and fails closed when Access configuration is absen
     {},
     { ACCESS_TEAM_DOMAIN: domain },
     { ACCESS_AUD: audience },
-    { ACCESS_TEAM_DOMAIN: "canvas.example.com", ACCESS_AUD: audience },
-    { ACCESS_TEAM_DOMAIN: "Canvas-Team.cloudflareaccess.com", ACCESS_AUD: audience },
+    { ACCESS_TEAM_DOMAIN: "artifact.example.com", ACCESS_AUD: audience },
+    { ACCESS_TEAM_DOMAIN: "Artifact-Team.cloudflareaccess.com", ACCESS_AUD: audience },
   ]) {
     const response = asResponse(await authenticate(request(await token()), config));
     expect(response.status).toBe(503);
@@ -93,7 +93,7 @@ test("local bypass requires the explicit local environment and an exact loopback
   for (const url of ["http://localhost:4785/mcp", "http://127.0.0.1:4785/mcp", "http://[::1]:4785/mcp"]) {
     expect(await authenticate(request(undefined, url), { ENVIRONMENT: "local" })).toEqual({ subject: "local", authority: "local" });
   }
-  for (const url of ["https://canvas.example.com/mcp", "http://localhost.example.com/mcp", "http://127.0.0.2/mcp"]) {
+  for (const url of ["https://artifact.example.com/mcp", "http://localhost.example.com/mcp", "http://127.0.0.2/mcp"]) {
     const response = asResponse(await authenticate(request(undefined, url), { ENVIRONMENT: "local" }));
     expect(response.status).toBe(503);
   }

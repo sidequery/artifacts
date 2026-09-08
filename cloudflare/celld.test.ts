@@ -13,10 +13,10 @@ const enabled = process.env.CELLD_INTEGRATION === "1";
 const celldTest = enabled ? test : test.skip;
 const binary = process.env.CELLD_BIN ?? Bun.which("celld");
 const esbuild = process.env.CELLD_ESBUILD ?? resolve(root, "node_modules/.bin/esbuild");
-const clientSource = await Bun.file(resolve(root, "examples/counter.canvas.tsx")).text();
+const clientSource = await Bun.file(resolve(root, "examples/counter.artifact.tsx")).text();
 const serverV1 = `
 import { DurableObject } from "cloudflare:workers";
-export class CanvasServer extends DurableObject {
+export class ArtifactServer extends DurableObject {
   fetch(request: Request): Response {
     this.ctx.storage.sql.exec("create table if not exists counter (id integer primary key, value integer not null)");
     this.ctx.storage.sql.exec("insert or ignore into counter values (1, 0)");
@@ -94,7 +94,7 @@ async function stopCelld() {
 }
 
 async function withClient<T>(run: (client: Client) => Promise<T>) {
-  const client = new Client({ name: "canvas-celld-test", version: "1" });
+  const client = new Client({ name: "artifact-celld-test", version: "1" });
   try {
     await client.connect(new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp`)));
     return await run(client);
@@ -106,13 +106,13 @@ async function withClient<T>(run: (client: Client) => Promise<T>) {
 }
 
 async function write(client: Client, server: string) {
-  const result = await client.callTool({ name: "canvas_write", arguments: { name: "native-counter", contents: clientSource, server } });
+  const result = await client.callTool({ name: "artifact_write", arguments: { name: "native-counter", contents: clientSource, server } });
   expect(result.isError, JSON.stringify(result.content)).toBe(false);
-  return (result._meta as { canvas: { versionId: string } }).canvas.versionId;
+  return (result._meta as { artifact: { versionId: string } }).artifact.versionId;
 }
 
 async function request(client: Client, method: string) {
-  const result = await client.callTool({ name: "canvas_request", arguments: {
+  const result = await client.callTool({ name: "artifact_request", arguments: {
     name: "native-counter", request: { path: "/counter", method, headers: [] },
   } });
   expect(result.isError, JSON.stringify(result.content)).toBe(false);
@@ -126,7 +126,7 @@ beforeAll(async () => {
   if (!binary) throw new Error("celld was not found; install celld or set CELLD_BIN to its executable");
   if (!existsSync(esbuild)) throw new Error(`esbuild was not found at ${esbuild}; run bun install or set CELLD_ESBUILD`);
   if (!existsSync(resolve(root, "dist/worker-app/worker.js"))) throw new Error("missing dist/worker-app/worker.js; run bun run build:cloudflare");
-  project = await mkdtemp(join(tmpdir(), "canvas-celld-test-"));
+  project = await mkdtemp(join(tmpdir(), "artifact-celld-test-"));
   await cp(resolve(root, "dist/worker-app"), join(project, "dist/worker-app"), { recursive: true });
   await cp(resolve(root, "dist/cloudflare/assets"), join(project, "dist/cloudflare/assets"), { recursive: true });
   await prepareCelldConfig(resolve(root, "wrangler.jsonc"), join(project, "wrangler.jsonc"));
@@ -142,7 +142,7 @@ afterAll(async () => {
   if (project) await rm(project, { recursive: true, force: true });
 });
 
-celldTest("runs native canvas SQLite and KV across code update and celld restart", async () => {
+celldTest("runs native artifact SQLite and KV across code update and celld restart", async () => {
   await withClient(async client => {
     await write(client, serverV1);
     expect(await request(client, "POST")).toEqual({ code: 1, value: 1, kv: 1 });
@@ -208,18 +208,18 @@ celldTest("aborted archived previews do not block reads or subsequent edits", as
   });
 }, 45_000);
 
-celldTest("saved canvas bundles serve after restart with native compilation disabled", async () => {
+celldTest("saved artifact bundles serve after restart with native compilation disabled", async () => {
   const marker = join(project, "compiler-disabled");
   const wrapper = join(project, "guarded-esbuild");
   const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
-  await writeFile(wrapper, `#!/bin/sh\nif [ -e ${quote(marker)} ]; then\n  echo 'Unexpected compilation during artifact read' >&2\n  exit 1\nfi\nexec ${quote(esbuild)} "$@"\n`);
+  await writeFile(wrapper, `#!/bin/sh\nif [ -e ${quote(marker)} ]; then\n  echo 'Unexpected compilation during artifacts read' >&2\n  exit 1\nfi\nexec ${quote(esbuild)} "$@"\n`);
   await chmod(wrapper, 0o700);
   await stopCelld();
   await startCelld(wrapper);
   try {
     const version = await withClient(async client => {
       const version = await write(client, serverV1);
-      const link = await client.callTool({ name: "artifact_link", arguments: { kind: "canvas", name: "native-counter", slug: "compiled-counter", access: "private" } });
+      const link = await client.callTool({ name: "artifact_link", arguments: { kind: "artifact", name: "native-counter", slug: "compiled-counter", access: "private" } });
       expect(link.isError).not.toBe(true);
       return version;
     });
@@ -238,7 +238,7 @@ celldTest("saved canvas bundles serve after restart with native compilation disa
         expect(await response.text()).toContain("serverVersionId");
       }
       await withClient(async client => {
-        const preview = await client.callTool({ name: "canvas_open", arguments: { version_id: version } });
+        const preview = await client.callTool({ name: "artifact_open", arguments: { version_id: version } });
         expect(preview.isError).not.toBe(true);
         expect(await request(client, "GET")).toMatchObject({ code: 1 });
       });
@@ -246,17 +246,17 @@ celldTest("saved canvas bundles serve after restart with native compilation disa
   } finally { await rm(marker, { force: true }); }
 }, 180_000);
 
-celldTest("per-canvas R2 files persist across celld restart and use native binary transfers", async () => {
+celldTest("per-artifact R2 files persist across celld restart and use native binary transfers", async () => {
   let fileId = "";
   const bytes = Buffer.alloc(2 * 1024 * 1024, 239);
   const files = async (client: Client, name: string, request: Record<string, unknown>) => {
-    const response = await client.callTool({ name: "canvas_files", arguments: { name, request } });
+    const response = await client.callTool({ name: "artifact_files", arguments: { name, request } });
     expect(response.isError, JSON.stringify(response.content)).not.toBe(true);
     return (response.structuredContent as { result: any }).result;
   };
   await withClient(async client => {
     for (const name of ["stored-files", "separate-files"]) {
-      const result = await client.callTool({ name: "canvas_write", arguments: { name, contents: clientSource } });
+      const result = await client.callTool({ name: "artifact_write", arguments: { name, contents: clientSource } });
       expect(result.isError, JSON.stringify(result.content)).not.toBe(true);
     }
     const grant = await files(client, "stored-files", { operation: "upload", name: "persistent.bin", size: bytes.length, type: "application/octet-stream" });

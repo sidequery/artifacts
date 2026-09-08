@@ -4,7 +4,7 @@ export type SandboxViolation = {
   line?: number;
 };
 
-const ALLOWED_MODULES = new Set(["sidequery/canvas", "herdr/canvas", "cursor/canvas"]);
+const ALLOWED_MODULES = new Set(["sidequery/artifacts","@sidequery/artifacts","sidequery/canvas","@sidequery/canvas","herdr/canvas","cursor/canvas"]);
 
 const IMPORT_FROM_RE = /(?:^|[;\n}])\s*(?:import|export)\s*(?:type\s+)?[\s\S]*?\bfrom\s*["']([^"']+)["']/g;
 const SIDE_EFFECT_IMPORT_RE = /(?:^|[;\n}])\s*import\s*["']([^"']+)["']/g;
@@ -12,15 +12,15 @@ const DYNAMIC_IMPORT_RE = /\bimport\s*\(/;
 const REQUIRE_RE = /\brequire\s*\(/;
 
 const FORBIDDEN_APIS: Array<{ kind: SandboxViolation["kind"]; pattern: RegExp; message: string }> = [
-  { kind: "api", pattern: /\bfetch\s*\(/, message: "fetch() is not allowed in canvas files; embed data inline" },
-  { kind: "api", pattern: /\bXMLHttpRequest\b/, message: "XMLHttpRequest is not allowed in canvas files" },
-  { kind: "api", pattern: /\bWebSocket\b/, message: "WebSocket is not allowed in canvas files" },
-  { kind: "api", pattern: /\beval\s*\(/, message: "eval() is not allowed in canvas files" },
-  { kind: "api", pattern: /\bnew\s+Function\b/, message: "new Function is not allowed in canvas files" },
-  { kind: "api", pattern: /\bprocess\./, message: "Node process is not allowed in canvas files" },
-  { kind: "api", pattern: /\bBun\./, message: "Bun APIs are not allowed in canvas files" },
-  { kind: "api", pattern: /\blocalStorage\b/, message: "localStorage is not allowed; use useCanvasState" },
-  { kind: "api", pattern: /\bsessionStorage\b/, message: "sessionStorage is not allowed; use useCanvasState" },
+  { kind: "api", pattern: /\bfetch\s*\(/, message: "fetch() is not allowed in artifact files; embed data inline" },
+  { kind: "api", pattern: /\bXMLHttpRequest\b/, message: "XMLHttpRequest is not allowed in artifact files" },
+  { kind: "api", pattern: /\bWebSocket\b/, message: "WebSocket is not allowed in artifact files" },
+  { kind: "api", pattern: /\beval\s*\(/, message: "eval() is not allowed in artifact files" },
+  { kind: "api", pattern: /\bnew\s+Function\b/, message: "new Function is not allowed in artifact files" },
+  { kind: "api", pattern: /\bprocess\./, message: "Node process is not allowed in artifact files" },
+  { kind: "api", pattern: /\bBun\./, message: "Bun APIs are not allowed in artifact files" },
+  { kind: "api", pattern: /\blocalStorage\b/, message: "localStorage is not allowed; use useArtifactState" },
+  { kind: "api", pattern: /\bsessionStorage\b/, message: "sessionStorage is not allowed; use useArtifactState" },
 ];
 
 export function stripCommentsForScan(source: string): string {
@@ -29,7 +29,7 @@ export function stripCommentsForScan(source: string): string {
     .replace(/(^|[^:\\\n])\/\/.*$/gm, "$1");
 }
 
-export function scanCanvasSource(source: string, publicImports: readonly string[] = []): SandboxViolation[] {
+export function scanArtifactSource(source: string, publicImports: readonly string[] = []): SandboxViolation[] {
   const stripped = stripCommentsForScan(source);
   const violations: SandboxViolation[] = [];
 
@@ -38,7 +38,7 @@ export function scanCanvasSource(source: string, publicImports: readonly string[
     if (!ALLOWED_MODULES.has(specifier) && !publicImports.includes(specifier)) {
       violations.push({
         kind: "import",
-        message: `import from "${specifier}" is not allowed; import only from "sidequery/canvas"`,
+        message: `import from "${specifier}" is not allowed; import only from "sidequery/artifacts"`,
         line: lineNumberAt(stripped, match.index ?? 0),
       });
     }
@@ -56,10 +56,10 @@ export function scanCanvasSource(source: string, publicImports: readonly string[
   }
 
   if (DYNAMIC_IMPORT_RE.test(stripped)) {
-    violations.push({ kind: "import", message: "dynamic import() is not allowed in canvas files" });
+    violations.push({ kind: "import", message: "dynamic import() is not allowed in artifact files" });
   }
   if (REQUIRE_RE.test(stripped)) {
-    violations.push({ kind: "import", message: "require() is not allowed in canvas files" });
+    violations.push({ kind: "import", message: "require() is not allowed in artifact files" });
   }
 
   for (const api of FORBIDDEN_APIS) {
@@ -71,7 +71,7 @@ export function scanCanvasSource(source: string, publicImports: readonly string[
   if (!/\bexport\s+default\b/.test(stripped)) {
     violations.push({
       kind: "export",
-      message: "canvas files must default-export a React component",
+      message: "artifact files must default-export a React component",
     });
   }
 

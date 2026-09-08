@@ -4,19 +4,19 @@ import { existsSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 
-import { canvasIdFromFile } from "./canvasFile";
-import { compileCanvas } from "./compile";
-import { formatCanvasCheck } from "./diagnostics";
-import { createCanvasServer, type CanvasServer } from "./serve";
-import { typecheckCanvas } from "./typecheck";
-import { CanvasHistory, historyPath } from "./history";
+import { artifactIdFromFile } from "./artifactFile";
+import { compileArtifact } from "./compile";
+import { formatArtifactCheck } from "./diagnostics";
+import { createArtifactServer, type ArtifactServer } from "./serve";
+import { typecheckArtifact } from "./typecheck";
+import { ArtifactHistory, historyPath } from "./history";
 
 type ViewerSignal = "SIGHUP" | "SIGINT" | "SIGTERM";
 
-export type CanvasPaneConfig = {
-  canvasPath: string;
-  canvasesDir: string;
-  canvasId: string;
+export type ArtifactPaneConfig = {
+  artifactPath: string;
+  artifactsDir: string;
+  artifactId: string;
   versionId?: string;
   eventId?: string;
 };
@@ -31,26 +31,26 @@ export type TerminalBrowserChild = {
   ): TerminalBrowserChild;
 };
 
-export function canvasPaneConfig(env: NodeJS.ProcessEnv = process.env): CanvasPaneConfig {
-  const rawPath = env.HERDR_CANVAS_PATH?.trim();
+export function artifactPaneConfig(env: NodeJS.ProcessEnv = process.env): ArtifactPaneConfig {
+  const rawPath = (env.ARTIFACTS_PATH ?? env.HERDR_CANVAS_PATH)?.trim();
   if (!rawPath) {
-    throw new Error("HERDR_CANVAS_PATH is required for a Canvas pane");
+    throw new Error("ARTIFACTS_PATH is required for an Artifact pane");
   }
-  const canvasPath = resolve(rawPath);
-  const canvasesDir = resolve(env.HERDR_CANVAS_DIR?.trim() || dirname(canvasPath));
-  const withinDir = relative(canvasesDir, canvasPath);
+  const artifactPath = resolve(rawPath);
+  const artifactsDir = resolve((env.ARTIFACTS_DIR ?? env.HERDR_CANVAS_DIR)?.trim() || dirname(artifactPath));
+  const withinDir = relative(artifactsDir, artifactPath);
   if (!withinDir || withinDir.startsWith("..") || isAbsolute(withinDir)) {
-    throw new Error(`canvas path must be inside the canvases directory: ${canvasPath}`);
+    throw new Error(`artifact path must be inside the artifacts directory: ${artifactPath}`);
   }
-  const versionId = env.HERDR_CANVAS_VERSION?.trim();
-  if (!versionId && !existsSync(canvasPath)) {
-    throw new Error(`canvas file does not exist: ${canvasPath}`);
+  const versionId = (env.ARTIFACTS_VERSION ?? env.HERDR_CANVAS_VERSION)?.trim();
+  if (!versionId && !existsSync(artifactPath)) {
+    throw new Error(`artifact file does not exist: ${artifactPath}`);
   }
   return {
-    canvasPath,
-    canvasesDir,
-    canvasId: canvasIdFromFile(canvasPath),
-    ...(versionId ? { versionId, eventId: env.HERDR_CANVAS_EVENT?.trim() || undefined } : {}),
+    artifactPath,
+    artifactsDir,
+    artifactId: artifactIdFromFile(artifactPath),
+    ...(versionId ? { versionId, eventId: (env.ARTIFACTS_EVENT ?? env.HERDR_CANVAS_EVENT)?.trim() || undefined } : {}),
   };
 }
 
@@ -61,36 +61,36 @@ export function terminalBrowserCommand(url: string, bin = "terminal-browser"): s
 export function paneInputCommand(env: NodeJS.ProcessEnv): string[] {
   const paneId = env.HERDR_PANE_ID?.trim();
   if (!paneId) {
-    throw new Error("HERDR_PANE_ID is required for an interactive Canvas pane");
+    throw new Error("HERDR_PANE_ID is required for an interactive Artifact pane");
   }
   return [env.HERDR_BIN_PATH?.trim() || "herdr", "pane", "input", "--pane", paneId, "--right-click", "pane"];
 }
 
-export async function runManagedCanvasPane(opts: {
-  config: CanvasPaneConfig;
+export async function runManagedArtifactPane(opts: {
+  config: ArtifactPaneConfig;
   env?: NodeJS.ProcessEnv;
   terminalBrowserBin?: string;
-  createServer?: typeof createCanvasServer;
+  createServer?: typeof createArtifactServer;
   spawnBrowser?: (command: string[], env: NodeJS.ProcessEnv) => TerminalBrowserChild;
   configurePaneInput?: (command: string[], env: NodeJS.ProcessEnv) => void;
 }): Promise<number> {
   const childEnv = opts.env ?? process.env;
   let snapshot: string | undefined;
   if (opts.config.versionId) {
-    const archive = new CanvasHistory(historyPath(childEnv));
+    const archive = new ArtifactHistory(historyPath(childEnv));
     try {
-      const version = archive.version(opts.config.versionId, opts.config.canvasesDir);
+      const version = archive.version(opts.config.versionId, opts.config.artifactsDir);
       if (!version) throw new Error("version not found in this workspace");
       snapshot = version.source;
     } finally { archive.close(); }
   }
-  const diagnostics = snapshot === undefined ? typecheckCanvas(opts.config.canvasPath) : [];
+  const diagnostics = snapshot === undefined ? typecheckArtifact(opts.config.artifactPath) : [];
   if (diagnostics.length > 0) {
-    throw new Error(formatCanvasCheck(diagnostics));
+    throw new Error(formatArtifactCheck(diagnostics));
   }
-  const compiled = await compileCanvas(opts.config.canvasPath, snapshot);
+  const compiled = await compileArtifact(opts.config.artifactPath, snapshot);
   if (!compiled.ok) {
-    throw new Error(formatCanvasCheck(compiled.diagnostics));
+    throw new Error(formatArtifactCheck(compiled.diagnostics));
   }
 
   const inputCommand = paneInputCommand(childEnv);
@@ -103,21 +103,21 @@ export async function runManagedCanvasPane(opts: {
       stdio: ["ignore", "pipe", "pipe"],
     });
     if (input.status !== 0) {
-      throw new Error(`failed to enable Canvas pane mouse input: ${(input.stderr || input.stdout).trim()}`);
+      throw new Error(`failed to enable Artifact pane mouse input: ${(input.stderr || input.stdout).trim()}`);
     }
   }
 
-  const createServer = opts.createServer ?? createCanvasServer;
-  let server: CanvasServer | undefined;
+  const createServer = opts.createServer ?? createArtifactServer;
+  let server: ArtifactServer | undefined;
   let child: TerminalBrowserChild | undefined;
   const listeners = new Map<ViewerSignal, () => void>();
   let requestedExitCode: number | undefined;
 
   try {
-    server = await createServer({ canvasesDir: opts.config.canvasesDir, env: childEnv });
+    server = await createServer({ artifactsDir: opts.config.artifactsDir, env: childEnv });
     const route = opts.config.versionId
       ? `/v/${opts.config.versionId}${opts.config.eventId ? `?event=${encodeURIComponent(opts.config.eventId)}` : ""}`
-      : `/c/${encodeURIComponent(opts.config.canvasId)}`;
+      : `/c/${encodeURIComponent(opts.config.artifactId)}`;
     const url = `${server.url}${route}`;
     const terminalBrowserBin = opts.terminalBrowserBin ?? (
       childEnv.HERDR_TERMINAL_BROWSER_BIN?.trim() || "terminal-browser"
@@ -172,8 +172,8 @@ function waitForChild(child: TerminalBrowserChild): Promise<number> {
 }
 
 async function main(): Promise<void> {
-  const config = canvasPaneConfig();
-  const exitCode = await runManagedCanvasPane({ config });
+  const config = artifactPaneConfig();
+  const exitCode = await runManagedArtifactPane({ config });
   process.exitCode = exitCode;
 }
 

@@ -1,72 +1,72 @@
-import { canvasIdFromFile } from "./canvasFile";
-import { compileCanvas } from "./compile";
-import { ensureCanvasServer } from "./local/preview-daemon";
-import { formatCanvasCheck } from "./diagnostics";
+import { artifactIdFromFile } from "./artifactFile";
+import { compileArtifact } from "./compile";
+import { ensureArtifactServer } from "./local/preview-daemon";
+import { formatArtifactCheck } from "./diagnostics";
 import {
-  canvasPaneOpenArgs,
+  artifactPaneOpenArgs,
   createHerdrClient,
   type CommandResult,
   type HerdrClient,
   type PanePlacement,
 } from "./herdr";
-import { typecheckCanvas } from "./typecheck";
-import { CanvasHistory, historyPath } from "./history";
+import { typecheckArtifact } from "./typecheck";
+import { ArtifactHistory, historyPath } from "./history";
 
 export type OpenResult = {
   ok: boolean;
   url?: string;
-  canvasId?: string;
+  artifactId?: string;
   reusedServer?: boolean;
-  opened?: "canvas-pane" | "none";
+  opened?: "artifact-pane" | "none";
   check: string;
-  diagnostics: ReturnType<typeof typecheckCanvas>;
+  diagnostics: ReturnType<typeof typecheckArtifact>;
   herdr?: CommandResult;
 };
 
-export type OpenCanvasOptions = {
-  canvasesDir: string;
+export type OpenArtifactOptions = {
+  artifactsDir: string;
   herdr?: HerdrClient;
   placement?: PanePlacement;
   direction?: "right" | "down";
   focus?: boolean;
   env?: NodeJS.ProcessEnv;
-  ensureServer?: typeof ensureCanvasServer;
-  compile?: typeof compileCanvas;
+  ensureServer?: typeof ensureArtifactServer;
+  compile?: typeof compileArtifact;
   skipOpen?: boolean;
   inProcessServer?: boolean;
   versionId?: string;
   eventId?: string;
 };
 
-export async function openCanvas(canvasPath: string, opts: OpenCanvasOptions): Promise<OpenResult> {
+export async function openArtifact(artifactPath: string, opts: OpenArtifactOptions): Promise<OpenResult> {
   let snapshot: string | undefined;
   if (opts.versionId) {
-    const archive = new CanvasHistory(historyPath(opts.env));
+    const archive = new ArtifactHistory(historyPath(opts.env));
     try {
-      const version = archive.version(opts.versionId, opts.canvasesDir);
+      const version = archive.version(opts.versionId, opts.artifactsDir);
       if (!version) throw new Error("version not found in this workspace");
       if (opts.eventId && !archive.events(version.id).some(event => event.id === opts.eventId)) throw new Error("serve event not found for version");
       snapshot = version.source;
     } finally { archive.close(); }
   }
-  const diagnostics = snapshot === undefined ? typecheckCanvas(canvasPath) : [];
-  const check = snapshot === undefined ? formatCanvasCheck(diagnostics) : "Archived source: compiling with the installed SDK";
+  const diagnostics = snapshot === undefined ? typecheckArtifact(artifactPath) : [];
+  const check = snapshot === undefined ? formatArtifactCheck(diagnostics) : "Archived source: compiling with the installed SDK";
   if (diagnostics.length > 0) {
     return { ok: false, check, diagnostics, opened: "none" };
   }
 
-  const compile = opts.compile ?? compileCanvas;
-  const compiled = await compile(canvasPath, snapshot);
+  const compile = opts.compile ?? compileArtifact;
+  const compiled = await compile(artifactPath, snapshot);
   if (!compiled.ok) {
     return {
       ok: false,
-      check: formatCanvasCheck(compiled.diagnostics),
+      check: formatArtifactCheck(compiled.diagnostics),
       diagnostics: compiled.diagnostics,
       opened: "none",
     };
   }
 
-  const canvasId = canvasIdFromFile(canvasPath);
+  const artifactId = artifactIdFromFile(artifactPath);
   const paneContext = {
     workspaceId: opts.env?.HERDR_WORKSPACE_ID,
     targetPaneId: opts.env?.HERDR_PANE_ID,
@@ -76,18 +76,18 @@ export async function openCanvas(canvasPath: string, opts: OpenCanvasOptions): P
   };
 
   if (opts.skipOpen) {
-    const ensure = opts.ensureServer ?? ensureCanvasServer;
+    const ensure = opts.ensureServer ?? ensureArtifactServer;
     const server = await ensure({
-      canvasesDir: opts.canvasesDir,
+      artifactsDir: opts.artifactsDir,
       env: opts.env,
       inProcess: opts.inProcessServer,
     });
-    const route = opts.versionId ? `/v/${opts.versionId}${opts.eventId ? `?event=${encodeURIComponent(opts.eventId)}` : ""}` : `/c/${encodeURIComponent(canvasId)}`;
+    const route = opts.versionId ? `/v/${opts.versionId}${opts.eventId ? `?event=${encodeURIComponent(opts.eventId)}` : ""}` : `/c/${encodeURIComponent(artifactId)}`;
     const url = `${server.url.replace(/\/$/, "")}${route}`;
     return {
       ok: true,
       url,
-      canvasId,
+      artifactId,
       reusedServer: server.reused,
       opened: "none",
       check,
@@ -97,7 +97,7 @@ export async function openCanvas(canvasPath: string, opts: OpenCanvasOptions): P
 
   const herdr = opts.herdr ?? createHerdrClient(opts.env);
   let pane = herdr.run(
-    canvasPaneOpenArgs(canvasPath, opts.canvasesDir, {
+    artifactPaneOpenArgs(artifactPath, opts.artifactsDir, {
       placement: opts.placement,
       direction: opts.direction,
       focus: opts.focus,
@@ -106,7 +106,7 @@ export async function openCanvas(canvasPath: string, opts: OpenCanvasOptions): P
   );
   if (pane.status !== 0 && `${pane.stdout}${pane.stderr}`.includes("no_active_pane")) {
     pane = herdr.run(
-      canvasPaneOpenArgs(canvasPath, opts.canvasesDir, {
+      artifactPaneOpenArgs(artifactPath, opts.artifactsDir, {
         placement: "tab",
         focus: opts.focus,
         ...paneContext,
@@ -115,8 +115,8 @@ export async function openCanvas(canvasPath: string, opts: OpenCanvasOptions): P
   }
   return {
     ok: pane.status === 0,
-    canvasId,
-    opened: "canvas-pane",
+    artifactId,
+    opened: "artifact-pane",
     check,
     diagnostics: [],
     herdr: pane,

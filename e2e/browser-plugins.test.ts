@@ -1,15 +1,15 @@
 import { expect, test } from "bun:test";
 import { chromium } from "playwright";
 import { prepareBrowserPlugins } from "../scripts/prepare-browser-plugins";
-import { compileCanvas } from "../src/compile";
-import { tempDir, writeCanvas } from "../src/test/fixtures";
+import { compileArtifact } from "../src/compile";
+import { tempDir, writeArtifact } from "../src/test/fixtures";
 import plugins from "../src/test/plugins/config";
 const registry = await prepareBrowserPlugins(plugins, new URL("../src/test/plugins", import.meta.url).pathname);
 const source = `import { PluginCounter } from "@test/counter";
-export default function Canvas() { return <PluginCounter prefix="Plugin" />; }`;
+export default function Artifact() { return <PluginCounter prefix="Plugin" />; }`;
 
 test("prepared plugin hooks share the renderer React and execute an installed transitive library", async () => {
-  const result = await compileCanvas(writeCanvas(tempDir(), "plugin", source), undefined, registry);
+  const result = await compileArtifact(writeArtifact(tempDir(), "plugin", source), undefined, registry);
   expect(result.diagnostics).toEqual([]);
   expect(result.ok).toBe(true);
   const browser = await chromium.launch({ headless: true });

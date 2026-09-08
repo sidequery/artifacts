@@ -1,11 +1,11 @@
-import type { CanvasPlugin } from "../src/plugins/config";
+import type { ArtifactPlugin } from "../src/plugins/config";
 import type { PluginRequest, PluginUser } from "../src/plugins/types";
 import installed from "../dist/cloudflare/plugin-server";
 import { validatePluginInput, validatePluginOutput } from "../dist/cloudflare/plugin-validators.js";
 import catalog from "../dist/cloudflare/plugin-catalog.json";
 
 export const PLUGIN_JSON_LIMIT = 256 * 1024;
-export const PLUGIN_GUIDE = `Deployment plugins provide installed browser modules and authenticated server functions. Call plugins_list to discover operation names, schemas, and read-only hints. Call canvas_plugin_call with {plugin, operation, input}, or use pluginCall from sidequery/canvas in a hosted canvas. Calls run as the authenticated deployment user, independently of canvas, version, workspace, or library selectors. Plugins may restrict users and must check row-level access in their handlers. Public standalone canvases cannot call plugins. Provider credentials stay on the server. Canvas backends and scripts do not receive this bridge.`;
+export const PLUGIN_GUIDE = `Deployment plugins provide installed browser modules and authenticated server functions. Call plugins_list to discover operation names, schemas, and read-only hints. Call artifact_plugin_call with {plugin, operation, input}, or use pluginCall from sidequery/artifacts in a hosted artifact. Calls run as the authenticated deployment user, independently of artifact, version, workspace, or library selectors. Plugins may restrict users and must check row-level access in their handlers. Public standalone artifacts cannot call plugins. Provider credentials stay on the server. Artifact backends and scripts do not receive this bridge.`;
 export const pluginCatalog = catalog;
 export type PluginInvocationContext = { user: PluginUser; env: object };
 export class PluginError extends Error {
@@ -25,7 +25,7 @@ function jsonValue(value: unknown, output = false): unknown {
   return JSON.parse(serialized);
 }
 
-export function createPluginDispatcher(plugins: readonly CanvasPlugin[], validators: {
+export function createPluginDispatcher(plugins: readonly ArtifactPlugin[], validators: {
   input: typeof validatePluginInput; output: typeof validatePluginOutput;
 }, timeoutMs = 30_000) {
   return async (request: PluginRequest, context?: PluginInvocationContext): Promise<unknown> => {

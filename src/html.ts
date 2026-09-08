@@ -1,6 +1,6 @@
-export function canvasHtml(opts: {
+export function artifactHtml(opts: {
   title: string;
-  canvasId: string;
+  artifactId: string;
   scriptUrl: string;
   persistUrl?: string;
   actionUrl?: string;
@@ -12,7 +12,8 @@ export function canvasHtml(opts: {
   state?: Record<string, unknown>;
 }): string {
   const bridge = {
-    canvasId: opts.canvasId,
+    artifactId: opts.artifactId,
+    canvasId: opts.artifactId,
     persistUrl: opts.persistUrl,
     actionUrl: opts.actionUrl,
     theme: { kind: opts.themeKind ?? "dark" },
@@ -38,20 +39,20 @@ export function canvasHtml(opts: {
   </head>
   <body>
     <div id="root"></div>
-    <script>window.__herdrCanvas = ${JSON.stringify(bridge).replaceAll("<", "\\u003c")};</script>
+    <script>window.__herdrCanvas = window.__artifacts = ${JSON.stringify(bridge).replaceAll("<", "\\u003c")};</script>
     <script type="module" src="${escapeHtml(opts.scriptUrl)}"></script>
     <script>
       (function () {
         var last = ${JSON.stringify(opts.mtimeUrl ?? null)};
         if (!last) return;
         var url = last;
-        window.__herdrCanvasMtime = ${JSON.stringify(opts.sourceHash ?? null)};
+        window.__artifactsMtime = ${JSON.stringify(opts.sourceHash ?? null)};
         setInterval(function () {
           fetch(url, { cache: "no-store" }).then(function (res) { return res.json(); }).then(function (data) {
-            if (window.__herdrCanvasMtime && data.mtime && data.mtime !== window.__herdrCanvasMtime) {
+            if (window.__artifactsMtime && data.mtime && data.mtime !== window.__artifactsMtime) {
               location.reload();
             }
-            window.__herdrCanvasMtime = data.mtime;
+            window.__artifactsMtime = data.mtime;
           }).catch(function () {});
         }, 750);
       })();

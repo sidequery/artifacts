@@ -8,7 +8,7 @@ test("authenticated viewers share a persisted collector; unauthorized calls neve
   const build = await Bun.build({ entrypoints: [new URL("./worker.ts", import.meta.url).pathname], target: "browser", format: "esm" });
   expect(build.success).toBe(true);
   const script = await build.outputs[0]!.text();
-  const directory = await mkdtemp(join(tmpdir(), "canvas-runner-test-"));
+  const directory = await mkdtemp(join(tmpdir(), "artifact-runner-test-"));
   let calls = 0;
   const options: MiniflareOptions = { cf: false, port: 0, resourcePersistencePath: directory, workers: [{
     config: { name: "runner-test", type: "worker", compatibilityDate: "2026-09-07",
@@ -53,7 +53,7 @@ test("authenticated viewers share a persisted collector; unauthorized calls neve
 test("cache larger than a DO value persists and serves a visibly bounded snapshot", async () => {
   const build = await Bun.build({ entrypoints: [new URL("./worker.ts", import.meta.url).pathname], target: "browser", format: "esm" });
   expect(build.success).toBe(true);
-  const directory = await mkdtemp(join(tmpdir(), "canvas-runner-large-"));
+  const directory = await mkdtemp(join(tmpdir(), "artifact-runner-large-"));
   let calls = 0;
   const options: MiniflareOptions = { cf: false, port: 0, resourcePersistencePath: directory, workers: [{
     config: { name: "large-runner-test", type: "worker", compatibilityDate: "2026-09-07",

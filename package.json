@@ -1,17 +1,17 @@
 {
-  "name": "@sidequery/canvas",
-  "description": "Sidequery Canvas: React artifacts with a web gallery, version history, CLI, MCP, and optional Herdr integration.",
+  "name": "@sidequery/artifacts",
+  "description": "Sidequery Artifacts: React artifacts with a web gallery, version history, CLI, MCP, and optional Herdr integration.",
   "version": "0.1.0",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/sidequery/canvas.git"
+    "url": "git+https://github.com/sidequery/artifacts.git"
   },
-  "homepage": "https://github.com/sidequery/canvas#readme",
+  "homepage": "https://github.com/sidequery/artifacts#readme",
   "bugs": {
-    "url": "https://github.com/sidequery/canvas/issues"
+    "url": "https://github.com/sidequery/artifacts/issues"
   },
   "engines": {
     "bun": ">=1.4.0"
@@ -21,7 +21,7 @@
     "./plugins": "./src/plugins/config.ts"
   },
   "bin": {
-    "canvas": "src/cli.ts"
+    "artifacts": "src/cli.ts"
   },
   "files": [
     "dist/celld/**",
@@ -38,7 +38,7 @@
     "src/auth/client-api.ts",
     "src/auth/client.tsx",
     "src/auth/server.ts",
-    "src/canvasFile.ts",
+    "src/artifactFile.ts",
     "src/cli.ts",
     "src/compile.ts",
     "src/diagnostics.ts",
@@ -70,7 +70,7 @@
     "src/plugins/types.ts",
     "src/runtime/cloud-runtime.ts",
     "src/runtime/gallery-request.ts",
-    "src/runtime/herdr-canvas-entry.d.ts",
+    "src/runtime/artifacts-entry.d.ts",
     "src/runtime/mcp-app.ts",
     "src/runtime/navigation-host.ts",
     "src/runtime/wrapper.tsx",
@@ -98,7 +98,6 @@
     "access": "public"
   },
   "scripts": {
-    "canvas": "bun run src/cli.ts",
     "mcp": "bun run src/cli.ts mcp",
     "test": "bun test src scripts/prepare-plugins.test.ts examples/runner-status --timeout 30000",
     "test:e2e": "bun test e2e/herdr.e2e.test.ts",
@@ -118,7 +117,8 @@
     "test:celld": "bun run build:cloudflare && bun run prepare:celld && CELLD_INTEGRATION=1 CELLD_AUTH_INTEGRATION=1 bun test cloudflare/celld.test.ts cloudflare/auth-flow.test.ts --timeout 180000",
     "deploy:cloudflare": "wrangler deploy",
     "seed:cloudflare": "bun run scripts/seed-cloudflare.ts",
-    "example:runner-status": "bun run examples/runner-status/local.ts"
+    "example:runner-status": "bun run examples/runner-status/local.ts",
+    "artifacts": "bun run src/cli.ts"
   },
   "dependencies": {
     "@better-auth/oauth-provider": "1.7.3",
