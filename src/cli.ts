@@ -3,6 +3,7 @@
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
+import { runHostCommand } from "./local/host";
 import { flagBoolean, flagString, parseArgs, type ParsedArgs } from "./args";
 import { artifactsDirFrom } from "./artifactFile";
 import { clearServerReady, ServerDaemonManager, writeServerReady } from "./local/server-daemon";
@@ -111,6 +112,7 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (await runHostCommand(args)) return;
   if (await runServerCommand(args)) return;
 
   const cwd = process.cwd();
@@ -302,6 +304,11 @@ Usage:
   artifacts server [--port 4786] [--state-dir PATH]
   artifacts server start [--port 4786] [--at-login]
   artifacts server stop | status | logs [--lines 100] | uninstall
+  artifacts host install --origin https://HOST.ts.net --tailscale-login LOGIN [--serve]
+    [--runner-org ORG --runner-repos ORG/REPO,...] [--gh-path PATH] [--replace-serve] [--keep-warm]
+    [--warm-gallery] [--warm-canvases NAME,...]
+  artifacts host start | stop | status | logs [--lines 100] | backup | uninstall
+    [--data-dir PATH]
 
 All commands accept --dir PATH and --history-db PATH.
 read returns up to 200 lines by default, with a source_hash and next_line.

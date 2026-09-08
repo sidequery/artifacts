@@ -132,6 +132,11 @@ test("published tarball runs the CLI, gallery, and stdio MCP outside a checkout"
     }
     const listing = await run(["tar", "-tzf", archive], root, isolatedEnv);
     expect(listing.stdout).toContain("package/dist/celld/wrangler.jsonc");
+    expect(listing.stdout).toContain("package/dist/host/service.js");
+    expect(listing.stdout).toContain("package/dist/runner-status/worker/local.worker.js");
+    expect(listing.stdout).toContain("package/dist/runner-status/assets/index.html");
+    expect(listing.stdout).toContain("package/dist/runner-status/runner-status.artifact.tsx");
+    expect(listing.stdout).not.toContain("package/dist/runner-status/build.json");
     expect(listing.stdout).toContain("package/dist/worker-app/worker.js");
     expect(listing.stdout).toContain("package/dist/cloudflare/assets/index.html");
     expect(listing.stdout).toContain("package/docs/daemon.md");
@@ -149,6 +154,12 @@ test("published tarball runs the CLI, gallery, and stdio MCP outside a checkout"
     }, null, 2));
     await run([process.execPath, "install", "--ignore-scripts"], consumer, isolatedEnv);
     await run([process.execPath, "-e", `
+      import { hostRuntime } from "./node_modules/@sidequery/artifacts/src/local/host.ts";
+      const runner = await Bun.file("./node_modules/@sidequery/artifacts/dist/runner-status/wrangler.jsonc").json();
+      if (runner.vars.GITHUB_TOKEN || runner.vars.RUNNER_STATUS_TOKEN) throw new Error("Package includes credentials");
+      if (!runner.durable_objects.bindings.some(binding => binding.name === "RUNNER_STATUS")) throw new Error("Runner collector binding missing");
+      const host = hostRuntime(runner, { origin: "https://test.ts.net", tailscaleLogin: "test@example.com", runnerOrg: "example", runnerRepos: "example/repo" });
+      if (host.main !== "app/release/worker/local.worker.js") throw new Error("Host main escapes durable project");
       import { definePlugins } from "@sidequery/artifacts/plugins";
       import { pluginCall, artifactFiles } from "@sidequery/artifacts";
       import { runtimeIdentity } from "./node_modules/@sidequery/artifacts/src/history.ts";

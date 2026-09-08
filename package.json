@@ -92,7 +92,13 @@
     "src/localProject.ts",
     "cloudflare/project.ts",
     "src/gallery/execution-controls.tsx",
-    "src/gallery/project-editor.tsx"
+    "src/gallery/project-editor.tsx",
+    "dist/host/**",
+    "dist/runner-status/**",
+    "src/local/host.ts",
+    "src/local/host-service.ts",
+    "src/local/host-backup.ts",
+    "src/local/tailnet-gateway.ts"
   ],
   "publishConfig": {
     "access": "public"
@@ -118,7 +124,8 @@
     "deploy:cloudflare": "wrangler deploy",
     "seed:cloudflare": "bun run scripts/seed-cloudflare.ts",
     "example:runner-status": "bun run examples/runner-status/local.ts",
-    "artifacts": "bun run src/cli.ts"
+    "artifacts": "bun run src/cli.ts",
+    "build:executable": "bun run scripts/build-executable.ts"
   },
   "dependencies": {
     "@better-auth/oauth-provider": "1.7.3",
