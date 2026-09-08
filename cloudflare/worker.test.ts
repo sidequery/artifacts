@@ -246,6 +246,13 @@ test("all hosted surfaces fail closed off loopback, and mutations enforce origin
 });
 
 test("verified users have isolated private libraries and can collaborate in the team library", async () => {
+  // Compilation pauses can outlive the local server's idle connections. Avoid
+  // reusing those sockets in both direct requests and the MCP transport.
+  const fetch = (input: string | URL | Request, init: RequestInit = {}) => {
+    const headers = new Headers(init.headers ?? (input instanceof Request ? input.headers : undefined));
+    headers.set("Connection", "close");
+    return globalThis.fetch(input, { ...init, headers });
+  };
   const { generateKeyPair, exportJWK, SignJWT } = await import("jose");
   const { Response: RuntimeResponse } = await import("miniflare");
   const keys = await generateKeyPair("RS256", { extractable: true });
@@ -276,6 +283,7 @@ test("verified users have isolated private libraries and can collaborate in the 
       const remote = new Client({ name: "tenancy-test", version: "1" });
       clients.push(remote);
       await remote.connect(new StreamableHTTPClientTransport(new URL(`${address}/mcp?workspace=test&library=${library}`), {
+        fetch,
         requestInit: { headers: { "Cf-Access-Jwt-Assertion": token } },
       }));
       return remote;
