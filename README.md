@@ -80,8 +80,9 @@ Import standard React hooks from `sidequery/canvas` for component state and effe
 Use `useCanvasState(key, defaultValue)` when you want host-backed state; persistence
 depends on the view.
 
-Canvases live at `<workspace>/canvases/<name>.canvas.tsx` and may import only
-from `sidequery/canvas` (`herdr/canvas` and `cursor/canvas` remain compatibility aliases). Use the CLI or MCP:
+Canvases live at `<workspace>/canvases/<name>.canvas.tsx`. Import the SDK from
+`sidequery/canvas` (`herdr/canvas` and `cursor/canvas` remain compatibility aliases).
+Projects can also import their declared helper files and pinned dependencies. Use the CLI or MCP:
 
 ```bash
 canvas list
@@ -291,9 +292,9 @@ unchanged: MCP supports `canvas_write` with `open: true`; CLI uses separate
 ## Artifact history
 
 Every successfully served source revision is archived automatically, including
-edits made directly to a `.canvas.tsx` file. History stores **raw TSX source and
-metadata only**, using Bun's built-in `bun:sqlite`; compiled JavaScript stays in
-memory. Unchanged source reuses its latest revision. Each page response records
+edits made directly to a `.canvas.tsx` file. History stores **authored source,
+dependency snapshots, and metadata**, using Bun's built-in `bun:sqlite`; compiled
+canvas JavaScript stays in memory. Unchanged source and project reuse their latest revision. Each page response records
 a separate serve event with its initial UI state, pane/session context, and
 runtime identity. A serve event means the server returned a page, not that a
 human viewed it. Unserved intermediate edits are not captured automatically.
@@ -401,3 +402,21 @@ for hostile JavaScript. Gallery previews run in isolated browser frames. Inline
 canvases execute inside the chat host's MCP Apps sandbox; use trusted local canvas
 source, as for the other local views. Artifact
 source and saved state can contain private data; keep the history database private.
+
+## Projects, remix, and scheduled runs
+
+Canvases and scripts support helper source files and pinned package dependencies.
+Use the gallery's source file picker and Dependencies editor, or pass
+`project: { files: { "lib/helper.ts": "..." }, dependencies: { "package": "1.2.3" } }`
+to the write tool. Local CLI writes accept `--project PROJECT_JSON`; targeted
+reads and edits accept `--source-file lib/helper.ts`. Source history retains the
+resolved dependency snapshot as well as authored files.
+
+Use **Remix** in the gallery, `canvas_remix` / `script_remix` through MCP, or
+`canvas remix SOURCE NEW_NAME` locally. Copies retain source provenance and start
+with fresh state, storage, secrets, and private hosted URLs.
+
+Hosted and celld backends expose **Schedule** and **Run history** controls. Native
+alarms support intervals and cron expressions with timezones, pause/resume, and
+run-now. Run records live in host-owned SQLite. See
+[project, remix, and scheduling contracts](docs/scripts.md) for details and limits.

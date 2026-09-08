@@ -1,3 +1,4 @@
+import { normalizeProject, emptyProject } from "./project";
 import { compileCanvasSource, compileCanvasServerSource, compileScriptSource, typecheckCanvasSource, typecheckCanvasServerSource } from "./compiler";
 import { readRequestText } from "./http";
 import type { ExecutionContext } from "@cloudflare/workers-types";
@@ -10,16 +11,21 @@ export default {
     if (request.method === "GET" && url.pathname === "/health") return Response.json({ ok: true, runtime: navigator.userAgent });
     if (request.method !== "POST" || !["/compile", "/compile-server", "/compile-script", "/typecheck", "/typecheck-server"].includes(url.pathname)) return new Response("Not found", { status: 404 });
     let source: string;
-    try { source = await readRequestText(request, 256 * 1024); }
+    let project = emptyProject();
+    try { source = await readRequestText(request, request.headers.get("content-type")?.includes("application/json") ? 10 * 1024 * 1024 : 256 * 1024); }
     catch (error) {
       if (error instanceof RangeError) return new Response("Canvas source exceeds 256 KiB", { status: 413 });
       throw error;
     }
-    const compilation = url.pathname === "/compile-script" ? compileScriptSource(source)
-      : url.pathname === "/compile-server" ? compileCanvasServerSource(source)
-      : url.pathname === "/compile" ? compileCanvasSource(source) : undefined;
+    if (request.headers.get("content-type")?.includes("application/json")) {
+      const input = JSON.parse(source);
+      source = input.source; project = normalizeProject(input.project);
+    }
+    const compilation = url.pathname === "/compile-script" ? compileScriptSource(source, project)
+      : url.pathname === "/compile-server" ? compileCanvasServerSource(source, project)
+      : url.pathname === "/compile" ? compileCanvasSource(source, project) : undefined;
     if (compilation) ctx.waitUntil(compilation);
     return Response.json(compilation ? await compilation
-      : { diagnostics: url.pathname === "/typecheck-server" ? typecheckCanvasServerSource(source) : typecheckCanvasSource(source) });
+      : { diagnostics: url.pathname === "/typecheck-server" ? typecheckCanvasServerSource(source, project) : typecheckCanvasSource(source, project) });
   },
 };

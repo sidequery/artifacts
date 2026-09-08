@@ -1,9 +1,12 @@
+import { readLocalProject } from "./localProject";
+import { projectSourceHash, type ArtifactProject } from "../cloudflare/project";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import { assertRegularCanvas, ensureCanvasFileName } from "./canvasFile";
 import { compileCanvas } from "./compile";
 import { CanvasHistory, hash, historyPath, runtimeIdentity, type Version } from "./history";
+import { CanvasService } from "./service";
 import { canvasHtml } from "./html";
 import { galleryBundle, galleryData, galleryHtml, workingSource } from "./gallery/server";
 
@@ -30,19 +33,19 @@ export async function createCanvasServer(opts: CreateCanvasServerOptions): Promi
   let galleryJs: Promise<string> | undefined;
   const states = new Map<string, Record<string, unknown>>();
   // Bundles exist only in this server's memory; the archive stores raw TSX.
-  const builds = new Map<string, Promise<{ js: string; runtime: string } | undefined>>();
-  const build = (path: string, source: string, requestedRuntime?: string) => {
+  const builds = new Map<string, Promise<{ js: string; runtime: string; project: ArtifactProject } | undefined>>();
+  const build = (path: string, source: string, requestedRuntime?: string, project: ArtifactProject = readLocalProject(path)) => {
     const runtime = identifyRuntime();
     const runtimeHash = hash(runtime);
-    const key = (requestedRuntime ?? runtimeHash) + ":" + path + ":" + hash(source);
+    const key = (requestedRuntime ?? runtimeHash) + ":" + path + ":" + projectSourceHash(source, project);
     let pending = builds.get(key);
     if (!pending) {
       // A page must never silently execute a different SDK generation than its event.
       if (requestedRuntime && requestedRuntime !== runtimeHash) return Promise.resolve(undefined);
-      pending = compile(path, source).then(result => {
+      pending = compile(path, source, undefined, project).then(result => {
         if (!result.ok || !result.js) { builds.delete(key); return undefined; }
         if (identifyRuntime() !== runtime) { builds.delete(key); throw new Error("Canvas SDK changed during compilation; reload to retry"); }
-        return { js: result.js, runtime };
+        return { js: result.js, runtime, project };
       }).catch(error => { builds.delete(key); throw error; });
       builds.set(key, pending);
       if (builds.size > 16) builds.delete(builds.keys().next().value!);
@@ -79,6 +82,26 @@ export async function createCanvasServer(opts: CreateCanvasServerOptions): Promi
           const url = new URL(request.url);
           if (url.pathname === "/health") return json({ ok: true });
 
+          if (opts.gallery && url.pathname === "/api/tools" && request.method === "POST") {
+            // The gallery is a loopback UI. Untrusted websites and opaque canvas
+            // previews must not be able to create local files through this endpoint.
+            const allowedHosts = new Set([opts.hostname ?? "127.0.0.1"]);
+            if (["127.0.0.1", "::1", "localhost"].includes(opts.hostname ?? "127.0.0.1")) {
+              for (const host of ["127.0.0.1", "[::1]", "localhost"]) allowedHosts.add(host);
+            }
+            if (!allowedHosts.has(url.hostname) || request.headers.get("origin") !== url.origin || !request.headers.get("content-type")?.startsWith("application/json")) {
+              return json({ ok: false, error: "same-origin JSON request required" }, 403);
+            }
+            const workspace = url.searchParams.get("workspace");
+            if (workspace && resolve(workspace) !== canvasesDir) return json({ ok: false, error: "open this workspace's gallery to remix its canvas" }, 400);
+            const body = await request.json() as { name?: string; arguments?: Parameters<CanvasService["remix"]>[0] };
+            if (body.name !== "canvas_remix" || !body.arguments) return json({ ok: false, error: "unknown tool" }, 400);
+            try {
+              const service = new CanvasService({ canvasesDir, env: { ...env, HERDR_CANVAS_HISTORY_DB: history.path } });
+              return json(service.remix(body.arguments));
+            } catch (error) { return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400); }
+          }
+
           if (opts.gallery && request.method === "GET") {
             if (url.pathname === "/" || url.pathname === "/gallery") return new Response(galleryHtml(), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
             if (url.pathname === "/gallery.js") {
@@ -105,10 +128,10 @@ export async function createCanvasServer(opts: CreateCanvasServerOptions): Promi
                   ...(url.searchParams.get("download") === "1" ? { "content-disposition": `attachment; filename="canvas.canvas.tsx"; filename*=UTF-8''${encodeURIComponent(canvasName + ".canvas.tsx")}` } : {}),
                 } });
               }
-              const compiled = await build(sourcePath, source);
+              const compiled = await build(sourcePath, source, undefined, version?.project);
               if (!compiled) return new Response("This source does not compile with the installed SDK.", { status: 400 });
               const initialState = version ? (() => { const events = history.events(version.id); const event = events.find(item => item.mode === "live") ?? events[0]; return event ? JSON.parse(event.initial_state) : {}; })() : loadState(sourcePath, states, canvasName);
-              version ??= history.capture({ workspace: canvasesDir, name: canvasName, sourcePath, source, runtime: compiled.runtime });
+              version ??= history.capture({ workspace: canvasesDir, name: canvasName, sourcePath, source, project: compiled.project, runtime: compiled.runtime });
               return versionPage(version, initialState, true, compiled.runtime, compiled.js);
             }
           }
@@ -118,7 +141,7 @@ export async function createCanvasServer(opts: CreateCanvasServerOptions): Promi
             const version = history.version(archived[1], canvasesDir);
             if (!version) return new Response("version not found", { status: 404 });
             const requestedRuntime = archived[2] ? url.searchParams.get("runtime") ?? undefined : undefined;
-            const compiled = await build(version.source_path, version.source, requestedRuntime);
+            const compiled = await build(version.source_path, version.source, requestedRuntime, version.project);
             if (!compiled) return new Response(requestedRuntime ? "page build expired or no longer compiles; reload the page" : "archived source does not compile with the installed SDK", { status: requestedRuntime ? 409 : 400 });
             if (archived[2]) return javascript(compiled.js);
             const events = history.events(version.id);
@@ -163,7 +186,7 @@ export async function createCanvasServer(opts: CreateCanvasServerOptions): Promi
             const source = readFileSync(filePath, "utf8");
             const compiled = await build(filePath, source);
             if (!compiled) return new Response("compile failed", { status: 400 });
-            const version = history.capture({ workspace: canvasesDir, name: canvasId, sourcePath: filePath, source, runtime: compiled.runtime });
+            const version = history.capture({ workspace: canvasesDir, name: canvasId, sourcePath: filePath, source, project: compiled.project, runtime: compiled.runtime });
             if (rest) return javascript(compiled.js);
             return versionPage(version, loadState(filePath, states, canvasId), false, compiled.runtime);
           }

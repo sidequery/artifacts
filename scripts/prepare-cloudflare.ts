@@ -8,6 +8,12 @@ import standaloneCode from "ajv/dist/standalone";
 import { CLOUD_MCP_TOOLS } from "../cloudflare/tool-contract";
 import { createHash } from "node:crypto";
 import * as sdk from "../src/sdk";
+import * as react from "react";
+import * as reactDom from "react-dom";
+import * as reactDomClient from "react-dom/client";
+import * as reactRouter from "react-router";
+import * as jsx from "react/jsx-runtime";
+import * as jsxDev from "react/jsx-dev-runtime";
 import { preparePlugins } from "./prepare-plugins";
 
 // Ship the lockfile-resolved dependencies with the compiler. Compiling a canvas
@@ -53,6 +59,8 @@ if (!runtimeBuild.success) throw new Error(runtimeBuild.logs.join("\n"));
 const runtimeJs = await runtimeBuild.outputs[0]!.text();
 await writeFile(join(dirname(output), "browser-runtime.json"), JSON.stringify({
   js: runtimeJs,
+  sharedVersions: Object.fromEntries(await Promise.all(["react", "react-dom", "react-router"].map(async name => [name, JSON.parse(await readFile(join(root, "node_modules", name, "package.json"), "utf8")).version]))),
+  sharedModules: Object.fromEntries(Object.entries({ react: { value: react, key: "react" }, "react-dom": { value: reactDom, key: "reactDom" }, "react-dom/client": { value: reactDomClient, key: "reactDomClient" }, "react-router": { value: reactRouter, key: "reactRouter" }, "react/jsx-runtime": { value: jsx, key: "jsx" }, "react/jsx-dev-runtime": { value: jsxDev, key: "jsxDev" } }).map(([name, {value, key}]) => [name, `export default globalThis.__herdrCanvasRuntime.${key};\n` + Object.keys(value).filter(item => item !== "default" && /^[A-Za-z_$][\w$]*$/.test(item)).map(item => `export const ${item} = globalThis.__herdrCanvasRuntime.${key}.${item};`).join("\n")])),
   sdkModule: Object.keys(sdk).sort().map(name => `export const ${name} = globalThis.__herdrCanvasRuntime.sdk.${name};`).join("\n"),
 }));
 const identity = createHash("sha256").update(JSON.stringify(files)).update(runtimeJs)

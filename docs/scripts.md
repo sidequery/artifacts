@@ -34,7 +34,7 @@ export default {
 } satisfies ExportedHandler<ScriptEnv>;
 ```
 
-`ScriptEnv` is available during type checking. It contains `secrets: Record<string, string>` and `sql: SqlStorage`. Outbound `fetch` is available. `ctx.waitUntil` can extend background work associated with a request. Scripts can import supported `cloudflare:` and `node:` builtins. Source is currently a single TypeScript module; third-party packages must be bundled into that source beforehand. Code must be compatible with the Workers runtime; this is not a general server process or scheduling system.
+`ScriptEnv` is available during type checking. It contains `secrets: Record<string, string>` and `sql: SqlStorage`. Outbound `fetch` is available. `ctx.waitUntil` can extend background work associated with a request. Scripts can import supported `cloudflare:` and `node:` builtins. Use relative helper modules and exact npm dependencies through the project source editor or MCP project fields. Code must be compatible with the Workers runtime; this is not a general server process or scheduling system.
 
 Use `env.secrets.NAME` for a configured secret. For example, a handler can verify a provider signature against the original request body. Script HTTP requests preserve their methods, query strings, and body bytes. The gateway strips cookies and Cloudflare Access assertion/service-token headers; private routes also strip the authorization credential used for management authentication.
 
@@ -86,25 +86,39 @@ Agents use `script_write`, `script_read`, `script_edit`, `script_list`, `script_
 
 ## Third-party dependencies
 
-The hosted compiler does not install bun dependencies or resolve a multi-file project. For a Workers-compatible package, keep your original TypeScript, `package.json`, and lockfile locally. Install an exact package version with `bun add --exact <package>@<version>` and typecheck the original source with your project's TypeScript setup.
+Scripts and canvases accept an optional `project` alongside their existing entrypoint source:
 
-Bundle the handler locally before calling `script_write`. For example, a Hono handler can be bundled with this `bundle.ts`:
-
-```ts
-const build = await Bun.build({
-  entrypoints: ["handler.ts"],
-  target: "browser",
-  format: "esm",
-  external: ["node:*", "cloudflare:*"],
-  banner: "// @ts-nocheck",
-  minify: true,
-});
-if (!build.success) throw new Error(build.logs.join("\n"));
-await Bun.write("handler.bundle.js", await build.outputs[0]!.text());
+```json
+{
+  "files": { "lib/message.ts": "export const message = 'Hello';" },
+  "dependencies": { "hono": "4.13.7" }
+}
 ```
 
-Run `bun run bundle.ts`, read `handler.bundle.js`, and pass its complete contents as `script_write.contents`. The banner applies only to generated JavaScript: it prevents strict implicit-any diagnostics caused by erased TypeScript types. Typecheck handwritten source before bundling. Runtime module initialization and handler-shape validation still apply.
+Import helpers with relative paths such as `./lib/message`, and import packages normally. The gallery source editor provides a file picker, add/remove helper controls, and an exact-version dependency editor. `script_read`, `script_edit`, `canvas_read`, and `canvas_edit` accept `file` to target a helper. Omit `project` on write to retain it; when supplied, its files and dependency declarations replace the whole project. Read responses include the complete project snapshot. Historical views are read-only and restoring a revision restores every source file and its dependency lock.
 
-Keep the bundle within the 256 KiB UTF-8 source limit. Packages requiring native addons or a Node process cannot run in Workers. Rebuild from original source when changing bundled scripts; do not use targeted text edits on generated dependency internals. Worker and Node builtins remain external because the runtime supplies them. Scripts cannot import dependencies through adjacent files or package URLs.
+Dependency declarations accept exact npm versions only. The service resolves packages when declarations change, verifies tarball integrity, and archives the package source and types with the artifact revision. Edits with unchanged dependencies, replay, and execution use this archived snapshot without registry access. Package installation scripts never execute. Download/decompression, file counts, and stored content are bounded. The service only accesses the public npm registry and rejects arbitrary tarball origins.
 
-Agents can call `script_guide` to retrieve this workflow through MCP. `script_write` points to that guide; hosted `canvas_guide` includes the same script guidance.
+The compiler currently supports one version of each package. Conflicting transitive requirements and missing required peers produce explicit diagnostics. Browser React, ReactDOM and React Router dependencies use Canvas's own compatible runtime so hooks do not load a second React. Packages must support the browser or Workers environment; native addons and packages requiring a Node process are unsupported. Source archives contain up to 64 helper files (1 MiB total) and up to 64 resolved packages with a dependency lock bounded to 4,096 files and 8 MiB. The entrypoint remains limited to 256 KiB.
+
+Hosted Cloudflare and celld deployments use the same project contract. Local canvas CLI and MCP also persist the project beside the canvas and carry its files and dependency snapshot through history and remix. Use `canvas write NAME --file SOURCE --project PROJECT_JSON`, where the JSON contains files and exact dependency declarations, or pass `project` to local MCP `canvas_write`. Source-only local writes preserve the project; update helpers by replacing `project.files`. Standalone script tools remain hosted-only.
+
+Agents can call `script_guide` to retrieve the authoring contract through MCP.
+
+## Remix
+
+Select a working copy or historical revision in the gallery, then **Remix** and choose a new name. MCP offers `canvas_remix` and `script_remix`, with `new_name` and exactly one of `name` or `version_id`. Hosted calls optionally accept a new `slug`; otherwise it defaults to the destination name. Sources and destinations belong to the authenticated library and selected workspace.
+
+A remix creates a separate artifact and records its immutable source revision as provenance. Canvas browser and server sources stay paired. The new artifact starts with empty runtime data and no copied secret values; its hosted URL starts private. Destination names cannot overwrite existing drafts or archived artifacts, and URL collisions are rejected. Invalid source remains saved as a remix draft, with validation diagnostics; it receives a working URL only after successful validation. Remixing does not execute the request handler.
+
+## Schedules and execution history
+
+Hosted Cloudflare and celld servers can schedule scripts and canvas backends with native Durable Object alarms. Configure **Schedule** in the gallery, or call `script_schedule` / `canvas_schedule` with `name` and `action: "set"`. Supply exactly one of `interval_seconds` (at least 60) or a five-field `cron` expression. Cron accepts an IANA `timezone`, defaulting to `UTC`. Supply a relative HTTP `request` (path, method, headers, optional base64 body); the default is GET `/`.
+
+Use `action: "get"`, `"pause"`, `"resume"`, or `"run_now"` to inspect or control the schedule. Run-now executes the saved request, including while paused. Each artifact has one schedule. Removing a canvas server pauses its schedule. The local filesystem CLI/stdio runtime does not execute backends or run a scheduler; use `canvas server` for local scheduled execution.
+
+Schedules execute the latest validated revision, not an invalid draft or a historical preview. An occurrence is durably claimed before calling user code; missed intervals are skipped rather than accumulated. Failures and uncertain interrupted invocations are not automatically replayed. Application handlers should make repeated writes idempotent when that matters. A local celld server must be running for alarms to execute.
+
+`script_runs` and `canvas_runs` expose the latest 100 of up to 1,000 retained executions: revision, trigger, start/end times, duration, HTTP status and outcome. The gallery's **Run history** shows the same records. These records live in host-owned SQLite, separate from the user handler's database, and survive code updates and source restores. An `interrupted` record means completion is unknown and side effects may already have occurred.
+
+Script logs can be filtered by `run_id` from `script_runs`; the existing 100-entry log retention still applies. Script success describes the HTTP handler returning a response, not completion of `waitUntil` tasks or streamed response bodies. Canvas history includes response serialization; canvas console capture is not provided.

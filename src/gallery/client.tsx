@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { authClient, signInUrl } from "../auth/client-api";
 import type { GalleryArtifact, GalleryData } from "./types";
-import { LinkSettings, ScriptPanel } from "./hosted";
+import { ExecutionControls } from "./execution-controls";
+import { CanvasSourcePanel, LinkSettings, ScriptPanel } from "./hosted";
 import { canvasFileTransferUrl } from "../sdk/files";
+import { RemixPanel } from "./remix";
 
 type Scope = "current" | "all";
 type DetailTab = "preview" | "source";
@@ -58,6 +60,9 @@ const styles = `
   .script-panel details { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 12px; }
   .script-panel summary { cursor: pointer; }
   .script-panel pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .canvas-execution { padding: 8px; border-bottom: 1px solid var(--line); max-height: 45vh; overflow: auto; }
+  .canvas-execution summary { cursor: pointer; }
+  .canvas-execution td, .canvas-execution th { padding: 4px 8px; text-align: left; }
   .muted { color: var(--muted); }
   .canvas-stage { position: relative; display: flex; min-width: 0; min-height: 0; overflow: hidden; }
   .preview-frame { display: block; width: 100%; height: 100%; border: 0; }
@@ -145,6 +150,7 @@ function formatDate(value: string): string {
 }
 
 function App() {
+  const [remixing, setRemixing] = useState(false);
   const [creatingScript, setCreatingScript] = useState(false);
   const [scope, setScope] = useState<Scope>("current");
   const [query, setQuery] = useState("");
@@ -160,6 +166,7 @@ function App() {
   const [user, setUser] = useState<SessionUser | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const [accountError, setAccountError] = useState("");
+  const createdRemix = useRef<{name:string;workspace:string;kind:string} | null>(null);
   const createdScriptName = useRef<string | null>(null);
   const galleryController = useRef<AbortController | null>(null);
   const galleryRequest = useRef(0);
@@ -203,7 +210,10 @@ function App() {
       setRefreshEpoch((epoch) => epoch + 1);
       const created = createdScriptName.current;
       createdScriptName.current = null;
+      const remix = createdRemix.current;
+      createdRemix.current = null;
       setSelectedKey((current) => {
+        if (remix) return payload.artifacts.find(artifact => (artifact.kind ?? "canvas") === remix.kind && artifact.name === remix.name && artifact.workspace === remix.workspace)?.key ?? current;
         if (created) return payload.artifacts.find(artifact => artifact.kind === "script" && artifact.name === created)?.key ?? current;
         if (current && payload.artifacts.some((artifact) => artifact.key === current)) return current;
         return payload.artifacts[0]?.key ?? null;
@@ -363,6 +373,7 @@ function App() {
 
   const selectArtifact = (artifact: GalleryArtifact) => {
     setCreatingScript(false);
+    setRemixing(false);
     setSelectedKey(artifact.key);
     setSelectedVersion(artifact.working ? WORKING_VERSION : [...artifact.versions].sort((a, b) => b.revision - a.revision)[0]?.id ?? null);
   };
@@ -443,6 +454,7 @@ function App() {
                 <button type="button" aria-pressed={tab === "preview"} aria-controls="canvas-panel" onClick={() => setTab("preview")}>Preview</button>
                 <button type="button" aria-pressed={tab === "source"} aria-controls="canvas-panel" onClick={() => setTab("source")}>Source</button>
               </div> : null}
+              <button type="button" onClick={() => setRemixing(true)}>Remix</button>
               <a className="download-link" href={downloadUrl} download onClick={downloadSource}>Download source</a>
             </>
           ) : null}
@@ -486,6 +498,8 @@ function App() {
             ))}
           </aside>
           <div className="artifact-detail">
+          {remixing && !creatingScript && selectedArtifact && resolvedVersion ? <RemixPanel key={selectedArtifact.key + resolvedVersion} artifact={selectedArtifact} version={resolvedVersion} onCancel={() => setRemixing(false)} onSaved={async name => { createdRemix.current = {name,workspace:selectedArtifact.workspace,kind:selectedArtifact.kind ?? "canvas"}; await loadGallery(); setSelectedVersion("working"); setQuery(""); setRemixing(false); }} /> : null}
+          {!creatingScript && selectedArtifact && selectedArtifact.kind !== "script" && gallery?.capabilities?.links ? <div className="canvas-execution"><ExecutionControls key={selectedArtifact.key + "execution"} workspace={selectedArtifact.workspace} name={selectedArtifact.name} kind="canvas" /></div> : null}
           {!creatingScript && selectedArtifact && gallery?.capabilities?.links ? <LinkSettings key={selectedArtifact.key} artifact={selectedArtifact} onSaved={loadGallery} /> : null}
           <section id="canvas-panel" className="canvas-stage" aria-label={tab === "preview" ? "Canvas preview" : "Canvas source"}>
             {creatingScript ? (
@@ -509,6 +523,8 @@ function App() {
                   onLoad={() => setPreviewLoading(false)}
                 />
               </>
+            ) : gallery?.capabilities?.links ? (
+              <CanvasSourcePanel key={`${selectedArtifact.key}:${resolvedVersion}`} artifact={selectedArtifact} version={resolvedVersion} sourceUrl={artifactUrl("/api/source", selectedArtifact, resolvedVersion)} onSaved={async () => { setSelectedVersion("working"); await loadGallery(); }} />
             ) : source.status === "ready" ? (
               <pre className="source-code" tabIndex={0} aria-label={`Source of ${selectedArtifact.name}`}><code>{source.text}</code></pre>
             ) : source.status === "error" ? (

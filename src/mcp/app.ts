@@ -1,3 +1,4 @@
+import { readLocalProject } from "../localProject";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { canvasIdFromFile, assertRegularCanvas, ensureCanvasFileName } from "../canvasFile";
@@ -62,8 +63,9 @@ export async function canvasAppResult(service: CanvasService, selection: { name?
   const path = saved?.source_path ?? service.resolve(ensureCanvasFileName(selection.name!));
   if (!saved) assertRegularCanvas(path);
   const source = saved?.source ?? readFileSync(path, "utf8");
+  const project = saved?.project ?? readLocalProject(path);
   const runtime = runtimeIdentity();
-  const compiled = await compileCanvas(path, source);
+  const compiled = await compileCanvas(path, source, undefined, project);
   if (!compiled.ok || !compiled.js) return { ok: false, path, check: formatCanvasCheck(compiled.diagnostics), diagnostics: compiled.diagnostics };
   if (runtimeIdentity() !== runtime) throw new Error("Canvas SDK changed during compilation; retry");
   let state: Record<string, unknown> = {};
@@ -79,7 +81,7 @@ export async function canvasAppResult(service: CanvasService, selection: { name?
   }
   const history = new CanvasHistory(historyPath(service.env));
   try {
-    const version = saved ?? history.capture({ workspace: service.canvasesDir, name: canvasIdFromFile(path), sourcePath: path, source, runtime });
+    const version = saved ?? history.capture({ workspace: service.canvasesDir, name: canvasIdFromFile(path), sourcePath: path, source, project, runtime });
     // Delivery records a preview event, not evidence that a human saw the app.
     const eventId = history.served(version.id, state, "preview", service.env, runtime);
     return {

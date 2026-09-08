@@ -71,6 +71,11 @@ const slugProperties = {
   slug: { type: "string", minLength: 1, maxLength: 80, pattern: "^[a-z0-9](?:[a-z0-9-]{0,78}[a-z0-9])?$", description: "Chosen root URL slug, unique across this deployment." },
   access: { type: "string", enum: ["private", "public"], description: "Private uses library permissions; public allows external HTTP callers. Default private." },
 };
+for (const kind of ["canvas", "script"]) {
+  // Canvas is shared with local MCP; hosted script authoring uses this contract too.
+  if (!CLOUD_MCP_TOOLS.some(tool => tool.name === kind + "_remix")) CLOUD_MCP_TOOLS.push({name:kind + "_remix",description:"Copy a working artifact or immutable revision to a new name in this workspace. Preserves source provenance. Starts with fresh state, storage, and secrets and a private URL. Never overwrites an existing artifact.",inputSchema:{type:"object",properties:{name:{type:"string",minLength:1},version_id:{type:"string",minLength:1},new_name:{type:"string",minLength:1},slug:slugProperties.slug},required:["new_name"],oneOf:[{required:["name"]},{required:["version_id"]}],additionalProperties:false}});
+  else Object.assign(CLOUD_MCP_TOOLS.find(tool => tool.name === kind + "_remix")!.inputSchema.properties!, {slug:slugProperties.slug});
+}
 const canvasWrite = CLOUD_MCP_TOOLS.find(tool => tool.name === "canvas_write")!;
 Object.assign(canvasWrite.inputSchema.properties!, slugProperties);
 function addScriptTool(name: string, description: string, properties: Record<string, object>, required: string[] = []) {
@@ -83,7 +88,7 @@ addScriptTool("artifact_link", "Give a canvas or script a chosen root URL. Canva
 }, ["kind", "name", "slug"]);
 addScriptTool("script_guide", "Read the hosted script and root-URL authoring guide before creating a script. Covers runtime, access, storage, secrets, validation, HTTP requests, and bundling third-party dependencies.", {});
 CLOUD_MCP_TOOLS[CLOUD_MCP_TOOLS.length - 1]!.annotations = { readOnlyHint: true };
-addScriptTool("script_write", "Call script_guide first. Create or replace arbitrary Workers-compatible TypeScript exporting default { fetch(request, env, ctx) }. Saved drafts and history are retained even when validation fails; only valid updates replace the running code. Scripts have outbound fetch, env.secrets, and env.sql for persistent SQLite. Slug defaults to the name; URLs use /<slug>. One module only: Workers/Node builtins or prebundled third-party code (see script_guide). No package installation at request time. This loads the module for validation but does not execute the handler.", {
+addScriptTool("script_write", "Call script_guide first. Create or replace arbitrary Workers-compatible TypeScript exporting default { fetch(request, env, ctx) }. Saved drafts and history are retained even when validation fails; only valid updates replace the running code. Scripts have outbound fetch, env.secrets, and env.sql for persistent SQLite. Slug defaults to the name; URLs use /<slug>. Use project.files for relative modules and project.dependencies for exact package versions. Dependencies are resolved and integrity-verified at write time, then archived as a source lock; execution and replay do not install packages. This loads the module for validation but does not execute the handler.", {
   ...nameProperty, contents: { type: "string", maxLength: 262144 }, ...slugProperties,
 }, ["name", "contents"]);
 addScriptTool("script_read", "Read script source with bounded line ranges, optionally from a historical version. Does not execute the script.", {
@@ -97,7 +102,9 @@ addScriptTool("script_run", "Execute a script's last validated handler. request.
 addScriptTool("script_history", "List script source history, 100 entries per page.", { ...nameProperty, ...pageProperty });
 addScriptTool("script_version", "Read an immutable script source revision. Never returns secrets.", { version_id: { type: "string" } }, ["version_id"]);
 addScriptTool("script_restore", "Restore a script revision as a new draft and activate it if validation succeeds. Persistent storage remains live.", { ...nameProperty, version_id: { type: "string" } }, ["name", "version_id"]);
-addScriptTool("script_logs", "Read bounded recent execution logs and errors without executing the script.", { ...nameProperty, limit: { type: "integer", minimum: 1, maximum: 100 } }, ["name"]);
+addScriptTool("script_schedule", "Inspect or configure recurring execution of the latest validated script. Use action set with exactly one of interval_seconds or five-field cron (timezone defaults UTC) and an optional request. Pause/resume preserve settings; run_now explicitly invokes the saved request, including while paused. Failed or interrupted runs are never automatically replayed; missed occurrences are skipped.", {...nameProperty,action:{type:"string",enum:["get","set","pause","resume","run_now"]},interval_seconds:{type:"integer",minimum:60,maximum:31536000},cron:{type:"string",maxLength:256},timezone:{type:"string",maxLength:100},request:CANVAS_REQUEST_SCHEMA},["name"]);
+addScriptTool("script_runs", "Inspect recent invocation outcomes, revision hashes, triggers, and HTTP-handler durations. Retains 1000 runs, returns the latest 100. Interrupted means completion is unknown; background waitUntil work and streamed response completion are not part of HTTP-handler success.", {...nameProperty,limit:{type:"integer",minimum:1,maximum:100}},["name"]);
+addScriptTool("script_logs", "Read bounded recent execution logs and errors without executing the script. Optionally filter by run_id from script_runs.", { ...nameProperty, run_id:{type:"string"}, limit: { type: "integer", minimum: 1, maximum: 100 } }, ["name"]);
 addScriptTool("script_secrets", "Set or delete per-script secrets (null deletes). Omit secrets to list names. Values are never returned or added to source history.", { ...nameProperty, secrets: { type: "object", maxProperties: 32, additionalProperties: { type: ["string", "null"], maxLength: 4096 } } }, ["name"]);
 
 addScriptTool("plugins_list", "List deployment-installed plugins, browser availability, and operation schemas and read-only hints. Does not execute operations.", {});
@@ -108,3 +115,19 @@ addScriptTool("canvas_plugin_call", "Call a deployment-installed server function
   plugin: { type: "string", minLength: 1 }, operation: { type: "string", minLength: 1 }, input: {},
 }, ["plugin", "operation", "input"]);
 CLOUD_MCP_TOOLS[CLOUD_MCP_TOOLS.length - 1]!.annotations = { readOnlyHint: false, destructiveHint: true, openWorldHint: true };
+
+addScriptTool("canvas_schedule", "Configure recurring requests to a canvas's latest validated native server. Uses Durable Object alarms, with no automatic retry after uncertain side effects. Exactly one of interval_seconds or cron is required for set; timezone defaults to UTC. run_now executes the configured request, including while paused. Historical previews do not change the scheduled revision.", {
+  name: { type: "string", minLength: 1 }, action: { type: "string", enum: ["get", "set", "pause", "resume", "run_now"], default: "get" },
+  interval_seconds: { type: "integer", minimum: 60, maximum: 31536000 }, cron: { type: "string", maxLength: 256 }, timezone: { type: "string", maxLength: 100 }, request: CANVAS_REQUEST_SCHEMA,
+}, ["name"]);
+addScriptTool("canvas_runs", "Read recent native canvas server invocations, their source revision, trigger, duration and outcome. Host-owned history is separate from application SQLite. An interrupted run may already have performed writes and is never automatically retried.", { name: { type: "string", minLength: 1 }, limit: { type: "integer", minimum: 1, maximum: 100 } }, ["name"]);
+CLOUD_MCP_TOOLS[CLOUD_MCP_TOOLS.length - 1]!.annotations = { readOnlyHint: true };
+// Project source is additive to legacy entrypoints; dependency locks are generated by the service.
+const projectProperty = { type: "object", properties: {
+  files: { type: "object", maxProperties: 64, additionalProperties: { type: "string" }, description: "Relative helper modules (.ts/.tsx/.js/.json). Import from ./path. Full replacement; omit project to preserve existing project." },
+  dependencies: { type: "object", maxProperties: 32, additionalProperties: { type: "string" }, description: "npm package names mapped to exact versions, for example {hono: '4.13.7'}. Resolved only on dependency changes; source and transitive dependency contents are archived together." },
+}, additionalProperties: false };
+for (const tool of CLOUD_MCP_TOOLS) {
+  if (tool.name === "canvas_write" || tool.name === "script_write") tool.inputSchema.properties!.project = projectProperty;
+  if (["canvas_read", "canvas_edit", "script_read", "script_edit"].includes(tool.name)) tool.inputSchema.properties!.file = {type:"string", description:"Select a relative project.files helper module instead of the entrypoint."};
+}

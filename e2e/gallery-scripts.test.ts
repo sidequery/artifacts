@@ -15,10 +15,16 @@ test("gallery edits scripts without execution and runs requests only on demand",
     if (url.pathname === "/api/session") return Response.json({});
     if (url.pathname === "/api/gallery") return Response.json({ workspace: "default", artifacts: hosted ? artifacts : [{ key: "local", name: "local", workspace: "default", working: true, versions: [] }], ...(hosted ? { capabilities: { scripts: true, links: true } } : {}) });
     if (url.pathname === "/gallery/preview") return new Response("<p>Canvas preview</p>", { headers: { "content-type": "text/html" } });
-    if (url.pathname === "/api/source") return new Response('export default { fetch() { return new Response("hello"); } };');
+    if (url.pathname === "/api/source") {
+      const source = 'export default { fetch() { return new Response("hello"); } };';
+      return url.searchParams.get("format") === "json"
+        ? Response.json({ source, project: { files: {}, dependencies: {}, lock: {} } })
+        : new Response(source);
+    }
     if (url.pathname === "/api/tools") {
       const call = await request.json() as typeof calls[number]; calls.push(call);
       if (call.name === "script_write" && call.arguments.name !== "hello") artifacts.push({ key: "script:new", kind: "script", name: call.arguments.name, workspace: "default", working: true, versions: [] });
+      if (call.name === "script_remix") artifacts.push({key:"script:remixed",kind:"script",name:call.arguments.new_name,workspace:"default",working:true,versions:[]});
       if (call.name === "artifact_link") return Response.json({ error: "Slug is already in use" }, { status: 409 });
       return Response.json({ structuredContent: { response: { status: 200, statusText: "OK", headers: [["content-type", "text/plain"]], body: Buffer.from("<script>alert(1)</script> 🌍").toString("base64") } } });
     }
@@ -51,6 +57,13 @@ test("gallery edits scripts without execution and runs requests only on demand",
     await page.getByRole("button", { name: "new-handler Script", exact: true }).waitFor();
     expect(await page.getByRole("button", { name: "new-handler Script", exact: true }).getAttribute("aria-current")).toBe("true");
     expect(calls.filter(call => call.name === "script_run")).toHaveLength(1);
+    await page.getByRole("button", {name:"Remix",exact:true}).click();
+    await page.getByRole("textbox", {name:"Remix name"}).fill("remixed-handler");
+    await page.getByRole("button", {name:"Create remix",exact:true}).click();
+    const remixedRow=page.getByRole("button",{name:"remixed-handler Script",exact:true});
+    await remixedRow.waitFor();
+    expect(await remixedRow.getAttribute("aria-current")).toBe("true");
+    expect(calls.at(-1)).toEqual({name:"script_remix",arguments:{name:"new-handler",new_name:"remixed-handler"}});
     hosted = false;
     await page.reload();
     await page.getByTitle("Preview of local").waitFor();

@@ -10,14 +10,14 @@ async function start(directory: string, identity: string) {
     plugins: [{ name: "compiler-probe", setup(build) {
       build.onLoad({ filter: /\/cloudflare\/compiler\.ts$/ }, () => ({ loader: "ts", contents: `
         globalThis.compilerProbe = { allowed: true, client: 0, server: 0 };
-        function compile(source, kind) {
+        function compile(source, kind, project) {
           if (!globalThis.compilerProbe.allowed) throw new Error("Compilation was invoked by a read");
           globalThis.compilerProbe[kind]++;
           return source.includes("invalid") ? { ok: false, diagnostics: [{ severity: "error", message: "Invalid source" }] }
-            : { ok: true, js: JSON.stringify({ source, kind, runtime: ${JSON.stringify(identity)} }), diagnostics: [] };
+            : { ok: true, js: JSON.stringify({ source, kind, project, runtime: ${JSON.stringify(identity)} }), diagnostics: [] };
         }
-        export async function compileCanvasSource(source) { return compile(source, "client"); }
-        export async function compileCanvasServerSource(source) { return compile(source, "server"); }
+        export async function compileCanvasSource(source, project) { return compile(source, "client", project); }
+        export async function compileCanvasServerSource(source, project) { return compile(source, "server", project); }
         export async function compileScriptSource() { throw new Error("Unexpected script compile"); }
         export function typecheckCanvasSource() { return []; }
         export function typecheckCanvasServerSource() { return []; }
@@ -52,6 +52,7 @@ test("edits persist compiled revisions; every read and restart works with the co
     expect(first.isError).not.toBe(true);
     const firstCanvas = first._meta.canvas;
     const firstVersion = firstCanvas.versionId;
+    expect(await call("/activated", { name: "example" })).toMatchObject({ version_id: firstVersion, code: expect.stringContaining("server-one") });
     expect(await call("/compiler", { allowed: false })).toMatchObject({ client: 1, server: 1 });
     for (let index = 0; index < 3; index++) {
       expect((await tool("canvas_open", { name: "example" }))._meta.canvas.js).toBe(firstCanvas.js);
@@ -100,10 +101,32 @@ test("edits persist compiled revisions; every read and restart works with the co
     expect((await call("/preview", { version_id: firstVersion }))._meta.canvas.js).toBe(firstCanvas.js);
     expect((await call("/active", { slug: "example" }))._meta.canvas.js).toBe(upgraded._meta.canvas.js);
 
+    // Project-only edits compile fresh output and preserve archived replay and remix snapshots.
+    await call("/compiler", { allowed: true });
+    const projectWrite = await tool("canvas_write", { name: "project", contents: "project-client", server: "project-server", project: { files: { "helper.ts": "original-helper" } } });
+    expect(projectWrite.isError).not.toBe(true);
+    const projectFirst = projectWrite._meta.canvas;
+    const projectEdit = await tool("canvas_edit", { name: "project", file: "helper.ts", edits: [{ old_text: "original-helper", new_text: "updated-helper" }] });
+    expect(projectEdit.isError).not.toBe(true);
+    expect(projectEdit._meta.canvas.js).toContain("updated-helper");
+    expect(await call("/activated", { name: "project" })).toMatchObject({ version_id: projectEdit._meta.canvas.versionId, code: expect.stringContaining("updated-helper") });
+    expect(projectEdit._meta.canvas.js).not.toBe(projectFirst.js);
+    expect(projectEdit._meta.canvas.versionId).not.toBe(projectFirst.versionId);
+    await call("/compiler", { allowed: false });
+    expect((await call("/preview", { version_id: projectFirst.versionId }))._meta.canvas.js).toBe(projectFirst.js);
+    expect((await tool("canvas_open", { name: "project" }))._meta.canvas.js).toBe(projectEdit._meta.canvas.js);
+    expect(JSON.parse(atob((await call("/request", { version_id: projectFirst.versionId })).body)).code).toContain("original-helper");
+    await call("/compiler", { allowed: true });
+    const remixed = await tool("canvas_remix", { version_id: projectFirst.versionId, new_name: "project-remix" });
+    expect(remixed.isError).not.toBe(true);
+    expect(remixed._meta.canvas.js).toContain("original-helper");
+    expect(remixed._meta.canvas.js).not.toContain("updated-helper");
+    await call("/compiler", { allowed: false });
+
     // Source-only legacy revisions are migrated explicitly, never during reads.
     const legacy = await call("/legacy", { name: "legacy", source: "legacy-source", server_source: null });
     expect((await call("/preview", { version_id: legacy.version.id })).check).toContain("canvas_compile");
-    expect(await call("/compiler", { allowed: true })).toMatchObject({ client: 1, server: 1 });
+    expect(await call("/compiler", { allowed: true })).toMatchObject({ client: 4, server: 4 });
     expect(result(await tool("canvas_compile", { name: "legacy" })).ok).toBe(true);
     // Compiling a draft must not silently pin or change an archived revision.
     await call("/compiler", { allowed: false });
@@ -112,6 +135,6 @@ test("edits persist compiled revisions; every read and restart works with the co
     expect(result(await tool("canvas_compile", { version_id: legacy.version.id })).ok).toBe(true);
     await call("/compiler", { allowed: false });
     expect((await call("/preview", { version_id: legacy.version.id }))._meta.canvas.js).toContain("legacy-source");
-    expect(await call("/compiler", { allowed: false })).toMatchObject({ client: 2, server: 1 });
+    expect(await call("/compiler", { allowed: false })).toMatchObject({ client: 5, server: 4 });
   } finally { await runtime.dispose(); await rm(directory, { recursive: true, force: true }); }
 }, 60000);

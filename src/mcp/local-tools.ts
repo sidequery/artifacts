@@ -58,13 +58,17 @@ async function callTool(
   if (name === "canvas_read" || name === "canvas_edit") {
     if (typeof args.name !== "string") throw new Error("canvas name must be a string");
     if (name === "canvas_read") {
-      return text(JSON.stringify(service.readRange(args.name, { start_line: args.start_line, end_line: args.end_line } as ReadOptions)));
+      return text(JSON.stringify(service.readRange(args.name, { file: args.file, start_line: args.start_line, end_line: args.end_line } as ReadOptions)));
     }
-    const result = service.edit(args.name, args.edits as CanvasEdit[], args.expected_hash as string | undefined);
+    const result = service.edit(args.name, args.edits as CanvasEdit[], args.expected_hash as string | undefined, args.file as string | undefined);
     return withPreview(service, result, { name: args.name });
   }
   if (name === "canvas_history") return text(JSON.stringify({ versions: service.history(args.name === undefined ? undefined : String(args.name)) }, null, 2));
   if (name === "canvas_version") return text(JSON.stringify(service.version(String(args.version_id)), null, 2));
+  if (name === "canvas_remix") {
+    const result = service.remix(args as Parameters<CanvasService["remix"]>[0]);
+    return withPreview(service, result, { name: result.name });
+  }
   if (name === "canvas_restore") {
     const result = service.restore(String(args.version_id));
     return withPreview(service, result, { name: canvasIdFromFile(result.path) });
@@ -74,7 +78,7 @@ async function callTool(
   }
   if (name === "canvas_write") {
     if (args.target !== undefined && args.target !== "inline" && args.target !== "herdr") throw new Error("target must be inline or herdr");
-    const written = service.write(String(args.name), String(args.contents ?? ""));
+    const written = args.project === undefined ? service.write(String(args.name), String(args.contents ?? "")) : await service.writeProject(String(args.name), String(args.contents ?? ""), args.project);
     let opened: unknown;
     if (args.target === "herdr" && written.ok) {
       opened = await service.open(written.path);

@@ -1,13 +1,14 @@
+import { readLocalProject, materializeProject, projectDiagnostics } from "./localProject";
+import type { ArtifactProject } from "../cloudflare/project";
 import type { BunPlugin } from "bun";
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
-import { sandboxToDiagnostics, type Diagnostic } from "./diagnostics";
+import { type Diagnostic } from "./diagnostics";
 import { PLUGIN_ROOT, SDK_ENTRY, WRAPPER_ENTRY } from "./paths";
 import { loadBrowserPlugins } from "./plugins/browser";
 import type { BrowserPlugins } from "./plugins/types";
-import { scanCanvasSource } from "./sandbox";
 
 const requireFromPlugin = createRequire(join(PLUGIN_ROOT, "package.json"));
 
@@ -41,21 +42,30 @@ export function canvasAliasPlugin(canvasPath: string, source?: string, plugins: 
       build.onResolve({ filter: /^(react|react-dom|react-router)(\/.*)?$/ }, (args) => ({
         path: requireFromPlugin.resolve(args.path),
       }));
+      // User modules resolve only inside the materialized snapshot, never host files.
+      build.onResolve({ filter: /.*/ }, args => {
+        if (!args.importer.startsWith(dirname(absCanvas) + "/")) return;
+        const path = Bun.resolveSync(args.path, args.resolveDir || dirname(args.importer));
+        if (!path.startsWith(dirname(absCanvas) + "/")) throw new Error(`import escapes canvas project: ${args.path}`);
+        return { path };
+      });
+
     },
   };
 }
 
-export async function compileCanvas(canvasPath: string, snapshot?: string, plugins: BrowserPlugins = loadBrowserPlugins()): Promise<CompileResult> {
+export async function compileCanvas(canvasPath: string, snapshot?: string, plugins: BrowserPlugins = loadBrowserPlugins(), project: ArtifactProject = readLocalProject(canvasPath)): Promise<CompileResult> {
   const absCanvas = resolve(canvasPath);
   const source = snapshot ?? readFileSync(absCanvas, "utf8");
-  const violations = scanCanvasSource(source, Object.keys(plugins.paths));
+  const violations = projectDiagnostics(absCanvas, source, project, Object.keys(plugins.paths));
   if (violations.length > 0) {
     return {
       ok: false,
-      diagnostics: sandboxToDiagnostics(absCanvas, violations),
+      diagnostics: violations,
     };
   }
 
+  const snapshotProject = materializeProject(source, project);
   let result: Awaited<ReturnType<typeof Bun.build>>;
   try {
     result = await Bun.build({
@@ -67,21 +77,23 @@ export async function compileCanvas(canvasPath: string, snapshot?: string, plugi
       define: {
         "process.env.NODE_ENV": JSON.stringify("production"),
       },
-      plugins: [canvasAliasPlugin(absCanvas, source, plugins)],
+      plugins: [canvasAliasPlugin(snapshotProject.path, source, plugins)],
     });
   } catch (error) {
+    snapshotProject.dispose();
     return {
       ok: false,
       diagnostics: [
         {
           severity: "error",
-          message: error instanceof Error ? error.message : String(error),
+          message: error instanceof AggregateError ? [...error.errors].map(String).join("\n") : error instanceof Error ? error.message : String(error),
           file: absCanvas,
         },
       ],
     };
   }
 
+  snapshotProject.dispose();
   if (!result.success) {
     return {
       ok: false,

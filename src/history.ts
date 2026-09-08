@@ -1,3 +1,5 @@
+import { readLocalProject } from "./localProject";
+import { normalizeProject, projectSourceHash, type ArtifactProject } from "../cloudflare/project";
 import { Database } from "bun:sqlite";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
@@ -75,31 +77,45 @@ export class CanvasHistory {
           served_at text not null, pane_id text, session_id text,
           mode text not null, initial_state text not null, runtime text not null
         );
+        create table if not exists artifact_remixes (
+          artifact_id text primary key references artifacts(id),
+          source_version_id text not null references versions(id)
+        );
         create index if not exists serve_events_version on serve_events(version_id, served_at);
         pragma user_version = 1;
       `);
+      const columns = this.db.query("pragma table_info(versions)").all() as { name: string }[];
+      if (!columns.some(column => column.name === "project_json")) this.db.exec("alter table versions add column project_json text");
     }).immediate();
   }
 
   close() { this.db.close(); }
 
-  capture(input: { workspace: string; name: string; sourcePath: string; source: string; runtime: string; reason?: string; restoredFrom?: string; force?: boolean }): Version {
+  capture(input: { workspace: string; name: string; sourcePath: string; source: string; project?: ArtifactProject; runtime: string; reason?: string; restoredFrom?: string; force?: boolean }): Version {
     return this.db.transaction(() => {
       const workspace = resolve(input.workspace);
       this.db.query("insert or ignore into artifacts values (?, ?, ?, ?, ?)").run(randomUUID(), workspace, input.name, resolve(input.sourcePath), new Date().toISOString());
       const artifact = this.db.query("select id from artifacts where workspace = ? and name = ?").get(workspace, input.name) as { id: string };
-      const sourceHash = hash(input.source);
+      const project = input.project ?? readLocalProject(input.sourcePath);
+      const sourceHash = projectSourceHash(input.source, project);
       const latest = this.db.query("select id, revision, source_hash from versions where artifact_id = ? order by revision desc limit 1").get(artifact.id) as Version | null;
       if (!input.force && latest && latest.source_hash === sourceHash) return this.version(latest.id)!;
       const id = randomUUID();
-      this.db.query("insert into versions values (?, ?, ?, ?, ?, ?, ?, ?, ?)").run(id, artifact.id, (latest?.revision ?? 0) + 1, input.source, sourceHash, input.runtime, new Date().toISOString(), input.reason ?? "served", input.restoredFrom ?? null);
+      this.db.query("insert into versions (id, artifact_id, revision, source, source_hash, runtime, created_at, reason, restored_from, project_json) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(id, artifact.id, (latest?.revision ?? 0) + 1, input.source, sourceHash, input.runtime, new Date().toISOString(), input.reason ?? "served", input.restoredFrom ?? null, JSON.stringify(project));
       return this.version(id)!;
     }).immediate();
+  }
+
+  origin(artifactId: string) {
+    return this.db.query(`select a.name as source_name, a.id as source_artifact_id, v.id as source_version_id
+      from artifact_remixes r join versions v on v.id = r.source_version_id
+      join artifacts a on a.id = v.artifact_id where r.artifact_id = ?`).get(artifactId);
   }
 
   version(id: string, workspace?: string): Version | null {
     const result = this.db.query(`select v.*, a.workspace, a.name, a.source_path from versions v
       join artifacts a on a.id = v.artifact_id where v.id = ?`).get(id) as Version | null;
+    if (result) result.project = normalizeProject(JSON.parse((result as Version & { project_json: string | null }).project_json ?? "null"));
     return result && (!workspace || result.workspace === resolve(workspace)) ? result : null;
   }
 

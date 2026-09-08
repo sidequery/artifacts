@@ -44,6 +44,7 @@
     "src/diagnostics.ts",
     "src/gallery/client.tsx",
     "src/gallery/hosted.tsx",
+    "src/gallery/remix.tsx",
     "src/gallery/server.ts",
     "src/gallery/types.ts",
     "src/herdr.ts",
@@ -87,7 +88,11 @@
     "src/serve.ts",
     "src/service.ts",
     "src/typecheck.ts",
-    "src/viewer.ts"
+    "src/viewer.ts",
+    "src/localProject.ts",
+    "cloudflare/project.ts",
+    "src/gallery/execution-controls.tsx",
+    "src/gallery/project-editor.tsx"
   ],
   "publishConfig": {
     "access": "public"
@@ -97,7 +102,7 @@
     "mcp": "bun run src/cli.ts mcp",
     "test": "bun test src scripts/prepare-plugins.test.ts examples/runner-status --timeout 30000",
     "test:e2e": "bun test e2e/herdr.e2e.test.ts",
-    "test:mcp-ui": "bun test e2e/mcp-app.test.ts e2e/gallery-scripts.test.ts e2e/browser-plugins.test.ts e2e/plugin-bridge.test.ts e2e/routing.test.ts e2e/runner-status.test.ts --timeout 30000",
+    "test:mcp-ui": "bun test e2e/mcp-app.test.ts e2e/gallery-scripts.test.ts e2e/execution-controls.test.ts e2e/browser-plugins.test.ts e2e/plugin-bridge.test.ts e2e/routing.test.ts e2e/runner-status.test.ts --timeout 30000",
     "typecheck": "tsc --noEmit && tsc -p examples/runner-status/tsconfig.json --noEmit && tsc -p examples/runner-status/tsconfig.local.json --noEmit",
     "dev:cloudflare": "wrangler dev --local --var ENVIRONMENT:local",
     "prepare:celld": "bun run scripts/prepare-celld.ts",
@@ -121,10 +126,12 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "better-auth": "1.7.3",
+    "cron-parser": "5.10.0",
     "esbuild": "0.28.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router": "^7",
+    "semver": "7.7.3",
     "typescript": "5.9.3"
   },
   "devDependencies": {
@@ -133,6 +140,7 @@
     "@cloudflare/workers-types": "5.20260907.1",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@types/bun": "^1.3.14",
+    "@types/semver": "7.7.1",
     "ajv": "8.20.0",
     "hono": "4.13.7",
     "jose": "6.2.12",
