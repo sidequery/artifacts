@@ -21,8 +21,7 @@ The gallery, source operations, history, typechecking and compilation work witho
 
 ## Install
 
-After the first registry release, install the CLI with Bun; a source checkout is
-not required. The package is currently being prepared and is not published yet.
+Install the CLI with Bun; a source checkout is not required.
 
 ```bash
 bun add --global @sidequery/artifacts

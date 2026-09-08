@@ -102,9 +102,10 @@ export class ArtifactBackend extends DurableObject<BackendEnv> {
         const worker = this.env.LOADER.get(input.hash, async () => ({
           compatibilityDate: "2026-09-06",
           mainModule: "artifact-server.js",
-          // Old immutable compiled revisions export CanvasServer.
+          // Old immutable compiled revisions export CanvasServer. Preserve the
+          // default Worker object too: celld requires it on the main module.
           modules: {
-            "artifact-server.js": 'import * as source from "./source.js"; export const ArtifactServer = source.ArtifactServer ?? source.CanvasServer;',
+            "artifact-server.js": 'import * as source from "./source.js"; export const ArtifactServer = source.ArtifactServer ?? source.CanvasServer; export default source.default;',
             "source.js": input.code,
           },
           globalOutbound: null,

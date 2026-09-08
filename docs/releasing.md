@@ -21,7 +21,13 @@ is stored in GitHub or 1Password for routine releases.
 The package must first exist on npm before its trusted publisher can be configured.
 For the first approved release, use the local validation and publication steps
 below with interactive npm authentication (or a temporary bootstrap credential).
-Then open `@sidequery/artifacts` package settings on npm and add this trusted publisher:
+Then configure the trusted publisher with the npm CLI (11.17 or newer):
+
+```bash
+npm trust github @sidequery/artifacts --repo sidequery/artifacts --file publish.yml --allow-publish
+```
+
+The equivalent settings on the npm package page are:
 
 | Field | Value |
 | --- | --- |
@@ -51,7 +57,7 @@ publication verifies the connection. Subsequent releases need a new package vers
    archive with `ARTIFACTS_PACKAGE_ARCHIVE=/tmp/sidequery-artifacts-VERSION.tgz
    CELLD_PACKAGE_INTEGRATION=1 bun test scripts/package.integration.test.ts --timeout 360000`.
 6. After release approval and authentication for the `@sidequery` scope,
-   publish that tarball with `bun publish /tmp/sidequery-artifacts-VERSION.tgz --access public`.
+   publish that tarball with `npm publish /tmp/sidequery-artifacts-VERSION.tgz --access public --ignore-scripts`.
 
 A package build is not a registry publication. CI validates packaging without
 publishing. Never enable a login daemon as an install or publish lifecycle script.
