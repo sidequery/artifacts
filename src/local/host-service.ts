@@ -136,7 +136,8 @@ export async function runHost(config: HostConfig) {
       cwd: directory, stdin: "ignore", stdout: "inherit", stderr: "inherit",
       env: hostRuntimeEnvironment(config),
     });
-    const deadline = Date.now() + 90_000;
+    // Busy build hosts can take several minutes to bundle and start workerd.
+    const deadline = Date.now() + 300_000;
     let ready = false;
     while (!stopping && child.exitCode === null && Date.now() < deadline) {
       try {

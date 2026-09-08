@@ -206,7 +206,7 @@ export class HostManager {
     await this.checked("/bin/launchctl", ["enable", `${this.domain}/${label}`]);
     await this.checked("/bin/launchctl", ["bootstrap", this.domain, this.plist]);
     try {
-      const deadline = Date.now() + 180_000;
+      const deadline = Date.now() + 360_000;
       while (Date.now() < deadline) {
         const status = await this.status();
         if (status.ready) return status;
