@@ -13,6 +13,7 @@ import type { PluginRequest, PluginUser } from "../src/plugins/types";
 import galleryBridge from "../dist/cloudflare/gallery-request.json";
 import navigationHost from "../dist/cloudflare/navigation-host.json";
 import { artifactApiRequest, artifactApiResponse } from "./artifact-api";
+import { SCRIPT_HEADER } from "./script-backend";
 
 export async function identify(request: Request, env: Env): Promise<{ privateKey: string; user: PluginUser } | Response> {
   if (env.AUTH_MODE && !["access", "better-auth"].includes(env.AUTH_MODE)) return Response.json({ error: "Invalid AUTH_MODE" }, { status: 503 });
@@ -49,8 +50,7 @@ export async function artifactRoute(request: Request, env: Env): Promise<Respons
     if (origin && origin !== url.origin) return new Response("Origin is not allowed", { status: 403 });
   }
   if (link.kind === "script") {
-    const active = await env.SCRIPTS.getByName(link.libraryKey).active({ workspace: link.workspace, name: link.name, hash: link.script_hash });
-    if (!active) return new Response("Script has no valid version", { status: 409 });
+    if (!link.script_hash) return new Response("Script has no valid version", { status: 409 });
     // Management session credentials never become inputs to user-authored code.
     // Public script Authorization headers remain available for application auth.
     const headers = new Headers(request.headers);
@@ -59,9 +59,10 @@ export async function artifactRoute(request: Request, env: Env): Promise<Respons
     headers.delete("cf-access-client-id");
     headers.delete("cf-access-client-secret");
     if (link.access === "private") headers.delete("authorization");
+    headers.set(SCRIPT_HEADER, JSON.stringify({libraryKey: link.libraryKey, workspace: link.workspace, name: link.name, hash: link.script_hash, original: headers.get(SCRIPT_HEADER)}));
     const input = new Request(request, { headers });
     const backend = env.SCRIPT_BACKENDS.getByName(JSON.stringify([link.libraryKey, link.workspace, link.name]));
-    const response = await backend.request({ ...active, request: input });
+    const response = await backend.fetch(input);
     const output = new Headers(response.headers);
     output.delete("set-cookie");
     // HTML returned by scripts cannot acquire the management origin's authority.

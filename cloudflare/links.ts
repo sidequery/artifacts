@@ -75,19 +75,20 @@ export class ArtifactLinks extends DurableObject<unknown> {
   }
   /** Swap executable revision, URL and access in one storage transaction. */
   commit(target: ArtifactTarget, generation: number, update: LinkUpdate): ArtifactLink | null {
-    return this.ctx.storage.transactionSync(() => {
-      if (this.generation(target) !== generation) return null;
-      const previous = this.find(target);
-      update = { ...this.draft(target), ...update };
-      const slug = this.check(target, update.slug ?? previous?.slug ?? target.name);
-      const access = update.access ?? previous?.access ?? "private";
-      if (access !== "private" && access !== "public") throw new Error("Invalid access");
-      const link: ArtifactLink = { ...previous, ...target, ...update, slug, access, generation };
-      this.ctx.storage.sql.exec("delete from links where target = ?", key(target));
-      this.ctx.storage.sql.exec("insert into links values (?, ?, ?)", slug, key(target), JSON.stringify(link));
-      this.ctx.storage.sql.exec("delete from pending_links where target = ?", key(target));
-      return link;
-    });
+    return this.ctx.storage.transactionSync(() => this.commitInTransaction(target, generation, update));
+  }
+  private commitInTransaction(target: ArtifactTarget, generation: number, update: LinkUpdate): ArtifactLink | null {
+    if (this.generation(target) !== generation) return null;
+    const previous = this.find(target);
+    update = { ...this.draft(target), ...update };
+    const slug = this.check(target, update.slug ?? previous?.slug ?? target.name);
+    const access = update.access ?? previous?.access ?? "private";
+    if (access !== "private" && access !== "public") throw new Error("Invalid access");
+    const link: ArtifactLink = { ...previous, ...target, ...update, slug, access, generation };
+    this.ctx.storage.sql.exec("delete from links where target = ?", key(target));
+    this.ctx.storage.sql.exec("insert into links values (?, ?, ?)", slug, key(target), JSON.stringify(link));
+    this.ctx.storage.sql.exec("delete from pending_links where target = ?", key(target));
+    return link;
   }
   set(input: ArtifactTarget & { slug: string; access?: "private" | "public" }): ArtifactLink {
     return this.ctx.storage.transactionSync(() => {
@@ -95,7 +96,7 @@ export class ArtifactLinks extends DurableObject<unknown> {
       // Explicit metadata actions replace draft intent, including pending public
       // access, so a subsequent source fix cannot undo a revocation.
       this.ctx.storage.sql.exec("delete from pending_links where target = ?", key(input));
-      return this.commit(input, this.begin(input), input)!;
+      return this.commitInTransaction(input, this.begin(input), input)!;
     });
   }
   activate(target: ArtifactTarget, generation: number, version_id: string): boolean {

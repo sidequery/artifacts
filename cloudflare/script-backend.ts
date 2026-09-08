@@ -5,6 +5,7 @@ import type { ArtifactLinks } from "./links";
 import { nativeRequest } from "./backend";
 import type { ArtifactHttpRequest } from "../src/httpTypes";
 import { sha256 } from "./library";
+import { scriptResponse } from "./script-service-http";
 
 export type ScriptLog = { timestamp: string; level: string; message: string; run_id?: string };
 export type ScriptRequest = {code: string; hash: string; secrets: Record<string,string>; request: Request; trigger?: "http" | "manual" | "schedule"; run_id?: string};
@@ -15,6 +16,7 @@ type Env = { LOADER: WorkerLoader; SCRIPTS: DurableObjectNamespace<ScriptLibrary
 const runtimeConfig = { compatibilityDate: "2026-09-06", compatibilityFlags: ["nodejs_compat"], limits: { cpuMs: 30000, subRequests: 50 } };
 declare abstract class ScriptFacet extends DurableObject { takeLogs(): ScriptLog[]; }
 const RUN_HEADER = "x-artifact-internal-run";
+export const SCRIPT_HEADER = "x-artifact-internal-script";
 
 // Each script has its own isolate and native SQLite facet. Only the explicit
 // script secrets are supplied; the application's environment is never copied.
@@ -92,7 +94,23 @@ export class ScriptBackend extends DurableObject<Env> {
       return {ok:true};
     } catch { return {ok:false,error:"Script module could not initialize"}; }
   }
-  async request(input: ScriptRequest): Promise<Response> {
+  // Generic RPC must contain only data: celld cannot transfer RPC streams.
+  async request(input: Omit<ScriptRequest, "request"> & {request: ArtifactHttpRequest; origin: string}) {
+    const incoming = nativeRequest(input.request);
+    const request = new Request(new URL(new URL(incoming.url).pathname + new URL(incoming.url).search, input.origin), incoming);
+    return scriptResponse(await this.execute({...input, request}), request.method);
+  }
+  // Direct URLs use the native fetch bridge so bodies remain streaming. The
+  // trusted router supplies the revision selection and restores caller headers.
+  async fetch(incoming: Request): Promise<Response> {
+    const {libraryKey, workspace, name, hash, original} = JSON.parse(incoming.headers.get(SCRIPT_HEADER)!);
+    const request = new Request(incoming);
+    if (original === null) request.headers.delete(SCRIPT_HEADER);
+    else request.headers.set(SCRIPT_HEADER, original);
+    const active = await this.env.SCRIPTS.getByName(libraryKey).active({workspace, name, hash});
+    return this.execute({...active, request});
+  }
+  private async execute(input: ScriptRequest): Promise<Response> {
     // The namespace identity is deliberately part of the loader key: identical
     // scripts owned by different libraries must never share secrets or globals.
     const hash=this.cacheKey(input);
@@ -187,7 +205,7 @@ export class ScriptBackend extends DurableObject<Env> {
       this.ctx.storage.sql.exec("update execution_runs set revision=? where id=?",active.hash,id);
       const incoming=nativeRequest(schedule.request);
       const request=new Request(new URL(new URL(incoming.url).pathname+new URL(incoming.url).search,origin),incoming);
-      const response=await this.request({...active,request,trigger,run_id:id});
+      const response=await this.execute({...active,request,trigger,run_id:id});
       await response.body?.cancel();
     } catch {
       this.ctx.storage.sql.exec("insert or ignore into execution_runs(id,revision,trigger,started_at,status) values(?,?,?,?,?)",id,"unavailable",trigger,new Date(started).toISOString(),"running");
