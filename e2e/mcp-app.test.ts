@@ -522,3 +522,39 @@ test("routed canvases navigate inside MCP and reset when a new preview arrives",
   expect(errors).toEqual([]);
   await page.close();
 }, 30000);
+
+test("canvas files use pinned metadata tools and host downloads without a generated server", async () => {
+  const source = `import { Button, canvasFiles, useState } from "sidequery/canvas";
+export default function Canvas() {
+  const [value, setValue] = useState("idle");
+  return <><Button onClick={() => { canvasFiles.list().then(v => setValue(v.files[0]?.name ?? "empty")).catch(e => setValue(e.message)); }}>List files</Button><Button onClick={() => { canvasFiles.download("one").then(() => setValue("downloaded")).catch(e => setValue(e.message)); }}>Download file</Button><p>{value}</p></>;
+}`;
+  const meta = await resultFor(source, "files");
+  meta.canvas.files = true;
+  meta.canvas.server = false;
+  const { page, app, errors } = await openHost();
+  const file = { id: "one", name: "report.csv", size: 123, type: "text/csv", uploaded: "2026-09-07T00:00:00Z" };
+  await page.evaluate(file => window.mcpHost!.setServerToolResult({ content: [], structuredContent: { result: { files: [file] } } }), file);
+  await page.evaluate(meta => window.mcpHost!.sendResult({ content: [], _meta: meta }), meta);
+  await app.getByRole("button", { name: "List files" }).click();
+  await app.getByText("report.csv", { exact: true }).waitFor();
+  expect(await page.evaluate(() => window.mcpHost!.serverToolCalls.map(({ name, arguments: args }) => ({ name, arguments: args })))).toEqual([
+    { name: "canvas_files", arguments: { version_id: meta.canvas.versionId, request: { operation: "list" } } },
+  ]);
+  const url = `https://canvas.example/api/canvas/files/transfer/${"a".repeat(64)}/12345678-1234-1234-1234-123456789abc`;
+  await page.evaluate(({ file, url }) => window.mcpHost!.setServerToolResult({ content: [], structuredContent: { result: { file, url, expires: "2026-09-07T00:05:00Z" } } }), { file, url });
+  await app.getByRole("button", { name: "Download file" }).click();
+  await app.getByText("downloaded", { exact: true }).waitFor();
+  expect(await page.evaluate(() => window.mcpHost!.links)).toEqual([url]);
+  expect(await page.evaluate(() => { const call = window.mcpHost!.serverToolCalls[1]!; return { name: call.name, arguments: call.arguments }; })).toEqual({ name: "canvas_files", arguments: { version_id: meta.canvas.versionId, request: { operation: "download", id: "one" } } });
+  await page.evaluate(() => window.mcpHost!.setServerToolResult({ content: [{ type: "text", text: "File access denied" }], isError: true }));
+  await app.getByRole("button", { name: "List files" }).click();
+  await app.getByText("File access denied", { exact: true }).waitFor();
+  meta.canvas.files = false;
+  await page.evaluate(meta => window.mcpHost!.sendResult({ content: [], _meta: meta }), meta);
+  await app.getByRole("button", { name: "List files" }).click();
+  await app.getByText("Canvas files are unavailable in this view.", { exact: true }).waitFor();
+  expect(await page.evaluate(() => window.mcpHost!.serverToolCalls.length)).toBe(3);
+  expect(errors).toEqual([]);
+  await page.close();
+}, 30_000);

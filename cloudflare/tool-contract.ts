@@ -53,6 +53,20 @@ CLOUD_MCP_TOOLS.push({
   }, required: ["request"], anyOf: [{ required: ["name"] }, { required: ["version_id"] }], additionalProperties: false },
 });
 
+export const CANVAS_FILE_REQUEST_SCHEMA = {
+  oneOf: [
+    { type: "object", properties: { operation: { const: "list" }, cursor: { type: "string", maxLength: 2048 } }, required: ["operation"], additionalProperties: false },
+    { type: "object", properties: { operation: { const: "upload" }, name: { type: "string", minLength: 1, maxLength: 255 }, size: { type: "integer", minimum: 0, maximum: 26214400 }, type: { type: "string", maxLength: 255 } }, required: ["operation", "name", "size", "type"], additionalProperties: false },
+    { type: "object", properties: { operation: { enum: ["download", "delete"] }, id: { type: "string", pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" } }, required: ["operation", "id"], additionalProperties: false },
+  ],
+};
+CLOUD_MCP_TOOLS.push({
+  name: "canvas_files",
+  description: "Manage files belonging to one canvas. List returns up to 100 files and an optional cursor. Upload allocates a new file and a single-use PUT URL (5 minutes, exact declared size, maximum 25 MiB); send raw bytes to that URL, never through this tool. Download returns a GET URL valid for 5 minutes. Delete removes a file. Files remain live across source edits and restores. Requires an existing canvas; no server code needed. Transfer URLs are bearer capabilities: do not publish them.",
+  inputSchema: { type: "object", properties: { name: { type: "string" }, version_id: { type: "string" }, request: CANVAS_FILE_REQUEST_SCHEMA }, required: ["request"], anyOf: [{ required: ["name"] }, { required: ["version_id"] }], additionalProperties: false },
+  annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+});
+
 const slugProperties = {
   slug: { type: "string", minLength: 1, maxLength: 80, pattern: "^[a-z0-9](?:[a-z0-9-]{0,78}[a-z0-9])?$", description: "Chosen root URL slug, unique across this deployment." },
   access: { type: "string", enum: ["private", "public"], description: "Private uses library permissions; public allows external HTTP callers. Default private." },

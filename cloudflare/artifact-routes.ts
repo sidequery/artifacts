@@ -6,6 +6,8 @@ import { readRequestText } from "./http";
 import { canvas_request as validateRequest } from "../dist/cloudflare/tool-validators.js";
 import type { CanvasHttpRequest } from "../src/httpTypes";
 import { PluginError, PLUGIN_JSON_LIMIT, type PluginInvocationContext } from "./plugins";
+import { canvas_files as validateFiles } from "../dist/cloudflare/tool-validators.js";
+import type { CanvasFileRequest } from "../src/sdk/files";
 import type { PluginRequest, PluginUser } from "../src/plugins/types";
 import galleryBridge from "../dist/cloudflare/gallery-request.json";
 import navigationHost from "../dist/cloudflare/navigation-host.json";
@@ -67,7 +69,21 @@ export async function artifactRoute(request: Request, env: Env): Promise<Respons
     return new Response(response.body, { status: response.status, statusText: response.statusText, headers: output });
   }
   if (!link.version_id) return new Response("Canvas has no valid version", { status: 409 });
-  const service = new CloudCanvasService(env.LIBRARIES.getByName(link.libraryKey), link.workspace, env.BACKENDS, link.libraryKey, undefined, plugins);
+  const service = new CloudCanvasService(env.LIBRARIES.getByName(link.libraryKey), link.workspace, env.BACKENDS, link.libraryKey, undefined, plugins,
+    env.FILE_BACKENDS ? { backends: env.FILE_BACKENDS, origin: url.origin } : undefined);
+  if (url.pathname === `/${slug}/_canvas/files`) {
+    if (request.method !== "POST") return new Response("Method not allowed", { status: 405, headers: { Allow: "POST" } });
+    const origin = request.headers.get("Origin");
+    if (origin && origin !== url.origin) return new Response("Origin is not allowed", { status: 403 });
+    let input: unknown;
+    try { input = JSON.parse(await readRequestText(request, 8192)); }
+    catch (error) { return Response.json({ error: error instanceof RangeError ? "File request exceeds 8 KiB" : "Invalid JSON" }, { status: error instanceof RangeError ? 413 : 400 }); }
+    if (!validateFiles(input)) return Response.json({ error: "Invalid file request" }, { status: 400 });
+    const args = input as { version_id?: string; request: CanvasFileRequest };
+    if (args.version_id !== link.version_id) return Response.json({ error: "Canvas updated; reload the page" }, { status: 409 });
+    const result = await service.fileRequest({ name: link.name, version_id: link.version_id }, args.request, link.access === "private");
+    return Response.json({ result }, { headers: { "cache-control": "private, no-store" } });
+  }
   if (url.pathname === `/${slug}/api` || url.pathname.startsWith(`/${slug}/api/`)) {
     const origin = request.headers.get("Origin");
     if (origin && origin !== url.origin) return new Response("Origin is not allowed", { status: 403 });
@@ -109,7 +125,7 @@ export async function artifactRoute(request: Request, env: Env): Promise<Respons
   const preview = await service.preview(snapshot);
   if (!preview.ok || !preview._meta) return new Response(preview.check, { status: 400 });
   const payload = preview._meta.canvas;
-  const frame = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'"><style>body{margin:0;background:#181818;color:#f0f0f0;font-family:system-ui,sans-serif}#root{padding:24px}</style></head><body><div id="root"></div><script>window.__herdrCanvas=${scriptJson({ canvasId: payload.name, state: payload.state, theme: { kind: "dark" }, plugins: payload.plugins, route: { path: (url.pathname.slice(slug.length + 1) || "/") + url.search, basePath: `/${slug}`, external: true }, ...(payload.server ? { serverVersionId: payload.versionId } : {}) })};${galleryBridge.replace(/<\/script/gi, "<\\/script")}</script><script type="module">${payload.js.replace(/<\/script/gi, "<\\/script")}</script></body></html>`;
+  const frame = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src ${url.origin}/api/canvas/files/transfer/; form-action 'none'; base-uri 'none'"><style>body{margin:0;background:#181818;color:#f0f0f0;font-family:system-ui,sans-serif}#root{padding:24px}</style></head><body><div id="root"></div><script>window.__herdrCanvas=${scriptJson({ canvasId: payload.name, state: payload.state, theme: { kind: "dark" }, plugins: payload.plugins, ...(payload.files ? { filesVersionId: payload.versionId } : {}), route: { path: (url.pathname.slice(slug.length + 1) || "/") + url.search, basePath: `/${slug}`, external: true }, ...(payload.server ? { serverVersionId: payload.versionId } : {}) })};${galleryBridge.replace(/<\/script/gi, "<\\/script")}</script><script type="module">${payload.js.replace(/<\/script/gi, "<\\/script")}</script></body></html>`;
   return html(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Canvas</title><style>html,body,iframe{width:100%;height:100%;margin:0;border:0;display:block;background:#181818}</style></head><body><iframe title="Canvas" sandbox="allow-scripts"></iframe><script>
 const frame=document.querySelector('iframe');frame.srcdoc=${scriptJson(frame)};
 window.__canvasNavigationHost={frame,basePath:${scriptJson(`/${slug}`)}};
@@ -117,17 +133,25 @@ ${navigationHost.replace(/<\/script/gi, "<\\/script")}
 const pending=new Set();
 window.addEventListener('message',async event=>{
  const data=event.data;
- if(event.source!==frame.contentWindow||!['canvas/http-request','canvas/plugin-request'].includes(data?.type)||typeof data.id!=='string'||data.id.length>64||pending.has(data.id))return;
+ if(event.source!==frame.contentWindow||!['canvas/http-request','canvas/plugin-request','canvas/files-request','canvas/file-download'].includes(data?.type)||typeof data.id!=='string'||data.id.length>64||pending.has(data.id))return;
  const plugin=data.type==='canvas/plugin-request';
- const responseType=plugin?'canvas/plugin-response':'canvas/http-response';
+ const files=data.type==='canvas/files-request';
+ const download=data.type==='canvas/file-download';
+ const responseType=plugin?'canvas/plugin-response':files?'canvas/files-response':download?'canvas/file-download-response':'canvas/http-response';
  try{
   if(pending.size>=16)throw new Error('Too many pending requests');
   if(plugin&&!${scriptJson(!!payload.plugins)})throw new Error('Plugin sign-in required');
-  if(!plugin&&data.versionId!==${scriptJson(payload.versionId)})throw new Error('Invalid canvas version');
+  if(!plugin&&!download&&data.versionId!==${scriptJson(payload.versionId)})throw new Error('Invalid canvas version');
   pending.add(data.id);
-  const response=await fetch(plugin?${scriptJson(`/${slug}/_canvas/plugins`)}:${scriptJson(`/${slug}/_canvas/request`)},{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(plugin?data.request:{version_id:${scriptJson(payload.versionId)},request:data.request})});
+  if(download){
+   const target=new URL(data.url);
+   if(target.origin!==location.origin||target.username||target.password||target.search||target.hash||!/^\\/api\\/canvas\\/files\\/transfer\\/[a-f0-9]{64}\\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(target.pathname))throw new Error('Invalid canvas file transfer URL');
+   const anchor=document.createElement('a');anchor.href=target.href;anchor.download='';anchor.rel='noreferrer';document.body.append(anchor);anchor.click();anchor.remove();
+   frame.contentWindow.postMessage({type:responseType,id:data.id,result:null},'*');return;
+  }
+  const response=await fetch(plugin?${scriptJson(`/${slug}/_canvas/plugins`)}:files?${scriptJson(`/${slug}/_canvas/files`)}:${scriptJson(`/${slug}/_canvas/request`)},{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(plugin?data.request:{version_id:${scriptJson(payload.versionId)},request:data.request})});
   const result=await response.json();if(!response.ok)throw new Error(result.error||'Canvas request failed');
-  frame.contentWindow.postMessage({type:responseType,id:data.id,...(plugin?{result:result.result}:{response:result.response})},'*');
+  frame.contentWindow.postMessage({type:responseType,id:data.id,...((plugin||files)?{result:result.result}:{response:result.response})},'*');
  }catch(error){frame.contentWindow.postMessage({type:responseType,id:data.id,error:String(error.message||error)},'*');}
  finally{pending.delete(data.id);}
 });</script></body></html>`, "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-src 'self' about:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'", request.method === "HEAD");

@@ -16,11 +16,14 @@ export async function handleCloudMcp(request: Request, service: CloudCanvasServi
   // JSON schemas, with argument validators generated from them at build time.
   const server = new Server({ name: "canvas", version: "0.1.0" }, { capabilities: { tools: {}, resources: {} } });
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: CLOUD_MCP_TOOLS }));
-  server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: [CANVAS_RESOURCE] }));
+  const resource = service.fileStorage ? { ...CANVAS_RESOURCE, _meta: { ui: { ...CANVAS_RESOURCE._meta.ui,
+    csp: { ...CANVAS_RESOURCE._meta.ui.csp, connectDomains: [service.fileStorage.origin] },
+  } } } : CANVAS_RESOURCE;
+  server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: [resource] }));
   server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({ resourceTemplates: [] }));
   server.setRequestHandler(ReadResourceRequestSchema, async ({ params }) => {
     if (params.uri !== CANVAS_APP_URI) throw new McpError(ErrorCode.InvalidParams, "Unknown resource");
-    return { contents: [{ ...CANVAS_RESOURCE, text: shell }] };
+    return { contents: [{ ...resource, text: shell }] };
   });
   server.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
     if (!Object.hasOwn(validators, params.name)) throw new McpError(ErrorCode.InvalidParams, "Unknown tool");

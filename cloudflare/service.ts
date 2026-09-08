@@ -15,6 +15,9 @@ import type { CanvasAppPayload } from "../src/mcp/app-contract";
 import type { GalleryArtifact, GalleryData } from "../src/gallery/types";
 import { runtime } from "../dist/cloudflare/identity.json";
 import { canvasGuideResult } from "../src/mcp/guide";
+import type { CanvasFiles } from "./files";
+import { CanvasFileError, validateFileRequest } from "./files";
+import type { CanvasFileRequest } from "../src/sdk/files";
 
 import { dispatchPlugin, pluginCatalog, PLUGIN_GUIDE, type PluginInvocationContext } from "./plugins";
 import type { PluginRequest } from "../src/plugins/types";
@@ -32,7 +35,8 @@ export class CloudCanvasService {
   private readonly scripts: CloudScriptService;
 
   constructor(readonly library: DurableObjectStub<CanvasLibrary>, readonly workspace: string,
-    readonly backends: DurableObjectNamespace<CanvasBackend>, readonly libraryKey: string, readonly hosted?: HostedArtifacts, readonly plugins?: PluginInvocationContext) {
+    readonly backends: DurableObjectNamespace<CanvasBackend>, readonly libraryKey: string, readonly hosted?: HostedArtifacts, readonly plugins?: PluginInvocationContext,
+    readonly fileStorage?: { backends: DurableObjectNamespace<CanvasFiles>; origin: string }) {
     this.artifacts = new ArtifactService(workspace, libraryKey, hosted);
     this.scripts = new CloudScriptService(this.artifacts);
   }
@@ -41,6 +45,10 @@ export class CloudCanvasService {
     if (name.startsWith("script_")) return this.scripts.callTool(name, args);
     if (name === "artifact_link") return this.artifactLink(args);
     switch (name) {
+      case "canvas_files": {
+        const result = await this.fileRequest(args as { name?: string; version_id?: string }, args.request as CanvasFileRequest);
+        return { ...text({ result }), structuredContent: { result } };
+      }
       case "plugins_list": return { ...text({ plugins: pluginCatalog }), structuredContent: { plugins: pluginCatalog } };
       case "plugin_guide": return text(PLUGIN_GUIDE);
       case "canvas_plugin_call": {
@@ -124,7 +132,7 @@ export class CloudCanvasService {
       ...(snapshot.version_id ? { version_id: snapshot.version_id } : {}),
     });
     const canvas = { name: version.name, versionId: version.id, eventId: event.id, sourceHash: version.source_hash };
-    return { ...base, ok: true, canvas, _meta: { canvas: { ...canvas, js: compiled.js, state: snapshot.state, server: snapshot.server_source !== null, ...(this.plugins ? { plugins: true } : {}) } satisfies CanvasAppPayload } };
+    return { ...base, ok: true, canvas, _meta: { canvas: { ...canvas, js: compiled.js, state: snapshot.state, server: snapshot.server_source !== null, ...(this.plugins ? { plugins: true } : {}), ...(this.fileStorage ? { files: true } : {}) } satisfies CanvasAppPayload } };
   }
 
   private async mutationResult(mutation: Mutation, generation?: number | null, settings: LinkUpdate = {}): Promise<CallToolResult> {
@@ -200,6 +208,22 @@ export class CloudCanvasService {
     const hash = createHash("sha256").update(code).digest("hex");
     const backend = this.backends.getByName(JSON.stringify([this.libraryKey, this.workspace, snapshot.name]));
     return backend.request({ code, hash, request });
+  }
+
+  async fileRequest(selection: { name?: string; version_id?: string }, input: CanvasFileRequest, writable = true): Promise<unknown> {
+    validateFileRequest(input);
+    if (!writable && input.operation !== "list" && input.operation !== "download") throw new CanvasFileError("Public canvases have read-only file access", 403);
+    if (!this.fileStorage) throw new CanvasFileError("Canvas file storage is not configured", 503);
+    if (!selection.name && !selection.version_id) throw new CanvasFileError("Select a canvas name or version_id");
+    const snapshot = await this.snapshot(selection.version_id ? { version_id: selection.version_id } : { name: selection.name });
+    if (selection.name && snapshot.name !== selection.name.trim().replace(/\.canvas\.tsx$/, "")) throw new CanvasFileError("File version does not belong to this canvas");
+    const backend = this.fileStorage.backends.getByName(JSON.stringify([this.libraryKey, this.workspace, snapshot.name]));
+    const result = await backend.request(input);
+    if (result && typeof result === "object" && "path" in result && typeof result.path === "string") {
+      const { path, ...details } = result;
+      return { ...details, url: new URL(path, this.fileStorage.origin).href };
+    }
+    return result;
   }
 
   private async artifactLink(args: Record<string, unknown>): Promise<CallToolResult> {

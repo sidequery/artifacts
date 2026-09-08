@@ -3,6 +3,7 @@ export { useState, useReducer, useRef, useMemo, useCallback, useEffect } from "r
 export { useCanvasAction, useCanvasState, useHostTheme } from "./hooks";
 export { canvasFetch, type CanvasHttpRequest, type CanvasHttpResponse } from "./server";
 export { pluginCall, type PluginRequest } from "./plugins";
+export { canvasFiles, MAX_CANVAS_FILE_BYTES, type CanvasFile, type CanvasFileRequest, type CanvasFileResult, type CanvasFileList, type CanvasFileTransfer } from "./files";
 export {
   canvasPaletteDark,
   canvasPaletteLight,

@@ -150,9 +150,10 @@ test("published tarball runs the CLI, gallery, and stdio MCP outside a checkout"
     await run([process.execPath, "install", "--ignore-scripts"], consumer, isolatedEnv);
     await run([process.execPath, "-e", `
       import { definePlugins } from "@sidequery/canvas/plugins";
-      import { pluginCall } from "@sidequery/canvas";
+      import { pluginCall, canvasFiles } from "@sidequery/canvas";
       import { runtimeIdentity } from "./node_modules/@sidequery/canvas/src/history.ts";
       if (definePlugins([]).length !== 0 || typeof pluginCall !== "function") throw new Error("Plugin exports are missing");
+      if (typeof canvasFiles.upload !== "function" || typeof canvasFiles.download !== "function") throw new Error("File exports are missing");
       const registry = "./node_modules/@sidequery/canvas/dist/cloudflare/plugin-browser.json";
       const original = await Bun.file(registry).text();
       const before = runtimeIdentity();
@@ -259,6 +260,22 @@ try {
   if (result.isError) throw new Error("native canvas_request failed: " + JSON.stringify(result.content));
   const response = result.structuredContent.response;
   if (response.status !== 200) throw new Error("native response status " + response.status);
+  const files = async request => {
+    const result = await client.callTool({ name: "canvas_files", arguments: { name: "native-counter", request } });
+    if (result.isError) throw new Error("native canvas_files failed: " + JSON.stringify(result.content));
+    return result.structuredContent.result;
+  };
+  const bytes = Buffer.alloc(1024 * 1024, 171);
+  if (mode === "write") {
+    const grant = await files({ operation: "upload", name: "package.bin", size: bytes.length, type: "application/octet-stream" });
+    const uploaded = await fetch(grant.url, { method: "PUT", body: bytes });
+    if (uploaded.status !== 201) throw new Error("installed file upload failed: " + await uploaded.text());
+  }
+  const listing = await files({ operation: "list" });
+  if (listing.files.length !== 1) throw new Error("installed file listing did not persist");
+  const grant = await files({ operation: "download", id: listing.files[0].id });
+  const downloaded = Buffer.from(await (await fetch(grant.url)).arrayBuffer());
+  if (!downloaded.equals(bytes)) throw new Error("installed file contents did not persist");
   console.log(Buffer.from(response.body, "base64").toString("utf8"));
 } finally { await client.close(); }
 `);

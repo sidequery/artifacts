@@ -43,10 +43,12 @@ beforeAll(async () => {
       LINKS: { type: "durable-object", worker: "canvas-app-test", exportName: "ArtifactLinks" },
       SCRIPTS: { type: "durable-object", worker: "canvas-app-test", exportName: "ScriptLibrary" },
       SCRIPT_BACKENDS: { type: "durable-object", worker: "canvas-app-test", exportName: "ScriptBackend" },
+      FILE_BACKENDS: { type: "durable-object", worker: "canvas-app-test", exportName: "CanvasFiles" },
+      FILES: { type: "r2", name: "canvas-test-files" },
       LOADER: { type: "worker-loader" },
       ASSETS: { type: "assets" },
     },
-    exports: { ArtifactLinks: { type: "durable-object", storage: "sqlite" }, ScriptLibrary: { type: "durable-object", storage: "sqlite" }, ScriptBackend: { type: "durable-object", storage: "sqlite" }, CanvasLibrary: { type: "durable-object", storage: "sqlite" }, CanvasBackend: { type: "durable-object", storage: "sqlite" } },
+    exports: { CanvasFiles: { type: "durable-object", storage: "sqlite" }, ArtifactLinks: { type: "durable-object", storage: "sqlite" }, ScriptLibrary: { type: "durable-object", storage: "sqlite" }, ScriptBackend: { type: "durable-object", storage: "sqlite" }, CanvasLibrary: { type: "durable-object", storage: "sqlite" }, CanvasBackend: { type: "durable-object", storage: "sqlite" } },
     assets: { directory: join(import.meta.dir, "../dist/cloudflare/assets"), hasUserWorker: true, runWorkerFirst: true, htmlHandling: "none" },
   }, dev: {} }] };
   runtime = new Miniflare(runtimeOptions);
@@ -315,6 +317,26 @@ test("verified users have isolated private libraries and can collaborate in the 
     for (const remote of [alice, bob, teamAlice]) {
       expect((await remote.callTool({ name: "canvas_write", arguments: { name: "database", contents: counterClient, server: counterServer } })).isError).not.toBe(true);
     }
+    const files = async (remote: Client, request: Record<string, unknown>) => {
+      const result = await remote.callTool({ name: "canvas_files", arguments: { name: "database", request } });
+      expect(result.isError, JSON.stringify(result.content)).not.toBe(true);
+      return (result.structuredContent as { result: any }).result;
+    };
+    const privateUpload = await files(alice, { operation: "upload", name: "private.txt", size: 3, type: "text/plain" });
+    // The grant is sufficient for bytes; it never grants management access.
+    expect((await fetch(privateUpload.url, { method: "PUT", body: "one" })).status).toBe(201);
+    expect((await files(alice, { operation: "list" })).files).toHaveLength(1);
+    expect((await files(bob, { operation: "list" })).files).toEqual([]);
+    expect((await files(teamAlice, { operation: "list" })).files).toEqual([]);
+    expect((await bob.callTool({ name: "canvas_files", arguments: { name: "database", request: { operation: "download", id: privateUpload.file.id } } })).isError).toBe(true);
+    const teamUpload = await files(teamAlice, { operation: "upload", name: "team.txt", size: 3, type: "text/plain" });
+    expect((await fetch(teamUpload.url, { method: "PUT", body: "two" })).status).toBe(201);
+    expect((await files(teamBob, { operation: "list" })).files[0].id).toBe(teamUpload.file.id);
+    const otherWorkspace = await fetch(`${address}/api/tools?workspace=other`, { method: "POST", headers: { "Cf-Access-Jwt-Assertion": aliceToken }, body: JSON.stringify({ name: "canvas_write", arguments: { name: "database", contents: source } }) });
+    expect(otherWorkspace.status).toBe(200);
+    const otherFiles = await fetch(`${address}/api/canvas/files?workspace=other`, { method: "POST", headers: { "Cf-Access-Jwt-Assertion": aliceToken }, body: JSON.stringify({ name: "database", request: { operation: "list" } }) });
+    expect(await otherFiles.json()).toEqual({ result: { files: [] } });
+    expect((await fetch(`${address}/api/canvas/files?workspace=test`, { method: "POST", body: JSON.stringify({ name: "database", request: { operation: "list" } }) })).status).toBe(401);
     const database = async (remote: Client, method = "GET") => {
       const result = await remote.callTool({ name: "canvas_request", arguments: { name: "database", request: { path: "/counter", method } } });
       expect(result.isError).not.toBe(true);
@@ -564,3 +586,81 @@ test("standalone nested canvas pages restore browser routes on direct load and r
     await frame.getByText("Hash: #latest", { exact: true }).waitFor();
   } finally { await browser.close(); }
 }, 60000);
+
+test("canvas files use per-canvas storage through MCP and standalone controls", async () => {
+  const write = async (name: string) => {
+    const result = await client.callTool({ name: "canvas_write", arguments: { name, slug: name, contents: source } });
+    expect(result.isError, JSON.stringify(result.content)).not.toBe(true);
+    return (result._meta as { canvas: { versionId: string; files: boolean } }).canvas;
+  };
+  const a = await write("files-a");
+  const b = await write("files-b");
+  expect(a.files).toBe(true);
+  const request = async (version: string, value: Record<string, unknown>) => {
+    const response = await client.callTool({ name: "canvas_files", arguments: { version_id: version, request: value } });
+    expect(response.isError, JSON.stringify(response.content)).not.toBe(true);
+    return (response.structuredContent as { result: any }).result;
+  };
+  const bytes = Buffer.alloc(2 * 1024 * 1024, 137);
+  const grant = await request(a.versionId, { operation: "upload", name: "café.bin", size: bytes.length, type: "application/octet-stream" });
+  expect((await fetch(grant.url, { method: "PUT", body: bytes })).status).toBe(201);
+  expect((await request(a.versionId, { operation: "list" })).files).toHaveLength(1);
+  expect((await request(b.versionId, { operation: "list" })).files).toEqual([]);
+  const download = await request(a.versionId, { operation: "download", id: grant.file.id });
+  expect(Buffer.from(await (await fetch(download.url)).arrayBuffer())).toEqual(bytes);
+  const wrongCanvas = await client.callTool({ name: "canvas_files", arguments: { name: "files-b", version_id: a.versionId, request: { operation: "list" } } });
+  expect(wrongCanvas.isError).toBe(true);
+  const otherFile = await client.callTool({ name: "canvas_files", arguments: { version_id: b.versionId, request: { operation: "download", id: grant.file.id } } });
+  expect(otherFile.isError).toBe(true);
+  const renamed = await write("files-a");
+  expect((await request(renamed.versionId, { operation: "list" })).files[0].id).toBe(grant.file.id);
+  expect((await client.callTool({ name: "artifact_link", arguments: { kind: "canvas", name: "files-a", slug: "files-public", access: "public" } })).isError).not.toBe(true);
+  const publicRequest = (value: Record<string, unknown>, version_id = renamed.versionId) => fetch(`${origin}/files-public/_canvas/files`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ version_id, request: value }) });
+  expect((await publicRequest({ operation: "list" })).status).toBe(200);
+  expect((await publicRequest({ operation: "download", id: grant.file.id })).status).toBe(200);
+  expect((await publicRequest({ operation: "upload", name: "bad", size: 1, type: "text/plain" })).status).toBe(403);
+  expect((await publicRequest({ operation: "delete", id: grant.file.id })).status).toBe(403);
+  expect((await publicRequest({ operation: "list" }, b.versionId)).status).toBe(409);
+  const forged = await fetch(`${origin}/api/canvas/files?workspace=test`, { method: "POST", headers: { Origin: "null" }, body: JSON.stringify({ name: "files-a", request: { operation: "list" } }) });
+  expect(forged.status).toBe(403);
+  const resource = await client.readResource({ uri: "ui://canvas/viewer.html" });
+  expect(JSON.stringify(resource)).toContain(`\"connectDomains\":[\"${origin}\"]`);
+}, 60_000);
+
+test("gallery and standalone file uploads and downloads work outside the sandboxed frame", async () => {
+  const contents = await Bun.file(new URL("../examples/files.canvas.tsx", import.meta.url)).text();
+  const created = await client.callTool({ name: "canvas_write", arguments: { name: "browser-files", slug: "browser-files", contents } });
+  expect(created.isError, JSON.stringify(created.content)).not.toBe(true);
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ acceptDownloads: true });
+    const errors: string[] = [];
+    page.on("pageerror", error => errors.push(error.message));
+    await page.goto(`${origin}/browser-files`);
+    const frame = page.frameLocator("iframe");
+    await frame.getByRole("heading", { name: "Canvas files" }).waitFor();
+    const bytes = Buffer.alloc(2 * 1024 * 1024, 193);
+    await frame.getByLabel("Upload file").setInputFiles({ name: "browser.bin", mimeType: "application/octet-stream", buffer: bytes });
+    const downloadButton = frame.getByRole("button", { name: "Download browser.bin", exact: true });
+    await downloadButton.waitFor({ timeout: 30_000 });
+    const pending = page.waitForEvent("download");
+    await downloadButton.click();
+    const download = await pending;
+    expect(download.suggestedFilename()).toBe("browser.bin");
+    expect(await download.failure()).toBeNull();
+    expect(Buffer.from(await Bun.file((await download.path())!).arrayBuffer())).toEqual(bytes);
+    // The same file is available through the gallery's independently scoped bridge.
+    await page.goto(`${origin}/gallery?workspace=test`);
+    await page.getByRole("button", { name: "browser-files", exact: true }).click();
+    const galleryFrame = page.frameLocator("iframe.preview-frame");
+    const galleryDownload = galleryFrame.getByRole("button", { name: "Download browser.bin", exact: true });
+    await galleryDownload.waitFor({ timeout: 30_000 });
+    const next = page.waitForEvent("download");
+    await galleryDownload.click();
+    expect(await (await next).failure()).toBeNull();
+    await galleryFrame.getByRole("button", { name: "Delete browser.bin", exact: true }).click();
+    await galleryDownload.waitFor({ state: "detached" });
+    expect(errors).toEqual([]);
+    await page.close();
+  } finally { await browser.close(); }
+}, 90_000);

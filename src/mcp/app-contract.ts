@@ -10,4 +10,5 @@ export type CanvasAppPayload = {
   name: string; versionId: string; eventId: string; sourceHash: string;
   js: string; state: Record<string, unknown>; server?: boolean;
   plugins?: boolean;
+  files?: boolean;
 };
