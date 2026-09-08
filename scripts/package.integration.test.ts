@@ -139,6 +139,8 @@ test("published tarball runs the CLI, gallery, and stdio MCP outside a checkout"
     expect(listing.stdout).toContain("package/src/cli.ts");
     expect(listing.stdout).not.toMatch(/\.test\.[cm]?[jt]sx?$/m);
     expect(listing.stdout).not.toContain("package/scripts/");
+    expect(listing.stdout).not.toContain("package/deployments/");
+    expect(listing.stdout).not.toContain("package/dist/runner-status/");
 
     await Bun.write(join(consumer, "package.json"), JSON.stringify({
       private: true,

@@ -29,6 +29,7 @@
     "dist/worker-app/**",
     "docs/architecture.md",
     "docs/daemon.md",
+    "docs/celld-deployment.md",
     "docs/releasing.md",
     "docs/scripts.md",
     "docs/runtime-plugins.md",
@@ -118,7 +119,8 @@
     "deploy:cloudflare": "wrangler deploy",
     "seed:cloudflare": "bun run scripts/seed-cloudflare.ts",
     "example:runner-status": "bun run examples/runner-status/local.ts",
-    "artifacts": "bun run src/cli.ts"
+    "artifacts": "bun run src/cli.ts",
+    "build:executable": "bun run scripts/build-executable.ts"
   },
   "dependencies": {
     "@better-auth/oauth-provider": "1.7.3",

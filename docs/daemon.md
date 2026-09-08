@@ -1,4 +1,15 @@
-# Local Artifacts server
+# Artifacts host
+
+`artifacts host` uses launchd on macOS and systemd user services on Linux.
+`artifacts server` remains a compatible name for the same service and state.
+
+`artifacts host install` starts the service and enables future login starts;
+`artifacts host start` starts it without newly enabling login startup; an existing
+login setting is retained. The other commands are `stop`, `status`, `logs`, and `uninstall`. On Linux this requires
+a working systemd user session; boot-before-login operation requires separately
+configured user lingering or a system-level service.
+
+## Local persistent runtime
 
 The native Artifacts server is optional. It runs the packaged Worker and its
 SQLite/KV state through a pinned celld runtime on `127.0.0.1`. The ordinary
@@ -96,7 +107,11 @@ The durable native project is under `server`, the managed runtime is under
 `runtimes`, and lifecycle state and logs are under `daemon`. On Linux,
 `XDG_CONFIG_HOME` selects the systemd user-unit directory when set.
 
-Supervisor definitions forward only `ARTIFACTS_DATA_HOME`; they do not copy the
-invoking shell's environment or credentials. The native server binds only to
+Supervisor definitions forward `ARTIFACTS_DATA_HOME` and, for standalone binaries,
+the embedded interpreter/runtime settings. They do not copy the invoking shell's
+credentials or other environment variables. The native server binds only to
 loopback. Its state is local application data and is not uploaded or backed up
 automatically.
+
+For bucket-backed production nodes, TLS/authentication boundaries, health checks,
+and graceful rollout guidance, see [celld deployment](celld-deployment.md).

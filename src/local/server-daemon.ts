@@ -144,6 +144,7 @@ ${args}
     <dict>
       <key>ARTIFACTS_DATA_HOME</key>
       <string>${xml(input.paths.dataRoot)}</string>
+${process.env.BUN_BE_BUN === "1" ? `      <key>BUN_BE_BUN</key><string>1</string>\n${process.env.ARTIFACTS_BUNDLED_CELLD ? `      <key>ARTIFACTS_BUNDLED_CELLD</key><string>${xml(process.env.ARTIFACTS_BUNDLED_CELLD)}</string>\n` : ""}` : ""}
     </dict>
     <key>RunAtLoad</key>
     <true/>
@@ -176,6 +177,7 @@ After=network.target
 [Service]
 Type=simple
 Environment=${systemdQuote(`ARTIFACTS_DATA_HOME=${input.paths.dataRoot}`)}
+${process.env.BUN_BE_BUN === "1" ? `Environment="BUN_BE_BUN=1"\n${process.env.ARTIFACTS_BUNDLED_CELLD ? `Environment=${systemdQuote(`ARTIFACTS_BUNDLED_CELLD=${process.env.ARTIFACTS_BUNDLED_CELLD}`)}\n` : ""}` : ""}
 WorkingDirectory=${systemdPathValue(input.paths.dataRoot)}
 ExecStart=:${command}
 Restart=on-failure

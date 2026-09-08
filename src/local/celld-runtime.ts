@@ -37,6 +37,12 @@ export async function ensureCelldRuntime(options: {
   artifact?: Artifact;
 }): Promise<string> {
   const artifact = options.artifact ?? celldArtifact();
+  if (process.env.ARTIFACTS_BUNDLED_CELLD && !options.artifact) {
+    const embedded = resolve(process.env.ARTIFACTS_BUNDLED_CELLD);
+    if (sha256(await readFile(embedded)) !== artifact.binarySha256) throw new Error("Bundled celld checksum mismatch");
+    await chmod(embedded, 0o700);
+    return embedded;
+  }
   const executable = join(options.dataRoot, "runtimes", "celld", CELLD_VERSION, artifact.target, "celld");
   try {
     const bytes = await readFile(executable);

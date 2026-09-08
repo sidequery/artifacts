@@ -17,7 +17,7 @@ test("CLI reports the installed package version", async () => {
   expect(result).toEqual({ exitCode: 0, stdout: `${manifest.name} ${manifest.version}\n`, stderr: "" });
 });
 
-test("server CLI dispatches lifecycle commands and foreground readiness", async () => {
+test.each(["host", "server"])("%s CLI dispatches lifecycle commands and foreground readiness", async command => {
   const calls: string[] = [];
   const status = { manager: "launchd" as const, installedAtLogin: false, loaded: true, running: true, ready: true, pid: 7, url: "http://127.0.0.1:4799", logPath: "/tmp/server.log", detail: "ready" };
   const manager = {
@@ -28,18 +28,18 @@ test("server CLI dispatches lifecycle commands and foreground readiness", async 
     uninstall: async () => status,
   };
   let output = "";
-  expect(await runServerCommand(parseArgs(["server", "start", "--port", "4799", "--at-login"]), { manager, stdout: value => { output += value; } })).toBe(true);
+  expect(await runServerCommand(parseArgs([command, "start", "--port", "4799", "--at-login"]), { manager, stdout: value => { output += value; } })).toBe(true);
   expect(calls).toContain("start:true:4799");
   expect(JSON.parse(output)).toMatchObject({ ready: true, url: status.url });
   output = "";
-  await runServerCommand(parseArgs(["server", "logs", "--lines", "1"]), { manager, stdout: value => { output += value; } });
+  await runServerCommand(parseArgs([command, "logs", "--lines", "1"]), { manager, stdout: value => { output += value; } });
   expect(calls).toContain("logs:1");
   expect(output).toBe("last line\n");
 
   const stateDir = tempDir();
   let observedReady = false;
   output = "";
-  await runServerCommand(parseArgs(["server", "--port", "4799", "--state-dir", stateDir]), {
+  await runServerCommand(parseArgs([command, "--port", "4799", "--state-dir", stateDir]), {
     signal: new AbortController().signal,
     stdout: value => { output += value; },
     runForeground: async options => {
@@ -49,15 +49,15 @@ test("server CLI dispatches lifecycle commands and foreground readiness", async 
   });
   expect(observedReady).toBe(true);
   expect(JSON.parse(output)).toMatchObject({ ok: true, port: 4799, stateDir });
-  await expect(runServerCommand(parseArgs(["server", "start", "--state-dir", stateDir]), { manager })).rejects.toThrow("foreground");
+  await expect(runServerCommand(parseArgs([command, "start", "--state-dir", stateDir]), { manager })).rejects.toThrow("foreground");
 
   const stopped = new AbortController();
   stopped.abort();
-  await expect(runServerCommand(parseArgs(["server"]), {
+  await expect(runServerCommand(parseArgs([command]), {
     signal: stopped.signal,
     runForeground: async () => { throw stopped.signal.reason; },
   })).resolves.toBe(true);
-  await expect(runServerCommand(parseArgs(["server"]), {
+  await expect(runServerCommand(parseArgs([command]), {
     signal: stopped.signal,
     runForeground: async () => { throw new Error("shutdown cleanup failed"); },
   })).rejects.toThrow("shutdown cleanup failed");
@@ -195,3 +195,11 @@ async function runCli(args: string[], env: NodeJS.ProcessEnv = {}, stdin?: strin
   const exitCode = await subprocess.exited;
   return { exitCode, stdout, stderr };
 }
+
+test("host install opts into login startup without network-provider configuration", async () => {
+  let installed = false;
+  const manager = { start: async options => { installed = options?.atLogin === true; return { ready: true }; } } as NonNullable<Parameters<typeof runServerCommand>[1]>["manager"];
+  await runServerCommand(parseArgs(["host", "install"]), { manager, stdout: () => {} });
+  expect(installed).toBe(true);
+  await expect(runServerCommand(parseArgs(["host", "install", "--tailscale-login", "owner"]), { manager })).rejects.toThrow("Unknown host option");
+});

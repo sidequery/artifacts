@@ -80,3 +80,20 @@ separate configuration described in [Cloudflare setup](cloudflare.md).
 celld v0.4.1 publishes Apple Silicon macOS and glibc Linux arm64/x64 binaries.
 Intel macOS and other targets cannot use this managed native server version.
 The ordinary Bun CLI, stdio MCP, and local file gallery do not download celld.
+
+## Standalone executables
+
+`bun run build:executable` builds a native `dist/binaries/artifacts-PLATFORM-ARCH`
+executable and SHA-256 file on the current supported machine. It embeds the Bun
+runtime, the prepared package, locked production dependencies, celld, and native
+esbuild. Users need no separate Bun, Node, dependency install, or source checkout.
+The executable extracts a versioned runtime tree under the Artifacts data directory;
+saved artifacts and server state are separate from that tree.
+
+CI builds and tests native macOS arm64 and Linux glibc arm64/x64 artifacts.
+The same executable provides CLI, MCP, and local host commands on each supported
+platform. A binary build does not publish a release. CI artifacts contain the
+executable and checksum.
+Run `bun test scripts/executable.integration.test.ts --timeout 180000` against a
+built executable to exercise its CLI, local compiler, and stdio MCP with no Bun on
+PATH. Set `ARTIFACTS_EXECUTABLE` to test a specific artifact.

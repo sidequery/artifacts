@@ -39,3 +39,24 @@ jobs:
           echo "CELLD_BIN=$RUNNER_TEMP/celld-x86_64-unknown-linux-gnu" >> "$GITHUB_ENV"
       - run: CELLD_PACKAGE_INTEGRATION=1 bun run test:package:prebuilt
       - run: bun run test:celld
+
+  executable:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+      - run: bun run build:executable
+      - run: bun test scripts/executable.integration.test.ts --timeout 180000
+      - uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-${{ matrix.os }}
+          path: dist/binaries/*
+          if-no-files-found: error
