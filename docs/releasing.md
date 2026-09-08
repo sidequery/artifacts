@@ -91,8 +91,9 @@ The executable extracts a versioned runtime tree under the Artifacts data direct
 saved artifacts and server state are separate from that tree.
 
 CI builds and tests native macOS arm64 and Linux glibc arm64/x64 artifacts.
-The executable uses the existing platform-neutral CLI and local server commands;
-it contains no Tailscale gateway or deployment installer. A binary build does not publish a release. CI artifacts contain the executable and checksum.
+The same executable provides CLI, MCP, and local host commands on each supported
+platform. A binary build does not publish a release. CI artifacts contain the
+executable and checksum.
 Run `bun test scripts/executable.integration.test.ts --timeout 180000` against a
 built executable to exercise its CLI, local compiler, and stdio MCP with no Bun on
 PATH. Set `ARTIFACTS_EXECUTABLE` to test a specific artifact.

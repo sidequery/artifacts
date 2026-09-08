@@ -21,7 +21,6 @@ import { ArtifactLinks } from "./links";
 import { ScriptLibrary } from "./scripts";
 import { ScriptBackend } from "./script-backend";
 import { artifactRoute } from "./artifact-routes";
-import { publicOrigin } from "./public-origin";
 import * as toolValidators from "../dist/cloudflare/tool-validators.js";
 export { ArtifactLibrary, ArtifactBackend, ArtifactFiles, ArtifactLinks, ScriptLibrary, ScriptBackend };
 // Deployed Durable Object exports retain their storage identities.
@@ -35,7 +34,6 @@ export type Env = AuthEnvironment & BetterAuthEnvironment & {
   FILE_BACKENDS?: DurableObjectNamespace<ArtifactFiles>;
   ASSETS: Fetcher;
   DEFAULT_WORKSPACE?: string;
-  CANVAS_PUBLIC_ORIGIN?: string;
 };
 
 const app = new Hono<{ Bindings: Env; Variables: { service: CloudArtifactService; libraryScope: "private" | "team"; user: ArtifactUser | null } }>();
@@ -98,7 +96,7 @@ app.use("*", async (c, next) => {
     ? JSON.stringify(["private", "better-auth", user.id])
     : JSON.stringify(["private", c.env.ACCESS_TEAM_DOMAIN ?? "local", identity.subject]);
   c.set("libraryScope", libraryScope);
-  c.set("service", new CloudArtifactService(c.env.LIBRARIES.getByName(libraryKey), workspace, c.env.BACKENDS, libraryKey, { links: c.env.LINKS.getByName("deployment"), scripts: c.env.SCRIPTS.getByName(libraryKey), scriptBackends: c.env.SCRIPT_BACKENDS, origin: publicOrigin(url.href, c.env.CANVAS_PUBLIC_ORIGIN) }, { user: identity, env: c.env }, c.env.FILE_BACKENDS ? { backends: c.env.FILE_BACKENDS, origin: publicOrigin(url.href, c.env.CANVAS_PUBLIC_ORIGIN) } : undefined));
+  c.set("service", new CloudArtifactService(c.env.LIBRARIES.getByName(libraryKey), workspace, c.env.BACKENDS, libraryKey, { links: c.env.LINKS.getByName("deployment"), scripts: c.env.SCRIPTS.getByName(libraryKey), scriptBackends: c.env.SCRIPT_BACKENDS, origin: url.origin }, { user: identity, env: c.env }, c.env.FILE_BACKENDS ? { backends: c.env.FILE_BACKENDS, origin: url.origin } : undefined));
   // Compilation uses shared isolate resources. Let an admitted operation finish
   // after a client disconnects rather than abandoning its native compiler I/O.
   const operation = next();

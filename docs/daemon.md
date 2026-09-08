@@ -2,18 +2,12 @@
 
 `artifacts host` uses launchd on macOS and systemd user services on Linux.
 `artifacts server` remains a compatible name for the same service and state.
-No Tailscale installation, account, URL, or gateway is required.
 
 `artifacts host install` starts the service and enables future login starts;
 `artifacts host start` starts it without newly enabling login startup; an existing
-login setting is retained. The other
-commands are `stop`, `status`, `logs`, and `uninstall`. On Linux this requires
+login setting is retained. The other commands are `stop`, `status`, `logs`, and `uninstall`. On Linux this requires
 a working systemd user session; boot-before-login operation requires separately
 configured user lingering or a system-level service.
-
-The nicmini-specific Tailscale gateway and offline backup commands live in
-[separate deployment tooling](../deployments/nicmini/README.md), excluded from
-the package and standalone executable.
 
 ## Local persistent runtime
 

@@ -47,16 +47,12 @@ export async function seed(origin: string) {
 }
 
 export async function main() {
-  const prepareOnly = process.argv.includes("--prepare-only");
   const { config, port, directory } = localOptions(process.env);
   // Fail before builds or state changes if another application owns this port.
-  if (!prepareOnly) {
-    const listener = Bun.listen({ hostname: "127.0.0.1", port, socket: { data() {} } });
-    listener.stop(true);
-  }
-  // A deployable bundle contains no credentials; provision those on its host.
-  let githubToken = prepareOnly ? undefined : process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
-  if (!prepareOnly && !githubToken) {
+  const listener = Bun.listen({ hostname: "127.0.0.1", port, socket: { data() {} } });
+  listener.stop(true);
+  let githubToken = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+  if (!githubToken) {
     if (!Bun.which("gh")) throw new Error("Set GITHUB_TOKEN or sign in with gh auth login");
     const auth = Bun.spawn(["gh", "auth", "token", "--hostname", "github.com"], { stdout: "pipe", stderr: "ignore" });
     githubToken = (await new Response(auth.stdout).text()).trim();
@@ -107,16 +103,11 @@ export async function main() {
     runtime.vars = {
       ...(runtime.vars as Record<string, unknown>),
       RUNNER_ORG: config.org, RUNNER_REPOS: config.repos.join(","), RUNNER_NAME_PREFIX: config.runnerPrefix,
-      ...(!prepareOnly ? { GITHUB_TOKEN: githubToken, RUNNER_STATUS_TOKEN: randomBytes(32).toString("hex") } : {}),
+      GITHUB_TOKEN: githubToken, RUNNER_STATUS_TOKEN: randomBytes(32).toString("hex"),
       RUNNER_STATUS_URL: `http://127.0.0.1:${port}/api/status`,
-      ...(process.env.CANVAS_PUBLIC_ORIGIN ? { CANVAS_PUBLIC_ORIGIN: process.env.CANVAS_PUBLIC_ORIGIN } : {}),
     };
     await chmod(runtimeConfig, 0o600);
     await writeFile(runtimeConfig, JSON.stringify(runtime), { mode: 0o600 });
-    if (prepareOnly) {
-      console.log(`Prepared credential-free Canvas host bundle: ${directory}`);
-      return;
-    }
     if (stopping) throw new Error("Startup interrupted");
     child = Bun.spawn([binary, "dev", runtimeConfig, "--host", "127.0.0.1", "--port", String(port), "--no-watch"], {
       cwd: directory, env: { ...environment, CELLD_ESBUILD: join(root, "node_modules/.bin/esbuild"), CELLD_WORKER_LOADER: "LOADER" },

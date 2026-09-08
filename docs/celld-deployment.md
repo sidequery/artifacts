@@ -11,12 +11,12 @@ through `celld dev --no-watch`, on loopback with local state. It supports macOS
 arm64 and glibc Linux arm64/x64. Background management uses launchd or systemd
 user services. No network provider is required. See [host commands](daemon.md).
 
-This is suitable for a personal machine such as nicmini. Keep its project path
-and `.celld/dev` data stable across upgrades. Local persistence does not provide
+This mode keeps state on one machine. Keep its project path and `.celld/dev`
+data stable across upgrades. Local persistence does not provide
 a replicated fleet or protect against losing the machine. A consistent offline
 copy requires stopping the service; copying live SQLite files is not a backup
-procedure. The optional nicmini tooling implements that stop/archive/start flow
-outside core. Its archive contains configuration and can contain credentials.
+procedure. Preserve the runtime configuration alongside state; configuration
+can contain credentials.
 
 ## Deployed celld nodes
 
@@ -35,8 +35,8 @@ For production or multiple machines, use celld's bucket-backed node mode:
    orchestrator, or another supervisor. The core host command currently manages
    the local mode; it does not provision a bucket or launch a production fleet.
 4. Terminate TLS and authenticate users in the application or a chosen reverse
-   proxy. Keep the operator/peer listener private. Tailscale is one optional
-   network transport, not a runtime dependency or the application's default auth.
+   proxy. Keep the operator/peer listener on a trusted private network, with an
+   encrypted overlay when that network does not provide confidentiality.
 5. Use `/.well-known/celld/health` for node readiness. `/health` is an application
    route and does not establish node readiness. Allow graceful SIGTERM shutdown:
    the supervisor's stop grace must exceed celld's configured shutdown bound
@@ -48,10 +48,9 @@ For production or multiple machines, use celld's bucket-backed node mode:
 
 Two or more nodes reduce write latency through peer durability; a single node
 waits for bucket persistence. Monitor memory headroom, cold activation queues,
-and disk space. Reserve capacity for startup and deploys: on nicmini, competing
-CI builds exhausted memory headroom and repeatedly exceeded celld dev's internal
-30-second listener-announcement deadline. Increasing an outer host timeout does
-not change that internal deadline.
+and disk space. Reserve capacity for startup and deploys. The local dev supervisor
+has an internal 30-second listener-announcement deadline; increasing an outer service
+timeout does not change it.
 
 Moving an existing local `.celld/dev` installation to a bucket-backed fleet is a
 separate data migration. Changing startup flags does not migrate its saved state.

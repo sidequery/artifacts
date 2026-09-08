@@ -19,8 +19,6 @@ jobs:
           bun-version: 1.4.0
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
-      - run: bun x tsc --project deployments/nicmini/tsconfig.json
-      - run: bun test deployments/nicmini
       - run: bun run test
       - run: bun x playwright install --with-deps chromium
       - run: bun run test:mcp-ui
