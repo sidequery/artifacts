@@ -1,6 +1,6 @@
 # Scripts and direct artifact links
 
-The hosted gallery supports artifacts and standalone scripts. Either can have a chosen root URL such as `/sales-dashboard` or `/stripe-webhook`. Artifact URLs open the interactive artifact and its backend; script URLs invoke the script's HTTP handler. Slugs are unique across the deployment, including across artifact types and libraries. Existing application routes are reserved.
+The HTTP server gallery supports artifacts and standalone scripts, both on Cloudflare and locally through `artifacts server`. Either can have a chosen root URL such as `/sales-dashboard` or `/stripe-webhook`. Artifact URLs open the interactive artifact and its backend; script URLs invoke the script's HTTP handler. Slugs are unique across the deployment, including across artifact types and libraries. Existing application routes are reserved. Local server URLs are reachable only on the same machine.
 
 ## Gallery
 
@@ -14,7 +14,7 @@ Expand **Run** to choose an HTTP method, path, headers as a JSON object, and a t
 
 Expand **Logs** and select **Load logs** to inspect recent execution output. Under **Secrets**, enter a name and value and select **Save secret**; the value field clears after saving. Enter a name and select **Remove secret** to delete it. Stored secret values are never loaded into the editor or source history.
 
-These controls are available in the hosted gallery. The local gallery continues to support existing artifacts.
+These controls are available in the HTTP server gallery. The separate workspace gallery (`artifacts web`) supports filesystem artifacts and does not run scripts.
 
 ## Script handler
 
@@ -34,7 +34,7 @@ export default {
 } satisfies ExportedHandler<ScriptEnv>;
 ```
 
-`ScriptEnv` is available during type checking. It contains `secrets: Record<string, string>` and `sql: SqlStorage`. Outbound `fetch` is available. `ctx.waitUntil` can extend background work associated with a request. Scripts can import supported `cloudflare:` and `node:` builtins. Use relative helper modules and exact npm dependencies through the project source editor or MCP project fields. Code must be compatible with the Workers runtime; this is not a general server process or scheduling system.
+`ScriptEnv` is available during type checking. It contains `secrets: Record<string, string>` and `sql: SqlStorage`. Outbound `fetch` is available. `ctx.waitUntil` can extend background work associated with a request. Scripts can import supported `cloudflare:` and `node:` builtins. Use relative helper modules and exact npm dependencies through the project source editor or MCP project fields. Code must be compatible with the Workers runtime. For recurring execution, use the server's [scheduling controls](#schedules-and-execution-history).
 
 Use `env.secrets.NAME` for a configured secret. For example, a handler can verify a provider signature against the original request body. Script HTTP requests preserve their methods, query strings, and body bytes. The gateway strips cookies and Cloudflare Access assertion/service-token headers; private routes also strip the authorization credential used for management authentication.
 
@@ -57,7 +57,7 @@ Do not assume an in-memory global persists between requests or updates. Each exe
 
 ## Access
 
-Links default to **Private** and use the artifact's existing library permissions. Management APIs and the gallery remain authenticated. Setting a link to **Public** allows external callers to invoke or view it; a public script can implement its own authentication through request headers or signatures.
+On authenticated hosted deployments, links default to **Private** and use the artifact's existing library permissions. Management APIs and the gallery remain authenticated. Setting a link to **Public** allows external callers to invoke or view it; a public script can implement its own authentication through request headers or signatures. The packaged local server uses loopback access and should not be exposed through a public proxy.
 
 If Cloudflare Access protects the deployment's entire hostname, configure an Access bypass for the intended public paths so external callers can reach the Worker. The artifact's access setting does not override an Access policy that blocks the request before it reaches the application.
 
