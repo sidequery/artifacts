@@ -9,8 +9,6 @@ through MCP, then manage source, versions, and execution in the browser.
 Deploy on **Cloudflare** or run your own servers with **celld**. Keep tools private,
 share them with your team, or publish a public URL.
 
-<img width="1417" height="945" alt="Sidequery Artifacts gallery with an interactive app preview" src="https://github.com/user-attachments/assets/87b51b80-660d-449a-8e80-acbeb5db15e9" />
-
 ## What you can build
 
 - **Apps and dashboards:** React interfaces with their own TypeScript backend,
