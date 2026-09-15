@@ -53,7 +53,7 @@ export default {
 } satisfies ExportedHandler<ScriptEnv>;
 ```
 
-Do not assume an in-memory global persists between requests or updates. Each execution is limited to 30 seconds of CPU and 50 subrequests, in addition to the Workers runtime limits. Logs retain the latest 100 entries with messages capped at 2 KiB. Secret strings are redacted from captured console output; handlers still control their own response bodies and outbound requests.
+Do not assume an in-memory global persists between requests or updates. On Cloudflare, each execution is limited to 30 seconds of CPU and 50 subrequests, in addition to the Workers runtime limits. The celld configuration omits these per-script budgets because celld 0.5.0 rejects them and does not enforce them. Logs retain the latest 100 entries with messages capped at 2 KiB. Secret strings are redacted from captured console output; handlers still control their own response bodies and outbound requests.
 
 ## Access
 

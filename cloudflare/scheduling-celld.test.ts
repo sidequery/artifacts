@@ -3,11 +3,12 @@ import {mkdtemp,rm} from "node:fs/promises";
 import {join} from "node:path";
 import {tmpdir} from "node:os";
 import {ensureCelldRuntime} from "../src/local/celld-runtime";
+import {prepareCelldConfig} from "../scripts/prepare-celld";
 const enabled=process.env.CELLD_SCHEDULING_INTEGRATION==="1";
 let directory="",url="",binary="",logs="";
 let child:ReturnType<typeof Bun.spawn>|undefined;
 async function start(){
-  child=Bun.spawn([binary,"dev",directory,"--host","127.0.0.1","--port",new URL(url).port,"--no-watch"],{cwd:directory,env:{...process.env,CELLD_WORKER_LOADER:"LOADER",CELLD_ESBUILD:join(import.meta.dir,"../node_modules/.bin/esbuild")},stdout:"pipe",stderr:"pipe"});
+  child=Bun.spawn([binary,"dev",directory,"--host","127.0.0.1","--port",new URL(url).port,"--no-watch","--logs"],{cwd:directory,env:{...process.env,CELLD_ESBUILD:join(import.meta.dir,"../node_modules/.bin/esbuild")},stdout:"pipe",stderr:"pipe"});
   for(const stream of [child.stdout,child.stderr]) if(typeof stream!=="number")void(async()=>{for await(const chunk of stream)logs+=new TextDecoder().decode(chunk);})();
   const deadline=Date.now()+45000;
   while(Date.now()<deadline){try{if((await fetch(url+"/logs")).ok)return;}catch{}if(child.exitCode!==null)break;await Bun.sleep(100);}
@@ -22,7 +23,8 @@ beforeAll(async()=>{
   const bundle=await Bun.build({entrypoints:[join(import.meta.dir,"scripts-test-worker.ts")],target:"browser",format:"esm",external:["cloudflare:workers","node:*","fs","fs/promises"]});
   if(!bundle.success)throw new Error(bundle.logs.join("\n"));
   await Bun.write(join(directory,"worker.js"),await bundle.outputs[0]!.text());
-  await Bun.write(join(directory,"wrangler.jsonc"),JSON.stringify({name:"schedule-test",main:"worker.js",compatibility_date:"2026-09-06",compatibility_flags:["nodejs_compat"],durable_objects:{bindings:[{name:"SCRIPTS",class_name:"ScriptLibrary"},{name:"SCRIPT_BACKENDS",class_name:"ScriptBackend"},{name:"LINKS",class_name:"ArtifactLinks"}]},migrations:[{tag:"v1",new_sqlite_classes:["ScriptLibrary","ScriptBackend","ArtifactLinks"]}]}));
+  await Bun.write(join(directory,"wrangler.jsonc"),JSON.stringify({name:"schedule-test",main:"worker.js",compatibility_date:"2026-09-06",compatibility_flags:["nodejs_compat"],worker_loaders:[{binding:"LOADER"}],durable_objects:{bindings:[{name:"SCRIPTS",class_name:"ScriptLibrary"},{name:"SCRIPT_BACKENDS",class_name:"ScriptBackend"},{name:"LINKS",class_name:"ArtifactLinks"}]},migrations:[{tag:"v1",new_sqlite_classes:["ScriptLibrary","ScriptBackend","ArtifactLinks"]}]}));
+  await prepareCelldConfig(join(directory,"wrangler.jsonc"),join(directory,"wrangler.jsonc"),{main:"worker.js"});
   await start();
 },180000);
 afterAll(async()=>{await stop();if(directory)await rm(directory,{recursive:true,force:true});});
@@ -36,7 +38,7 @@ async function call(path:string,input:unknown={}){const response=await fetch(`${
   await call("backend/schedule",{action:"set",identity:{...identity,libraryKey:"scheduled",origin:url},cron:"* * * * *",timezone:"UTC",request:{path:"/tick",method:"POST",headers:[["x-artifact-internal-run","caller-value"]]}});
   await call("backend/schedule",{action:"pause"});
   await call("backend/schedule",{action:"run_now"});
-  expect((await call("backend/runs"))[0]).toMatchObject({status:"succeeded",trigger:"manual"});
+  expect((await call("backend/runs"))[0],JSON.stringify(await call("backend/logs"))+logs).toMatchObject({status:"succeeded",trigger:"manual"});
   await stop();await start();
   expect(await call("backend/schedule")).toMatchObject({paused:true,cron:"* * * * *",timezone:"UTC"});
   expect(await call("backend/runs")).toHaveLength(1);

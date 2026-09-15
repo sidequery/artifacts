@@ -377,8 +377,14 @@ backend. Their browser views can use ordinary local artifact interactions, but
 
 [celld](https://github.com/denoland/celld) is a Cloudflare-compatible runtime.
 Wrangler/workerd remains the default Cloudflare development path. Artifact also
-qualifies the released celld v0.4.1 against the built application, including
+targets the released celld v0.5.0 with integration tests for the built application, including
 generated `ArtifactServer` execution on raw SQL and KV facets.
+The generated config preserves the `worker_loaders` binding used by celld 0.5.0;
+the removed `CELLD_WORKER_LOADER` environment variable must no longer be set.
+The generated config sets `ARTIFACTS_RUNTIME=celld`, which omits the unsupported
+script CPU and subrequest limits. celld does not enforce these per-script budgets.
+Cloudflare retains the 30,000 ms CPU and 50 subrequest limits by default; do not
+set this variable to `celld` on Cloudflare. See the [upstream compatibility notes](https://github.com/denoland/celld/blob/v0.5.0/docs/cloudflare-compat.md#dynamic-workers).
 
 ```sh
 bun run dev:celld
@@ -414,7 +420,7 @@ carries that D1 binding. celld v0.4.1 can run the checked-in Better Auth schema 
 local D1 and preserve it across a restart. Its `celld d1 migrations apply` command
 targets deployed bucket storage rather than the local development database, so
 the Artifacts celld integration uses a temporary bootstrap Worker for local schema
-setup. This fixture qualifies the complete OAuth/session flow on celld v0.4.1;
+setup. This fixture exercises the complete OAuth/session flow on celld v0.5.0;
 ordinary `dev:celld` does not apply auth migrations automatically. Use
 Wrangler/workerd's local migration command for routine Better Auth development.
 

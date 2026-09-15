@@ -12,7 +12,7 @@ let directory = "", binary = "", url = "", logs = "";
 let child: ReturnType<typeof Bun.spawn> | undefined;
 async function startNative() {
   child = Bun.spawn([binary, "dev", directory, "--host", "127.0.0.1", "--port", new URL(url).port, "--no-watch"], {
-    cwd: directory, env: { ...process.env, CELLD_WORKER_LOADER: "LOADER", CELLD_ESBUILD: join(import.meta.dir, "../node_modules/.bin/esbuild") }, stdout: "pipe", stderr: "pipe",
+    cwd: directory, env: { ...process.env, CELLD_ESBUILD: join(import.meta.dir, "../node_modules/.bin/esbuild") }, stdout: "pipe", stderr: "pipe",
   });
   for (const stream of [child.stdout, child.stderr]) if (typeof stream !== "number") void (async () => {
     for await (const chunk of stream) logs += new TextDecoder().decode(chunk);
@@ -43,6 +43,7 @@ beforeAll(async () => {
     await Bun.write(join(directory, "worker.js"), await build.outputs[0]!.text());
     await Bun.write(join(directory, "wrangler.jsonc"), JSON.stringify({ name: "backend-test", main: "worker.js", compatibility_date: "2026-09-06", compatibility_flags: ["nodejs_compat"],
       durable_objects: { bindings: [{ name: "BACKENDS", class_name: "ArtifactBackend" }] }, migrations: [{ tag: "v1", new_sqlite_classes: ["ArtifactBackend"] }],
+      worker_loaders: [{ binding: "LOADER" }],
     }));
     await startNative();
     return;

@@ -88,7 +88,7 @@ function spawnCelld(binary: string, esbuild: string, project: string, port: numb
   const process = Bun.spawn({
     cmd: [binary, "dev", project, "--host", "127.0.0.1", "--port", String(port), "--no-watch", "--logs"],
     cwd: project,
-    env: { ...globalThis.process.env, CELLD_ESBUILD: esbuild, CELLD_WORKER_LOADER: "LOADER" },
+    env: { ...globalThis.process.env, CELLD_ESBUILD: esbuild },
     stdout: "pipe",
     stderr: "pipe",
   });

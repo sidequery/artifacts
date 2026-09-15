@@ -61,7 +61,7 @@ async function startCelld(compiler = esbuild) {
   processHandle = Bun.spawn({
     cmd: [binary, "dev", project, "--host", "127.0.0.1", "--port", String(port), "--no-watch"],
     cwd: project,
-    env: { ...process.env, CELLD_ESBUILD: compiler, CELLD_WORKER_LOADER: "LOADER" },
+    env: { ...process.env, CELLD_ESBUILD: compiler },
     stdout: "pipe",
     stderr: "pipe",
   });

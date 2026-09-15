@@ -110,7 +110,7 @@ export async function main() {
     await writeFile(runtimeConfig, JSON.stringify(runtime), { mode: 0o600 });
     if (stopping) throw new Error("Startup interrupted");
     child = Bun.spawn([binary, "dev", runtimeConfig, "--host", "127.0.0.1", "--port", String(port), "--no-watch"], {
-      cwd: directory, env: { ...environment, CELLD_ESBUILD: join(root, "node_modules/.bin/esbuild"), CELLD_WORKER_LOADER: "LOADER" },
+      cwd: directory, env: { ...environment, CELLD_ESBUILD: join(root, "node_modules/.bin/esbuild") },
       stdout: "inherit", stderr: "inherit",
     });
     const origin = `http://127.0.0.1:${port}`;
