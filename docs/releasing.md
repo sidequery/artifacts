@@ -77,7 +77,7 @@ the runtime suite, and daemon lifecycle on supported service managers. The local
 packaged server uses loopback single-user mode; deploying Better Auth remains the
 separate configuration described in [Cloudflare setup](cloudflare.md).
 
-celld v0.4.1 publishes Apple Silicon macOS and glibc Linux arm64/x64 binaries.
+celld v0.5.0 publishes Apple Silicon macOS and glibc Linux arm64/x64 binaries.
 Intel macOS and other targets cannot use this managed native server version.
 The ordinary Bun CLI, stdio MCP, and local file gallery do not download celld.
 

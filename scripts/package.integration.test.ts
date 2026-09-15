@@ -234,7 +234,7 @@ try {
             : undefined;
       if (!target) throw new Error(`CELLD_PACKAGE_INTEGRATION is unsupported on ${process.platform}/${process.arch}`);
       if (process.env.CELLD_BIN) {
-        const managedBinary = join(isolatedEnv.ARTIFACTS_DATA_HOME, "runtimes", "celld", "0.4.1", target, "celld");
+        const managedBinary = join(isolatedEnv.ARTIFACTS_DATA_HOME, "runtimes", "celld", "0.5.0", target, "celld");
         mkdirSync(dirname(managedBinary), { recursive: true });
         copyFileSync(process.env.CELLD_BIN, managedBinary);
         chmodSync(managedBinary, 0o700);

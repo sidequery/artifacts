@@ -6,14 +6,14 @@ import { nativeRequest } from "./backend";
 import type { ArtifactHttpRequest } from "../src/httpTypes";
 import { sha256 } from "./library";
 import { scriptResponse } from "./script-service-http";
+import { scriptRuntimeConfig } from "./script-runtime";
 
 export type ScriptLog = { timestamp: string; level: string; message: string; run_id?: string };
 export type ScriptRequest = {code: string; hash: string; secrets: Record<string,string>; request: Request; trigger?: "http" | "manual" | "schedule"; run_id?: string};
 export type ScheduleIdentity = {libraryKey: string; workspace: string; name: string; origin: string};
 export type ScriptSchedule = ScheduleTiming & { paused: boolean; next_run_at: number | null; request: ArtifactHttpRequest};
 export type ScriptRun = {id: string; revision: string; trigger: string; started_at: string; finished_at: string | null; duration_ms: number | null; status: string; http_status: number | null};
-type Env = { LOADER: WorkerLoader; SCRIPTS: DurableObjectNamespace<ScriptLibrary>; LINKS: DurableObjectNamespace<ArtifactLinks> };
-const runtimeConfig = { compatibilityDate: "2026-09-06", compatibilityFlags: ["nodejs_compat"], limits: { cpuMs: 30000, subRequests: 50 } };
+type Env = { LOADER: WorkerLoader; SCRIPTS: DurableObjectNamespace<ScriptLibrary>; LINKS: DurableObjectNamespace<ArtifactLinks>; ARTIFACTS_RUNTIME?: string };
 declare abstract class ScriptFacet extends DurableObject { takeLogs(): ScriptLog[]; }
 const RUN_HEADER = "x-artifact-internal-run";
 export const SCRIPT_HEADER = "x-artifact-internal-script";
@@ -64,10 +64,12 @@ export default { fetch() { return new Response(typeof handler?.fetch === "functi
 `;
 
 export class ScriptBackend extends DurableObject<Env> {
+  private readonly runtimeConfig: ReturnType<typeof scriptRuntimeConfig>;
   private activeKey?: string;
   private facet?: Fetcher<ScriptFacet>;
   constructor(state: DurableObjectState, env: Env) {
     super(state,env);
+    this.runtimeConfig = scriptRuntimeConfig(env.ARTIFACTS_RUNTIME);
     state.storage.sql.exec("create table if not exists execution_logs(id integer primary key autoincrement,timestamp text not null,level text not null,message text not null)");
     if (!state.storage.sql.exec<{name: string}>("pragma table_info(execution_logs)").toArray().some(column => column.name === "run_id")) state.storage.sql.exec("alter table execution_logs add column run_id text");
     state.storage.sql.exec("create table if not exists execution_runs(id text primary key,revision text not null,trigger text not null,started_at text not null,finished_at text,duration_ms integer,status text not null,http_status integer)");
@@ -76,12 +78,12 @@ export class ScriptBackend extends DurableObject<Env> {
     state.storage.sql.exec("update execution_runs set status='interrupted' where status='running'");
   }
   private cacheKey(input: Omit<ScriptRequest,"request">) {
-    return sha256(JSON.stringify([this.ctx.id.toString(), input.code, input.secrets, runtimeConfig, adapter, logging]));
+    return sha256(JSON.stringify([this.ctx.id.toString(), input.code, input.secrets, this.runtimeConfig, adapter, logging]));
   }
   private worker(input: Omit<ScriptRequest,"request">) {
     const hash=this.cacheKey(input);
     return this.env.LOADER.get(hash,async()=>({
-      ...runtimeConfig,
+      ...this.runtimeConfig,
       mainModule:"adapter.js",modules:{"adapter.js":adapter,"logging.js":logging.replace("__ARTIFACTS_SCRIPT_SECRETS__", () => JSON.stringify(input.secrets)),"user.js":input.code},
       env:{secrets:input.secrets},
     }));

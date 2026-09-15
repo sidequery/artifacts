@@ -17,6 +17,7 @@ const supportedKeys = new Set([
   "kv_namespaces",
   "queues",
   "workflows",
+  "worker_loaders",
   "r2_buckets",
 ]);
 
@@ -34,7 +35,7 @@ export async function prepareCelldConfig(
       directory: paths.assets ?? "./dist/cloudflare/assets",
     };
   }
-  config.vars = { ...(config.vars as Record<string, unknown> | undefined), ENVIRONMENT: "local" };
+  config.vars = { ...(config.vars as Record<string, unknown> | undefined), ENVIRONMENT: "local", ARTIFACTS_RUNTIME: "celld" };
   await Bun.write(output, `${JSON.stringify(config, null, 2)}\n`);
   return config;
 }

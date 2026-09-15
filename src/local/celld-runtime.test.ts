@@ -11,7 +11,7 @@ afterEach(async () => { for (const directory of directories.splice(0)) await rm(
 async function fixture() {
   const dataRoot = await mkdtemp(join(tmpdir(), "artifact-runtime-test-"));
   directories.push(dataRoot);
-  const binary = Buffer.from("#!/bin/sh\nprintf 'celld 0.4.1\\n'\n");
+  const binary = Buffer.from("#!/bin/sh\nprintf 'celld 0.5.0\\n'\n");
   const compressed = gzipSync(binary);
   const hash = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
   return { dataRoot, binary, compressed, artifact: { target: "fixture", archiveSha256: hash(compressed), binarySha256: hash(binary) } };
@@ -33,12 +33,12 @@ test("selects only released native platforms and keeps app data outside the chec
 test("downloads a verified executable once, works offline thereafter, and repairs executable mode", async () => {
   const f = await fixture();
   let calls = 0;
-  const fetcher = (async (url: string | URL | Request) => { calls++; expect(String(url)).toEndWith("/v0.4.1/celld-fixture.gz"); return new Response(f.compressed); });
+  const fetcher = (async (url: string | URL | Request) => { calls++; expect(String(url)).toEndWith("/v0.5.0/celld-fixture.gz"); return new Response(f.compressed); });
   const executable = await ensureCelldRuntime({ ...f, fetch: fetcher });
   expect(await readFile(executable)).toEqual(f.binary);
   expect((await stat(executable)).mode & 0o777).toBe(0o700);
   const child = Bun.spawn([executable], { stdout: "pipe" });
-  expect(await new Response(child.stdout).text()).toBe("celld 0.4.1\n");
+  expect(await new Response(child.stdout).text()).toBe("celld 0.5.0\n");
   expect(await child.exited).toBe(0);
   expect(await ensureCelldRuntime({ ...f, fetch: (async () => { throw new Error("offline"); }) })).toBe(executable);
   expect(calls).toBe(1);
@@ -52,7 +52,7 @@ test("rejects HTTP, archive, and decompressed integrity failures before installi
   await expect(ensureCelldRuntime({ ...f, fetch: (async () => new Response("unavailable", { status: 503 })) })).rejects.toThrow("HTTP 503");
   await expect(ensureCelldRuntime({ ...f, fetch: (async () => new Response("bad bytes")) })).rejects.toThrow("archive checksum mismatch");
   await expect(ensureCelldRuntime({ ...f, artifact: { ...f.artifact, binarySha256: "wrong" }, fetch: (async () => new Response(f.compressed)) })).rejects.toThrow("executable checksum mismatch");
-  expect(await Bun.file(join(f.dataRoot, "runtimes/celld/0.4.1/fixture/celld")).exists()).toBe(false);
+  expect(await Bun.file(join(f.dataRoot, "runtimes/celld/0.5.0/fixture/celld")).exists()).toBe(false);
 });
 
 test("concurrent verified installs publish one complete executable", async () => {

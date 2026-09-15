@@ -29,7 +29,7 @@ The server keeps its project and native state under the Artifacts data directory
 `--state-dir PATH` overrides that project directory for a foreground run. Press
 Ctrl-C to request a graceful stop. SIGTERM uses the same shutdown path.
 
-On first use, Artifacts downloads celld 0.4.1 for a supported platform, verifies
+On first use, Artifacts downloads celld 0.5.0 for a supported platform, verifies
 the pinned archive and executable SHA-256 values, and installs it in the Artifact
 data directory with user-only permissions. This release supports Apple Silicon
 macOS and glibc Linux on arm64 or x64. The ordinary Bun commands do not require this native runtime; `artifacts server`

@@ -10,7 +10,7 @@ if (!existsSync(esbuild)) throw new Error(`esbuild was not found at ${esbuild}; 
 const child = Bun.spawn({
   cmd: [binary, "dev", resolve(root, "wrangler.celld.jsonc"), "--host", "127.0.0.1", "--port", process.env.CELLD_PORT ?? "4786"],
   cwd: root,
-  env: { ...process.env, CELLD_ESBUILD: esbuild, CELLD_WORKER_LOADER: "LOADER" },
+  env: { ...process.env, CELLD_ESBUILD: esbuild },
   stdin: "inherit",
   stdout: "inherit",
   stderr: "inherit",
