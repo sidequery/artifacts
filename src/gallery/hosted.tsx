@@ -58,6 +58,11 @@ export function formatScriptResponse(value: unknown): string {
 export function encodeRequestBody(body: string): string {
   return btoa(Array.from(new TextEncoder().encode(body), byte => String.fromCharCode(byte)).join(""));
 }
+export function parseRequestHeaders(text: string): [string, string][] {
+  const parsed: unknown = JSON.parse(text);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || Object.values(parsed).some(value => typeof value !== "string")) throw new Error("Headers must be a JSON object of string values.");
+  return Object.entries(parsed);
+}
 export function LinkSettings({ artifact, onSaved }: { artifact: GalleryArtifact; onSaved: () => Promise<void> }) {
   const [slug, setSlug] = useState(artifact.slug ?? "");
   const [access, setAccess] = useState(artifact.access ?? "private");
@@ -98,6 +103,29 @@ function ConflictActions({ sourceUrl, dirty, onReload }: { sourceUrl: string; di
   </div>;
 }
 const initialSource = `export default {\n  async fetch(request, env, ctx) {\n    return Response.json({ message: "Hello" });\n  },\n} satisfies ExportedHandler<ScriptEnv>;\n`;
+export function AgentOnboarding({ workspace }: { workspace: string }) {
+  const [status, setStatus] = useState("");
+  const url = new URL("/mcp", window.location.origin);
+  url.searchParams.set("workspace", workspace);
+  const library = new URLSearchParams(window.location.search).get("library");
+  if (library) url.searchParams.set("library", library);
+  const prompt = "Use artifact_guide, then create a small interactive artifact in this library with artifact_write. Use a new kebab-case name and private access. Show the preview and explain how I can edit it.";
+  async function copy(value: string, label: string) {
+    try { await navigator.clipboard.writeText(value); setStatus(`${label} copied`); }
+    catch (error) { setStatus(message(error)); }
+  }
+  return <div className="agent-onboarding">
+    <h2>Create your first artifact</h2>
+    <p>Connect your agent to this deployment’s MCP URL, then send the starter prompt. You can also create an HTTP handler with New script.</p>
+    <details open><summary>Connect agent</summary>
+      <label>MCP URL<input aria-label="Deployment MCP URL" readOnly value={url.href} /></label>
+      <button type="button" onClick={() => void copy(url.href, "MCP URL")}>Copy MCP URL</button>
+      <label>Starter prompt<textarea aria-label="Starter prompt" readOnly value={prompt} /></label>
+      <button type="button" onClick={() => void copy(prompt, "Starter prompt")}>Copy starter prompt</button>
+      <p role="status">{status}</p>
+    </details>
+  </div>;
+}
 export function ScriptPanel({ artifact, workspace, version, sourceUrl, onSaved, onCancel, view = "source" }: { artifact?: GalleryArtifact; workspace: string; version?: string; sourceUrl?: string; onSaved: (name: string) => Promise<void>; onCancel?: () => void; view?: ScriptView }) {
   const buffer = useProjectDraft(artifact ? `${artifact.key}:${version}` : `new-script:${workspace}`);
   const { draft } = buffer;
@@ -176,10 +204,9 @@ export function ScriptPanel({ artifact, workspace, version, sourceUrl, onSaved, 
     {artifact ? <>
       <section className="script-activity" aria-label="Script requests" hidden={view !== "requests"}>
         <form onSubmit={event => { event.preventDefault(); void perform(async () => {
-          const parsed: unknown = JSON.parse(headers);
-          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || Object.values(parsed).some(value => typeof value !== "string")) throw new Error("Headers must be a JSON object of string values.");
+          const parsed = parseRequestHeaders(headers);
           if (!path.startsWith("/")) throw new Error("Path must start with /.");
-          const result = await galleryTool(workspace, "script_run", { name, request: { path, method, headers: Object.entries(parsed), ...(method !== "GET" && method !== "HEAD" && body ? { body: encodeRequestBody(body) } : {}) } });
+          const result = await galleryTool(workspace, "script_run", { name, request: { path, method, headers: parsed, ...(method !== "GET" && method !== "HEAD" && body ? { body: encodeRequestBody(body) } : {}) } });
           setOutput(formatScriptResponse(result));
         }); }}>
           <p className="muted">Run target: {liveRevisionLabel(artifact)}. Unsaved changes and invalid drafts are not included.</p>

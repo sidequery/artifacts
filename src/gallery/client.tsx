@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { authClient, signInUrl } from "../auth/client-api";
 import type { GalleryArtifact, GalleryData } from "./types";
 import { ExecutionControls } from "./execution-controls";
-import { ArtifactSourcePanel, LinkSettings, ScriptPanel, liveRevisionLabel, type ScriptView } from "./hosted";
+import { AgentOnboarding, ArtifactSourcePanel, LinkSettings, ScriptPanel, liveRevisionLabel, type ScriptView } from "./hosted";
 import { artifactFileTransferUrl } from "../sdk/files";
 import { RemixPanel } from "./remix";
 import { Select } from "./select";
@@ -130,6 +130,12 @@ const styles = `
   .save-feedback p { margin: 0 0 6px; }
   .save-feedback button { height: auto; text-align: left; text-decoration: underline; }
   .save-feedback pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .agent-onboarding { max-width: 680px; padding: 32px; }
+  .agent-onboarding label { display: block; margin-top: 16px; }
+  .agent-onboarding input, .agent-onboarding textarea { display: block; width: 100%; background: var(--raised); }
+  .agent-onboarding textarea { min-height: 100px; }
+  .live-data-note { padding: 8px 16px; margin: 0; border-bottom: 1px solid var(--line); color: var(--muted); }
+  .artifact-execution fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
   .source-actions .source-readonly { margin-right: auto; }
   .save-conflict { flex-shrink: 0; padding: 8px 16px; max-height: 35vh; overflow: auto; }
   .save-conflict button { border-color: var(--line); margin-right: 8px; }
@@ -693,12 +699,14 @@ function App() {
                 {sortedVersions.map(version => <option key={version.id} value={version.id}>Revision {version.revision} · {formatDate(version.createdAt)}</option>)}
               </Select></label>
             </div> : null}
+            {!creatingScript && selectedArtifact?.kind !== "script" && selectedArtifact && resolvedVersion !== "working" && gallery?.capabilities?.links ? <p className="live-data-note"><strong>Live data</strong> · Historical code uses the current database and files and can change them. Restore deploys this code while keeping current data.</p> : null}
             {showMove && !creatingScript && selectedArtifact && gallery?.libraryScope && gallery.capabilities?.moves ? <div id="library-move-panel" className="detail-disclosure"><MovePanel key={selectedArtifact.key} artifact={selectedArtifact} library={gallery.libraryScope} onCancel={() => setShowMove(false)} /></div> : null}
             {remixing && !creatingScript && selectedArtifact && resolvedVersion ? <div className="detail-disclosure"><RemixPanel key={selectedArtifact.key + resolvedVersion} artifact={selectedArtifact} version={resolvedVersion} onCancel={() => setRemixing(false)} onSaved={async name => { createdRemix.current = {name, workspace:selectedArtifact.workspace, kind:selectedArtifact.kind ?? "artifact"}; await loadGallery(); setSelectedVersion("working"); setQuery(""); setKindFilter("all"); setRemixing(false); }} /></div> : null}
             {!creatingScript && selectedArtifact && gallery?.capabilities?.links ? <div id="link-settings-panel" className="detail-disclosure" hidden={!showLinks}><LinkSettings key={selectedArtifact.key} artifact={selectedArtifact} onSaved={loadGallery} /></div> : null}
             <section id="artifact-panel" className="artifact-stage" aria-label={selectedArtifact?.kind === "script" || creatingScript ? "Script editor" : activeTab === "preview" ? "Artifact preview" : activeTab === "activity" ? "Artifact activity" : "Artifact source"}>
               {creatingScript ? <ScriptPanel key="new-script" workspace={gallery?.workspace ?? "default"} onCancel={() => setCreatingScript(false)} onSaved={async name => { createdScriptName.current = name; await loadGallery(); setCreatingScript(false); setSelectedVersion("working"); setTab("source"); setQuery(""); setKindFilter("all"); }} />
                 : selectedArtifact?.kind === "script" ? <ScriptPanel key={`${selectedArtifact.key}:${resolvedVersion}`} artifact={selectedArtifact} workspace={selectedArtifact.workspace} version={resolvedVersion ?? undefined} view={activeTab as ScriptView} sourceUrl={resolvedVersion ? artifactUrl("/api/source", selectedArtifact, resolvedVersion) : undefined} onSaved={async () => { setSelectedVersion("working"); await loadGallery(); }} />
+                : !selectedArtifact && !loading && gallery?.capabilities?.links ? <AgentOnboarding workspace={gallery.workspace} />
                 : !selectedArtifact ? <div className="empty-detail"><h2>{loading ? "Loading your library…" : "Your library"}</h2><p>{loading ? "Your saved artifacts will appear shortly." : "Select an artifact or script to open it."}</p></div>
                 : !resolvedVersion ? <div className="empty-detail"><h2>No readable version</h2><p>This artifact has no saved source available to preview.</p></div>
                 : <>

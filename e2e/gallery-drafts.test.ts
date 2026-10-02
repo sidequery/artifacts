@@ -68,6 +68,7 @@ test("gallery retains complete unsaved projects and new scripts and offers confl
     await page.getByRole("combobox", { name: "Version", exact: true }).selectOption("old");
     await page.getByRole("button", { name: "Restore and deploy", exact: true }).waitFor();
     expect(await client.innerText()).toBe("historical client");
+    expect(await page.locator(".live-data-note").innerText()).toContain("Historical code uses the current database and files and can change them");
     await page.getByRole("combobox", { name: "Version", exact: true }).selectOption("working");
     expect(await client.innerText()).toBe("unsaved client");
     await page.getByRole("button", { name: "Save and deploy", exact: true }).click();

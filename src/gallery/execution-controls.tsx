@@ -1,44 +1,80 @@
-import {Select} from "./select";
-import {useState} from "react";
-import {galleryTool} from "./hosted";
+import { useEffect, useState } from "react";
+import { Select } from "./select";
+import { encodeRequestBody, galleryTool, parseRequestHeaders } from "./hosted";
+import { nextOccurrence, normalizeTiming } from "../../cloudflare/schedule";
 
-type Schedule = {interval_seconds?:number;cron?:string;timezone?:string;paused:boolean;next_run_at:number|null;request:{path:string;method:string;headers:[string,string][];body?:string}};
-type Run = {id:string;revision:string;trigger:string;started_at:string;duration_ms:number|null;status:string;http_status:number|null};
-const unpack=(value:unknown):any=>typeof value==="string"?JSON.parse(value):value;
-export function ExecutionControls({workspace,name,kind="script"}:{workspace:string;name:string;kind?:"script"|"artifact"}) {
-  const [schedule,setSchedule]=useState<Schedule|null>(null),[loaded,setLoaded]=useState(false);
-  const [mode,setMode]=useState("interval"),[interval,setInterval]=useState("3600"),[cron,setCron]=useState("0 * * * *"),[timezone,setTimezone]=useState("UTC");
-  const [path,setPath]=useState("/"),[method,setMethod]=useState("GET"),[headers,setHeaders]=useState("[]"),[body,setBody]=useState("");
-  const [runs,setRuns]=useState<Run[]>([]),[logs,setLogs]=useState(""),[error,setError]=useState(""),[busy,setBusy]=useState(false);
-  async function perform(work:()=>Promise<void>) {setBusy(true);setError("");try{await work();}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}}
-  async function control(action:string) {
-    const request=action==="set"?{path,method,headers:JSON.parse(headers),...(body?{body:btoa(Array.from(new TextEncoder().encode(body),b=>String.fromCharCode(b)).join(""))}:{})}:undefined;
-    const result=unpack(await galleryTool(workspace,`${kind}_schedule`,{name,action,...(action==="set"?{...(mode==="interval"?{interval_seconds:Number(interval)}:{cron,timezone}),request}:{})}));
-    setSchedule(result.schedule);setLoaded(true);
-    if(action==="get"&&result.schedule){const s=result.schedule as Schedule;setMode(s.cron?"cron":"interval");setInterval(String(s.interval_seconds??3600));setCron(s.cron??"0 * * * *");setTimezone(s.timezone??"UTC");setPath(s.request.path);setMethod(s.request.method);setHeaders(JSON.stringify(s.request.headers));setBody(s.request.body?new TextDecoder().decode(Uint8Array.from(atob(s.request.body),c=>c.charCodeAt(0))):"");}
+type Schedule = { interval_seconds?: number; cron?: string; timezone?: string; paused: boolean; next_run_at: number | null; request: { path: string; method: string; headers: [string, string][]; body?: string } };
+type Run = { id: string; revision: string; trigger: string; started_at: string; duration_ms: number | null; status: string; http_status: number | null };
+const unpack = (value: unknown): { schedule: Schedule | null; runs: Run[] } => typeof value === "string" ? JSON.parse(value) : value as { schedule: Schedule | null; runs: Run[] };
+const units = { seconds: 1, minutes: 60, hours: 3600, days: 86400 };
+type Unit = keyof typeof units;
+
+export function ExecutionControls({ workspace, name, kind = "script" }: { workspace: string; name: string; kind?: "script" | "artifact" }) {
+  const [open, setOpen] = useState(false);
+  const [schedule, setSchedule] = useState<Schedule | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [mode, setMode] = useState("interval");
+  const [interval, setInterval] = useState("1"), [unit, setUnit] = useState<Unit>("hours");
+  const [cron, setCron] = useState("0 * * * *"), [timezone, setTimezone] = useState("UTC");
+  const [path, setPath] = useState("/"), [method, setMethod] = useState("GET");
+  const [headers, setHeaders] = useState("{}"), [originalHeaders, setOriginalHeaders] = useState<[string, string][] | null>(null);
+  const [body, setBody] = useState("");
+  const [runs, setRuns] = useState<Run[]>([]), [logs, setLogs] = useState("");
+  const [error, setError] = useState(""), [busy, setBusy] = useState(false);
+
+  async function perform(work: () => Promise<void>) {
+    setBusy(true); setError("");
+    try { await work(); } catch (error) { setError(error instanceof Error ? error.message : String(error)); }
+    finally { setBusy(false); }
   }
+  function timing() { return normalizeTiming(mode === "interval" ? { interval_seconds: Number(interval) * units[unit] } : { cron, timezone }); }
+  async function control(action: string) {
+    const request = action === "set" ? { path, method, headers: originalHeaders ?? parseRequestHeaders(headers), ...(method !== "GET" && method !== "HEAD" && body ? { body: encodeRequestBody(body) } : {}) } : undefined;
+    if (request && !path.startsWith("/")) throw new Error("Path must start with /.");
+    const result = unpack(await galleryTool(workspace, `${kind}_schedule`, { name, action, ...(action === "set" ? { ...timing(), request } : {}) }));
+    setSchedule(result.schedule); setLoaded(true);
+    if (action === "get") {
+      const current = result.schedule;
+      const seconds = current?.interval_seconds ?? 3600;
+      const nextUnit = (["days", "hours", "minutes", "seconds"] as Unit[]).find(value => seconds % units[value] === 0)!;
+      setMode(current?.cron ? "cron" : "interval"); setUnit(nextUnit); setInterval(String(seconds / units[nextUnit]));
+      setCron(current?.cron ?? "0 * * * *"); setTimezone(current?.timezone ?? "UTC");
+      setPath(current?.request.path ?? "/"); setMethod(current?.request.method ?? "GET");
+      setOriginalHeaders(current?.request.headers ?? null);
+      setHeaders(JSON.stringify(Object.fromEntries(current?.request.headers ?? []), null, 2));
+      setBody(current?.request.body ? new TextDecoder().decode(Uint8Array.from(atob(current.request.body), character => character.charCodeAt(0))) : "");
+    }
+  }
+  useEffect(() => { if (open && !loaded) void perform(() => control("get")); }, [open]);
+  let preview = "";
+  if (loaded) { try { preview = `Next run if saved now: ${new Date(nextOccurrence(timing())).toISOString()} (UTC)`; } catch (error) { preview = error instanceof Error ? error.message : String(error); } }
+  const duplicates = originalHeaders && new Set(originalHeaders.map(([key]) => key.toLowerCase())).size < originalHeaders.length;
   return <>
-    {error?<p role="alert">{error}</p>:null}
-    <details><summary>Schedule</summary>
-      <button disabled={busy} onClick={()=>void perform(()=>control("get"))}>Load schedule</button>
-      {loaded?<p>{schedule?(schedule.paused?"Paused":`Next run: ${new Date(schedule.next_run_at!).toISOString()} (UTC)`):"No schedule configured"}</p>:null}
-      <form onSubmit={event=>{event.preventDefault();void perform(()=>control("set"));}}>
-        <label>Repeat <Select aria-label="Schedule mode" value={mode} onChange={e=>setMode(e.target.value)}><option value="interval">Interval</option><option value="cron">Cron</option></Select></label>
-        {mode==="interval"?<label>Every (seconds) <input aria-label="Schedule interval" type="number" min="60" max="31536000" required value={interval} onChange={e=>setInterval(e.target.value)}/></label>:<><label>Cron <input aria-label="Schedule cron" required value={cron} onChange={e=>setCron(e.target.value)}/></label><label>Timezone <input aria-label="Schedule timezone" required value={timezone} onChange={e=>setTimezone(e.target.value)}/></label></>}
-        <label>Method <Select aria-label="Schedule method" value={method} onChange={e=>setMethod(e.target.value)}>{["GET","POST","PUT","PATCH","DELETE","HEAD"].map(m=><option key={m}>{m}</option>)}</Select></label>
-        <label>Path <input aria-label="Schedule path" required value={path} onChange={e=>setPath(e.target.value)}/></label>
-        <label>Headers (JSON pairs) <textarea aria-label="Schedule headers" value={headers} onChange={e=>setHeaders(e.target.value)}/></label>
-        <label>Body <textarea aria-label="Schedule body" value={body} onChange={e=>setBody(e.target.value)}/></label>
-        <button disabled={busy}>Save schedule</button>
+    {error ? <p role="alert">{error}</p> : null}
+    <details onToggle={event => setOpen(event.currentTarget.open)}><summary>Schedule</summary>
+      <button disabled={busy} onClick={() => void perform(() => control("get"))}>{loaded ? "Reload schedule" : "Load schedule"}</button>
+      {!loaded ? <p role="status">{busy ? "Loading schedule…" : "Load current settings before editing."}</p> : <p>{schedule ? schedule.paused ? "Paused" : schedule.next_run_at === null ? "No next run" : `Next run: ${new Date(schedule.next_run_at).toISOString()} (UTC)` : "No schedule configured"}</p>}
+      <form onSubmit={event => { event.preventDefault(); if (loaded && !busy) void perform(() => control("set")); }}>
+        <fieldset disabled={!loaded || busy}>
+          <label>Repeat <Select aria-label="Schedule mode" value={mode} onChange={event => setMode(event.target.value)}><option value="interval">Interval</option><option value="cron">Cron</option></Select></label>
+          {mode === "interval" ? <><label>Every <input aria-label="Schedule interval" type="number" min={60 / units[unit]} max={31536000 / units[unit]} step="any" required value={interval} onChange={event => setInterval(event.target.value)} /></label><Select aria-label="Schedule interval unit" value={unit} onChange={event => { const nextUnit = event.target.value as Unit; setInterval(String(Number(interval) * units[unit] / units[nextUnit])); setUnit(nextUnit); }}>{Object.keys(units).map(value => <option key={value}>{value}</option>)}</Select></> : <><label>Cron <input aria-label="Schedule cron" required value={cron} onChange={event => setCron(event.target.value)} /></label><label>Timezone <input aria-label="Schedule timezone" required value={timezone} onChange={event => setTimezone(event.target.value)} /></label></>}
+          {loaded ? <p>{preview}</p> : null}
+          <label>Method <Select aria-label="Schedule method" value={method} onChange={event => setMethod(event.target.value)}>{["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"].map(value => <option key={value}>{value}</option>)}</Select></label>
+          <label>Path <input aria-label="Schedule path" required value={path} onChange={event => setPath(event.target.value)} /></label>
+          <label>Headers (JSON) <textarea aria-label="Schedule headers" value={headers} onChange={event => { setHeaders(event.target.value); setOriginalHeaders(null); }} /></label>
+          {duplicates ? <p>Repeated headers are preserved until you edit this field.</p> : null}
+          {method !== "GET" && method !== "HEAD" ? <label>Body <textarea aria-label="Schedule body" value={body} onChange={event => setBody(event.target.value)} /></label> : null}
+          <button disabled={!loaded || busy}>Save schedule</button>
+        </fieldset>
       </form>
-      {schedule?<><button disabled={busy} onClick={()=>void perform(()=>control(schedule.paused?"resume":"pause"))}>{schedule.paused?"Resume schedule":"Pause schedule"}</button><button disabled={busy} onClick={()=>void perform(()=>control("run_now"))}>Run schedule now</button></>:null}
+      {schedule ? <><button disabled={busy} onClick={() => void perform(() => control(schedule.paused ? "resume" : "pause"))}>{schedule.paused ? "Resume schedule" : "Pause schedule"}</button><button disabled={busy} onClick={() => void perform(() => control("run_now"))}>Run schedule now</button></> : null}
       <p>Runs the latest validated revision. Missed occurrences are skipped. Failed or interrupted runs require an explicit retry.</p>
     </details>
     <details><summary>Run history</summary>
-      <button disabled={busy} onClick={()=>void perform(async()=>setRuns(unpack(await galleryTool(workspace,`${kind}_runs`,{name})).runs))}>Load runs</button>
+      <button disabled={busy} onClick={() => void perform(async () => setRuns(unpack(await galleryTool(workspace, `${kind}_runs`, { name })).runs))}>Load runs</button>
       <p>HTTP-handler outcomes; background tasks and streamed response completion are separate. Latest 100 of up to 1,000 retained runs.</p>
-      <table><thead><tr><th>Started (UTC)</th><th>Trigger</th><th>Status</th><th>HTTP</th><th>Duration</th><th>Revision</th>{kind==="script"?<th>Logs</th>:null}</tr></thead><tbody>{runs.map(run=><tr key={run.id}><td>{run.started_at}</td><td>{run.trigger}</td><td>{run.status}</td><td>{run.http_status??"—"}</td><td>{run.duration_ms===null?"—":`${run.duration_ms} ms`}</td><td title={run.revision}>{run.revision.slice(0,12)}</td>{kind==="script"?<td><button disabled={busy} onClick={()=>void perform(async()=>setLogs(JSON.stringify(unpack(await galleryTool(workspace,"script_logs",{name,run_id:run.id})),null,2)))}>View logs</button></td>:null}</tr>)}</tbody></table>
-      {logs?<pre aria-label="Run logs">{logs}</pre>:null}
+      <table><thead><tr><th>Started (UTC)</th><th>Trigger</th><th>Status</th><th>HTTP</th><th>Duration</th><th>Revision</th>{kind === "script" ? <th>Logs</th> : null}</tr></thead><tbody>{runs.map(run => <tr key={run.id}><td>{run.started_at}</td><td>{run.trigger}</td><td>{run.status}</td><td>{run.http_status ?? "—"}</td><td>{run.duration_ms === null ? "—" : `${run.duration_ms} ms`}</td><td title={run.revision}>{run.revision.slice(0, 12)}</td>{kind === "script" ? <td><button disabled={busy} onClick={() => void perform(async () => setLogs(JSON.stringify(await galleryTool(workspace, "script_logs", { name, run_id: run.id }), null, 2)))}>View logs</button></td> : null}</tr>)}</tbody></table>
+      {logs ? <pre aria-label="Run logs">{logs}</pre> : null}
     </details>
   </>;
 }

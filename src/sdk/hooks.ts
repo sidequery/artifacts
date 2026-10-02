@@ -12,6 +12,26 @@ export type ArtifactAction =
 
 export type SetArtifactState<T> = Dispatch<SetStateAction<T>>;
 
+export type ArtifactCapabilities = {
+  server: boolean;
+  files: boolean;
+  plugins: boolean;
+  hostActions: boolean;
+  statePersistence: "persistent" | "session";
+};
+
+/** Query the bridges installed by this view without making a request. */
+export function getArtifactCapabilities(): ArtifactCapabilities {
+  const bridge = (globalThis as typeof globalThis & { __artifacts?: HostBridge }).__artifacts ?? {};
+  return {
+    server: typeof bridge.onRequest === "function",
+    files: typeof bridge.onFileRequest === "function",
+    plugins: typeof bridge.onPluginCall === "function",
+    hostActions: typeof bridge.onAction === "function" || !!bridge.actionUrl,
+    statePersistence: bridge.persistUrl ? "persistent" : "session",
+  };
+}
+
 export type HostBridge = {
   route?: import("./routing").ArtifactRoute;
   artifactId?: string;
