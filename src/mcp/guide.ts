@@ -6,7 +6,7 @@ export const ARTIFACTS_GUIDE_EXPORTS = [
   "Pill", "Row", "Select", "Spacer", "Stack", "Stat", "Table", "Text", "TextArea",
   "TextInput", "Toggle", "artifactFetch", "pluginCall", "Routes", "Route", "Outlet", "Navigate", "NavLink", "useNavigate", "useParams", "useLocation", "useSearchParams", "useMatch", "useResolvedPath", "artifactPaletteDark", "artifactPaletteLight", "artifactTypography",
   "mergeStyle", "themeFromKind", "tokensFromPalette", "useArtifactAction", "useArtifactState", "useState", "useReducer", "useRef", "useMemo", "useCallback", "useEffect", "useHostTheme",
-  "artifactFiles", "MAX_ARTIFACTS_FILE_BYTES",
+  "artifactFiles", "MAX_ARTIFACTS_FILE_BYTES", "getArtifactCapabilities",
 ];
 export const LEGACY_GUIDE_EXPORTS = [
   "useCanvasAction", "useCanvasState", "canvasFetch", "canvasFiles", "MAX_CANVAS_FILE_BYTES",
