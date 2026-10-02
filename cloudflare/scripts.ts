@@ -84,6 +84,17 @@ export class ScriptLibrary extends DurableObject<unknown> {
       return {...result,remixed:true,origin:{source_name:origin.name,source_version_id:origin.id}};
     });
   }
+  importDraft(input: { workspace: string; name: string; source: string; project: ArtifactProject }) {
+    const { workspace, name } = key(input);
+    return this.ctx.storage.transactionSync(() => {
+      if (this.sql.exec("select name from scripts where workspace=? and name=? union all select name from script_versions where workspace=? and name=?", workspace, name, workspace, name).toArray().length) throw new Error("Destination script already exists; choose a new name");
+      return { ...this.save({ ...input, workspace, name }, "import"), imported: true };
+    });
+  }
+  draftRevision(input: { workspace: string; name: string }): string {
+    const row = this.row(input);
+    return projectRevision(row.source, null, this.projectStorage.read(row.project));
+  }
   listDrafts(input: {workspace?: string; offset?: number; limit?: number} = {}) {
     const {offset,limit} = page(input), workspace = input.workspace === undefined ? null : text(input.workspace,"workspace");
     return this.sql.exec<{workspace: string; name: string; source_hash: string; updated_at: string; active_hash: string | null}>("select workspace,name,source_hash,updated_at,active_hash from scripts where (? is null or workspace=?) order by workspace,name limit ? offset ?",workspace,workspace,limit,offset).toArray().map(row=>({...row,id:row.name,path:`${row.workspace}/${row.name}.script.ts`,kind:"script" as const}));

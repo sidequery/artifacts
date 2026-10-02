@@ -177,6 +177,10 @@ test("published tarball runs the CLI, gallery, and stdio MCP outside a checkout"
     const compiled = JSON.parse((await run([artifact, "compile", "package-smoke", ...args], consumer, isolatedEnv)).stdout);
     expect(compiled.ok).toBe(true);
     expect(compiled.bytes).toBeGreaterThan(1_000);
+    const projectArchive = join(consumer, "package-smoke.artifact-project.json");
+    await run([artifact, "export", "package-smoke", "--output", projectArchive, ...args], consumer, isolatedEnv);
+    const imported = JSON.parse((await run([artifact, "import", "package-copy", "--file", projectArchive, ...args], consumer, isolatedEnv)).stdout);
+    expect(imported).toMatchObject({ ok: true, imported: true, name: "package-copy" });
 
     gallery = Bun.spawn([artifact, "web", "--port", "0", ...args], {
       cwd: consumer,

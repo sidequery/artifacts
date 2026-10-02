@@ -157,7 +157,7 @@ test("gallery filters, previews revisions, and preserves mobile library navigati
     await mobile.frameLocator('iframe[title="Preview of Campaign overview"]').getByRole("heading", { name: "Campaign performance" }).waitFor();
     await noHorizontalOverflow(mobile);
     await mobile.getByLabel("More actions", { exact: true }).click();
-    expect(await mobile.getByRole("link", { name: "Download source", exact: true }).isVisible()).toBe(true);
+    expect(await mobile.getByRole("link", { name: "Download entrypoint", exact: true }).isVisible()).toBe(true);
     await mobile.getByLabel("More actions", { exact: true }).click();
     await screenshot(mobile, "gallery-mobile-preview");
     await mobile.getByRole("group", { name: "Artifact view" }).getByRole("button", { name: "Source", exact: true }).click();

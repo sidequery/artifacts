@@ -9,6 +9,7 @@ import type { ArtifactHttpRequest } from "../src/httpTypes";
 import { formatArtifactCheck } from "../src/diagnostics";
 import { compileScriptSource } from "./compiler";
 import { HOSTED_SCRIPT_GUIDE } from "./script-guide";
+import { parseProjectArchive, projectArchive } from "../src/project-archive";
 
 export class CloudScriptService {
   constructor(private readonly artifacts: ArtifactService) {}
@@ -51,6 +52,10 @@ export class CloudScriptService {
         return text({ versions, next_offset: versions.length === 100 ? offset + 100 : null });
       }
       case "script_version": return text(await scripts.version({ workspace: this.artifacts.workspace, id: args.version_id as string }));
+      case "script_export": {
+        const archive = projectArchive("script", await this.readSource({ name, version_id: args.version_id as string | undefined }));
+        return { ...text(archive), structuredContent: archive };
+      }
       case "script_schedule": {
         const target=this.artifacts.target("script",name);
         const backend=hosted.scriptBackends.getByName(JSON.stringify([this.artifacts.libraryKey,this.artifacts.workspace,target.name]));
@@ -76,8 +81,10 @@ export class CloudScriptService {
         const envelope = await hosted.scriptBackends.getByName(JSON.stringify([this.artifacts.libraryKey, this.artifacts.workspace, this.artifacts.target("script", name).name])).request({ ...active, request: args.request as ArtifactHttpRequest, origin: hosted.origin, trigger: "manual" });
         return { ...text({ status: envelope.status, ...(link ? { url: `${hosted.publicOrigin ?? hosted.origin}/${link.slug}` } : {}) }), structuredContent: { response: envelope } };
       }
-      case "script_remix": case "script_write": case "script_edit": case "script_restore": {
-        const target = this.artifacts.target("script", tool === "script_remix" ? args.new_name as string : name);
+      case "script_import": case "script_remix": case "script_write": case "script_edit": case "script_restore": {
+        const archive = tool === "script_import" ? parseProjectArchive(args.archive, "script") : undefined;
+        const fresh = tool === "script_remix" || tool === "script_import";
+        const target = this.artifacts.target("script", fresh ? args.new_name as string : name);
         if (tool === "script_write" && args.expected_revision !== undefined) {
           const current = await scripts.readRange(input).catch(error => { if (error instanceof Error && error.message.includes("script not found")) return null; throw error; });
           assertProjectRevision(args.expected_revision as string | null, current?.revision_token ?? null);
@@ -85,9 +92,9 @@ export class CloudScriptService {
         // Read pending intent only after taking this operation's generation.
         // A concurrent explicit access change then either precedes this read or
         // supersedes this generation; it cannot be undone by stale metadata.
-        let generation = tool === "script_remix" ? undefined : await hosted.links.begin(target);
+        let generation = fresh ? undefined : await hosted.links.begin(target);
         const settings: LinkUpdate = await hosted.links.draft(target);
-        if (tool === "script_remix") { settings.slug = args.slug as string | undefined ?? target.name; settings.access = "private"; }
+        if (fresh) { settings.slug = args.slug as string | undefined ?? target.name; settings.access = "private"; }
         if (tool === "script_write") {
           const previous = await hosted.links.find(target);
           settings.slug = args.slug as string | undefined ?? settings.slug ?? previous?.slug ?? target.name;
@@ -101,7 +108,8 @@ export class CloudScriptService {
         const destination = {...input,name:target.name};
         const previous = tool === "script_write" && args.project !== undefined ? await scripts.readRange(input).catch(error => { if (error instanceof Error && error.message.includes("script not found")) return undefined; throw error; }) : undefined;
         const project = tool === "script_write" && args.project !== undefined ? await resolveProject(args.project, previous?.project) : undefined;
-        const mutation = tool === "script_remix" ? await scripts.remix({workspace:this.artifacts.workspace,name:args.name as string | undefined,version_id:args.version_id as string | undefined,new_name:args.new_name as string}) : tool === "script_write" ? await scripts.writeDraft({ ...input, source: args.contents as string, project, expected_revision: args.expected_revision as string | null | undefined })
+        const mutation = archive ? await scripts.importDraft({ workspace: this.artifacts.workspace, name: target.name, source: archive.source, project: archive.project })
+          : tool === "script_remix" ? await scripts.remix({workspace:this.artifacts.workspace,name:args.name as string | undefined,version_id:args.version_id as string | undefined,new_name:args.new_name as string}) : tool === "script_write" ? await scripts.writeDraft({ ...input, source: args.contents as string, project, expected_revision: args.expected_revision as string | null | undefined })
           : tool === "script_edit" ? await scripts.editDraft({ ...input, file: args.file as string | undefined, edits: args.edits as ArtifactEdit[], expected_hash: args.expected_hash as string | undefined })
           : await scripts.restore({ workspace: this.artifacts.workspace, id: args.version_id as string });
         generation ??= await hosted.links.begin(target);

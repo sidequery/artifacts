@@ -7,6 +7,23 @@ import { sandboxToDiagnostics } from "./diagnostics";
 import { assertRegularArtifact, replaceArtifactSource } from "./artifactFile";
 
 export const localProjectPath = (path: string) => `${path}.project.json`;
+export const localServerPath = (path: string) => path.replace(/\.tsx$/, ".server.ts");
+export function readLocalServer(path: string): string | null {
+  const file = localServerPath(path);
+  if (!existsSync(file)) return null;
+  assertRegularArtifact(file);
+  return readFileSync(file, "utf8");
+}
+export function writeLocalServer(path: string, source: string | null, exclusive = false): void {
+  const file = localServerPath(path);
+  if (source === null) {
+    if (existsSync(file)) { assertRegularArtifact(file); rmSync(file); }
+    return;
+  }
+  if (exclusive) { writeFileSync(file, source, { flag: "wx" }); return; }
+  if (existsSync(file)) assertRegularArtifact(file);
+  replaceArtifactSource(file, source, existsSync(file) ? readFileSync(file, "utf8") : undefined, "server source update");
+}
 export function readLocalProject(path: string): ArtifactProject {
   const file = localProjectPath(path);
   if (!existsSync(file)) return emptyProject();

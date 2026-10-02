@@ -8,6 +8,8 @@ import { assertRegularArtifact, ensureArtifactFileName } from "./artifactFile";
 import { compileArtifact } from "./compile";
 import { ArtifactHistory, hash, historyPath, runtimeIdentity, type Version } from "./history";
 import { ArtifactService } from "./service";
+import { parseProjectArchive, projectArchive } from "./project-archive";
+import { readToolBody } from "../cloudflare/http";
 import { artifactHtml } from "./html";
 import { galleryBundle, galleryData, galleryHtml, workingSource } from "./gallery/server";
 
@@ -94,12 +96,19 @@ export async function createArtifactServer(opts: CreateArtifactServerOptions): P
               return json({ ok: false, error: "same-origin JSON request required" }, 403);
             }
             const workspace = url.searchParams.get("workspace");
-            if (workspace && resolve(workspace) !== artifactsDir) return json({ ok: false, error: "open this workspace's gallery to remix its artifact" }, 400);
-            const body = await request.json() as { name?: string; arguments?: Parameters<ArtifactService["remix"]>[0] };
-            if (body.name !== "artifact_remix" || !body.arguments) return json({ ok: false, error: "unknown tool" }, 400);
+            if (workspace && resolve(workspace) !== artifactsDir) return json({ ok: false, error: "open this workspace's gallery to import or remix its artifact" }, 400);
+            let body: { name?: string; arguments?: Record<string, unknown> };
+            try { body = await readToolBody(request) as typeof body; }
+            catch (error) { return json({ error: error instanceof Error ? error.message : "Invalid JSON" }, error instanceof RangeError ? 413 : 400); }
+            if (!body || !["artifact_remix", "artifact_import"].includes(body.name ?? "") || !body.arguments) return json({ ok: false, error: "unknown tool" }, 400);
             try {
               const service = new ArtifactService({ artifactsDir, env: { ...env, ARTIFACTS_HISTORY_DB: history.path } });
-              return json(service.remix(body.arguments));
+              if (body.name === "artifact_import") {
+                const archive = parseProjectArchive(body.arguments.archive, "artifact");
+                const result = service.importProject(body.arguments.new_name as string, archive);
+                return json({ structuredContent: result, isError: !result.ok });
+              }
+              return json(service.remix(body.arguments as Parameters<ArtifactService["remix"]>[0]));
             } catch (error) { return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400); }
           }
 
@@ -124,6 +133,10 @@ export async function createArtifactServer(opts: CreateArtifactServerOptions): P
                 source = selected.source; sourcePath = selected.path; artifactName = selected.name;
               } catch { return new Response("working artifact not found or not a regular file", { status: 404 }); }
               if (url.pathname === "/api/source") {
+                if (url.searchParams.get("format") === "project") {
+                  const archive = version ? projectArchive("artifact", version) : new ArtifactService({ artifactsDir, env: { ...env, ARTIFACTS_HISTORY_DB: history.path } }).exportProject({ name: artifactName });
+                  return new Response(JSON.stringify(archive), { headers: { "content-type": "application/json", "cache-control": "no-store", "content-disposition": `attachment; filename="project.artifact-project.json"; filename*=UTF-8''${encodeURIComponent(artifactName + ".artifact-project.json")}` } });
+                }
                 return new Response(source, { headers: {
                   "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff",
                   ...(url.searchParams.get("download") === "1" ? { "content-disposition": `attachment; filename="artifact.artifact.tsx"; filename*=UTF-8''${encodeURIComponent(artifactName + ".artifact.tsx")}` } : {}),

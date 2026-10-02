@@ -203,3 +203,19 @@ test("host install opts into login startup without network-provider configuratio
   expect(installed).toBe(true);
   await expect(runServerCommand(parseArgs(["host", "install", "--tailscale-login", "owner"]), { manager })).rejects.toThrow("Unknown host option");
 });
+
+test("CLI imports and exports complete versioned projects and rejects overwriting exports", async () => {
+  const directory = tempDir();
+  const common = ["--dir", directory, "--history-db", join(directory, "history.sqlite")];
+  const archive = { format: "sidequery-artifacts-project", version: 1, kind: "artifact", name: "portable", source: VALID_ARTIFACT, server_source: "preserved backend", project: { files: {}, dependencies: {}, lock: {} } };
+  const imported = await runCli(["import", "fresh", "--stdin", ...common], {}, JSON.stringify(archive));
+  expect(imported.exitCode).toBe(0);
+  const exported = await runCli(["export", "fresh", ...common]);
+  expect(exported.exitCode).toBe(0);
+  expect(JSON.parse(exported.stdout)).toEqual({ ...archive, name: "fresh" });
+  const output = join(directory, "export.json");
+  expect((await runCli(["export", "fresh", "--output", output, ...common])).exitCode).toBe(0);
+  expect((await runCli(["export", "fresh", "--output", output, ...common])).exitCode).toBe(1);
+  expect(JSON.parse(readFileSync(output, "utf8"))).toEqual({ ...archive, name: "fresh" });
+  expect((await runCli(["import", "fresh", "--file", output, ...common])).exitCode).toBe(1);
+});

@@ -72,6 +72,17 @@ test("gallery moves artifacts and scripts between libraries, preserves selection
       await panel.getByRole("button", { name: "Cancel", exact: true }).click();
       expect(await panel.count()).toBe(0);
       expect(moves).toHaveLength(beforeCancel);
+      if (kind === "artifact") await page.getByRole("group", { name: "Artifact view" }).getByRole("button", { name: "Source", exact: true }).click();
+      const editor = page.getByRole("textbox", { name: kind === "script" ? "script.ts" : `${name}.artifact.tsx`, exact: true });
+      const savedSource = await editor.innerText();
+      await editor.fill("unsaved project source");
+      await page.getByRole("button", { name: "Move", exact: true }).click();
+      page.once("dialog", dialog => void dialog.dismiss());
+      await panel.getByRole("button", { name: "Move to team library", exact: true }).click();
+      expect(moves).toHaveLength(beforeCancel);
+      expect(await editor.innerText()).toBe("unsaved project source");
+      await editor.fill(savedSource);
+      await panel.getByRole("button", { name: "Cancel", exact: true }).click();
       await page.getByRole("button", { name: "Move", exact: true }).click();
       collision = true;
       await panel.getByRole("button", { name: "Move to team library", exact: true }).click();

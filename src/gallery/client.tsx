@@ -10,6 +10,7 @@ import { Select } from "./select";
 import { MovePanel } from "./move";
 import { SourceEditor } from "./source-editor";
 import { DraftProvider, confirmLeavingDrafts, useDrafts } from "./drafts";
+import { ProjectImportPanel } from "./project-transfer";
 
 type Scope = "current" | "all";
 type DetailTab = "preview" | "source" | "activity" | "requests" | "secrets";
@@ -123,7 +124,7 @@ const styles = `
   .source-form > .script-fields { padding: 12px 16px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
   .source-actions { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--line); flex-shrink: 0; }
   .source-actions p { margin: 0; color: var(--muted); }
-  button.primary-action { background: #d8e3ec; color: #17202a; border-color: #d8e3ec; font-weight: 600; }
+  .gallery-app button.primary-action { background: #d8e3ec; color: #17202a; border-color: #d8e3ec; font-weight: 600; }
   button.primary-action:disabled { opacity: .45; }
   .deployment-status { margin: 6px 0 0; color: var(--muted); }
   .save-feedback { padding: 8px 16px; flex-shrink: 0; max-height: 30vh; overflow: auto; }
@@ -136,6 +137,12 @@ const styles = `
   .agent-onboarding textarea { min-height: 100px; }
   .live-data-note { padding: 8px 16px; margin: 0; border-bottom: 1px solid var(--line); color: var(--muted); }
   .artifact-execution fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+  .project-import { padding: 16px 20px; max-height: 50vh; overflow: auto; }
+  .project-import label { display: block; margin: 8px 0; }
+  .project-import h2 { margin: 0 0 8px; font-size: 16px; }
+  .project-import input { background: var(--raised); }
+  .project-import input[type=file] { height: auto; }
+  .project-import pre { max-height: 160px; overflow: auto; white-space: pre-wrap; }
   .source-actions .source-readonly { margin-right: auto; }
   .save-conflict { flex-shrink: 0; padding: 8px 16px; max-height: 35vh; overflow: auto; }
   .save-conflict button { border-color: var(--line); margin-right: 8px; }
@@ -183,6 +190,7 @@ const styles = `
   .refresh-error { padding: 10px 16px; margin: 0; border-bottom: 1px solid var(--line); background: var(--panel); }
   @media (hover: hover) and (pointer: fine) {
     button:hover:not(:disabled), .download-link:hover { background: var(--raised); }
+    .gallery-app button.primary-action:hover:not(:disabled) { background: #edf3f8; }
     .artifact-row[aria-current="true"]:hover { background: var(--selected); }
     .detail-actions .open-link:hover { background: #fff; }
     .view-control button:hover:not([aria-pressed="true"]), .library-filters button:hover:not([aria-pressed="true"]) { color: var(--text); background: transparent; }
@@ -304,6 +312,7 @@ function App() {
   const [kindFilter, setKindFilter] = useState<KindFilter>("all");
   const [showLinks, setShowLinks] = useState(false);
   const [showMove, setShowMove] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [sourceVisited, setSourceVisited] = useState<string | null>(null);
   const [mobileDetail, setMobileDetail] = useState(false);
   const [narrowLayout, setNarrowLayout] = useState(() => window.matchMedia("(max-width: 760px)").matches);
@@ -461,6 +470,7 @@ function App() {
   const downloadUrl = selectedArtifact && resolvedVersion
     ? artifactUrl("/api/source", selectedArtifact, resolvedVersion, true)
     : "";
+  const exportUrl = downloadUrl ? `${downloadUrl}&format=project` : "";
 
   useEffect(() => {
     const pending = new Set<string>();
@@ -578,14 +588,15 @@ function App() {
   const downloadSource = async (event: React.MouseEvent<HTMLAnchorElement>) => {
     if (!user) return;
     event.preventDefault();
+    const downloadHref = event.currentTarget.href;
     try {
-      const response = await fetch(downloadUrl, { headers: { Accept: "text/plain" } });
+      const response = await fetch(downloadHref);
       if (redirectExpiredSession(response)) return;
       if (!response.ok) throw new Error(`Source download failed (${response.status})`);
       const url = URL.createObjectURL(await response.blob());
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = `${selectedArtifact?.name ?? "artifact"}${selectedArtifact?.kind === "script" ? ".ts" : ".artifact.tsx"}`;
+      anchor.download = new URL(downloadHref).searchParams.get("format") === "project" ? `${selectedArtifact?.name ?? "artifact"}.artifact-project.json` : `${selectedArtifact?.name ?? "artifact"}${selectedArtifact?.kind === "script" ? ".ts" : ".artifact.tsx"}`;
       anchor.click();
       URL.revokeObjectURL(url);
     } catch (error) {
@@ -601,6 +612,7 @@ function App() {
           <span className="wordmark">Artifacts</span>
           {gallery?.workspace ? <span className="header-context" title={gallery.workspace}>{gallery.workspace}</span> : null}
           <div className="header-actions">
+            <button type="button" onClick={() => { setShowImport(true); setCreatingScript(false); setMobileDetail(true); }}>Import project</button>
             {gallery?.libraryScope ? <Select aria-label="Library" value={gallery.libraryScope} onChange={event => {
               if (!confirmLeavingDrafts(drafts)) return;
               const url = new URL(window.location.href);
@@ -682,11 +694,13 @@ function App() {
                 {gallery?.capabilities?.links ? <button type="button" aria-expanded={showLinks} aria-controls="link-settings-panel" onClick={() => setShowLinks(value => !value)}>Link settings</button> : null}
                 {gallery?.capabilities?.moves && gallery.libraryScope ? <button type="button" aria-expanded={showMove} aria-controls="library-move-panel" onClick={() => { setShowMove(value => !value); setShowLinks(false); setRemixing(false); }}>Move</button> : null}
                 <button type="button" onClick={() => setRemixing(value => !value)} aria-expanded={remixing}>Remix</button>
-                <a className="download-link desktop-download" href={downloadUrl} download onClick={downloadSource}>Download source</a>
-                <details className="mobile-more"><summary aria-label="More actions">More</summary><a className="download-link" href={downloadUrl} download onClick={downloadSource}>Download source</a></details>
+                <a className="download-link desktop-download" href={exportUrl} download onClick={downloadSource} title="Export the saved project; unsaved edits are not included">Export project</a>
+                <a className="download-link desktop-download" href={downloadUrl} download onClick={downloadSource}>Download entrypoint</a>
+                <details className="mobile-more"><summary aria-label="More actions">More</summary><a className="download-link" href={exportUrl} download onClick={downloadSource}>Export project</a><a className="download-link" href={downloadUrl} download onClick={downloadSource}>Download entrypoint</a></details>
                 {selectedArtifact.kind !== "script" && selectedArtifact.url ? <a className="download-link open-link" href={selectedArtifact.url} target="_blank" rel="noopener noreferrer">Open<span aria-hidden="true">↗</span></a> : null}
               </div> : null}
             </div>
+            {showImport && gallery ? <div className="detail-disclosure"><ProjectImportPanel workspace={gallery.workspace} hosted={!!gallery.capabilities?.links} onCancel={() => setShowImport(false)} onSaved={async (name, kind) => { createdRemix.current = { name, kind, workspace: gallery.workspace }; await loadGallery(); setSelectedVersion("working"); setTab("source"); setQuery(""); setKindFilter("all"); }} /></div> : null}
             {!creatingScript && selectedArtifact && resolvedVersion ? <div className="detail-toolbar">
               <div className="view-control" role="group" aria-label={selectedArtifact.kind === "script" ? "Script view" : "Artifact view"}>
                 {(selectedArtifact.kind === "script"

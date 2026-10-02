@@ -1,5 +1,6 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { MCP_TOOLS } from "../src/mcp/tools";
+import { PROJECT_ARCHIVE_SCHEMA } from "../src/project-archive-contract";
 
 // Share the local tool contract. A hosted service cannot open a terminal pane.
 export const CLOUD_MCP_TOOLS: Tool[] = JSON.parse(JSON.stringify(MCP_TOOLS));
@@ -78,6 +79,11 @@ for (const kind of ["artifact", "script"]) {
 }
 const artifactWrite = CLOUD_MCP_TOOLS.find(tool => tool.name === "artifact_write")!;
 Object.assign(artifactWrite.inputSchema.properties!, slugProperties);
+Object.assign(CLOUD_MCP_TOOLS.find(tool => tool.name === "artifact_import")!.inputSchema.properties!, { slug: slugProperties.slug });
+CLOUD_MCP_TOOLS.push(
+  { name: "script_export", description: "Export script source, helpers and exact dependency snapshot as a complete versioned project archive. Includes no secrets, database or schedules.", annotations: { readOnlyHint: true }, inputSchema: { type: "object", properties: { name: { type: "string" }, version_id: { type: "string" } }, oneOf: [{ required: ["name"] }, { required: ["version_id"] }], additionalProperties: false } },
+  { name: "script_import", description: "Import a complete script project archive under a fresh new_name and private URL. Preserves dependency bytes without network resolution. Copies no secrets, storage or schedules; invalid code stays as a draft with diagnostics.", inputSchema: { type: "object", properties: { new_name: { type: "string" }, slug: slugProperties.slug, archive: PROJECT_ARCHIVE_SCHEMA }, required: ["new_name", "archive"], additionalProperties: false } },
+);
 function addScriptTool(name: string, description: string, properties: Record<string, object>, required: string[] = []) {
   CLOUD_MCP_TOOLS.push({ name, description, inputSchema: { type: "object", properties, required, additionalProperties: false } });
 }

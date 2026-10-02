@@ -8,7 +8,8 @@ import { ManagedArtifactService } from "./managed-service";
 // the MCP SDK constructs its top-level schemas (Zod 4.5.4).
 import { authenticateBetterAuth, getArtifactAuth, ArtifactAuthConfigurationError, type BetterAuthEnvironment, type ArtifactUser } from "./better-auth";
 import { handleCloudMcp } from "./mcp";
-import { readRequestText } from "./http";
+import { readRequestText, readToolBody } from "./http";
+import { projectArchive } from "../src/project-archive";
 import { ArtifactBackend } from "./backend";
 import { ArtifactFiles, ArtifactFileError, TRANSFER_PATH } from "./files";
 import type { ArtifactFileRequest } from "../src/sdk/files";
@@ -114,8 +115,8 @@ app.get("/api/session", c => {
 app.all("/mcp", async c => {
   let body: unknown;
   if (c.req.method === "POST") {
-    try { body = JSON.parse(await readRequestText(c.req.raw, 1024 * 1024)); }
-    catch (error) { return c.json({ error: error instanceof RangeError ? "Request exceeds 1 MiB" : "Invalid JSON" }, error instanceof RangeError ? 413 : 400); }
+    try { body = await readToolBody(c.req.raw, true); }
+    catch (error) { return c.json({ error: error instanceof RangeError ? error.message : "Invalid JSON" }, error instanceof RangeError ? 413 : 400); }
   }
   return handleCloudMcp(c.req.raw, c.get("service"), body);
 });
@@ -159,8 +160,8 @@ app.post("/api/artifact/files", async c => {
 });
 app.post("/api/tools", async c => {
   let input: { name?: string; arguments?: Record<string, unknown> };
-  try { input = JSON.parse(await readRequestText(c.req.raw, 1024 * 1024)); }
-  catch (error) { return c.json({ error: error instanceof RangeError ? "Request exceeds 1 MiB" : "Invalid JSON" }, error instanceof RangeError ? 413 : 400); }
+  try { input = await readToolBody(c.req.raw) as typeof input; }
+  catch (error) { return c.json({ error: error instanceof RangeError ? error.message : "Invalid JSON" }, error instanceof RangeError ? 413 : 400); }
   if (!input || typeof input.name !== "string" || !Object.hasOwn(toolValidators, input.name)) return c.json({ error: "Unknown tool" }, 400);
   const validate = toolValidators[input.name as keyof typeof toolValidators];
   if (!validate(input.arguments ?? {})) return c.json({ error: "Invalid tool arguments" }, 400);
@@ -169,12 +170,20 @@ app.post("/api/tools", async c => {
 app.get("/api/source", async c => {
   if (c.req.query("kind") === "script") {
     const source = await c.get("service").scriptReadSource({ name: c.req.query("name"), version_id: c.req.query("version") });
+    if (c.req.query("format") === "project") {
+      c.header("Content-Disposition", `attachment; filename="project.artifact-project.json"; filename*=UTF-8''${encodeURIComponent(source.name + ".artifact-project.json")}`);
+      return c.json(projectArchive("script", source));
+    }
     if (c.req.query("format") === "json") return c.json(source);
     c.header("Content-Type", "text/plain; charset=utf-8");
     if (c.req.query("download") === "1") c.header("Content-Disposition", 'attachment; filename="script.ts"');
     return c.body(source.source);
   }
   const snapshot = await c.get("service").snapshot({ name: c.req.query("name"), version_id: c.req.query("version") });
+  if (c.req.query("format") === "project") {
+    c.header("Content-Disposition", `attachment; filename="project.artifact-project.json"; filename*=UTF-8''${encodeURIComponent(snapshot.name + ".artifact-project.json")}`);
+    return c.json(projectArchive("artifact", snapshot));
+  }
   if (c.req.query("format") === "json") return c.json(snapshot);
   c.header("Content-Type", "text/plain; charset=utf-8");
   if (c.req.query("download") === "1") c.header("Content-Disposition", `attachment; filename="artifact.artifact.tsx"; filename*=UTF-8''${encodeURIComponent(snapshot.name + ".artifact.tsx")}`);

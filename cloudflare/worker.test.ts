@@ -772,3 +772,71 @@ test("configured public origin changes generated links without changing local au
     expect(denied.status).toBe(403);
   } finally { await proxied.dispose(); }
 }, 60000);
+
+test("complete project archives round trip into fresh private scripts and artifacts with no live data", async () => {
+  const project = { files: { "lib/value.ts": 'export {value} from "archive-value";' }, dependencies: { "archive-value": "1.0.0" }, lock: {
+    "node_modules/archive-value/package.json": '{"name":"archive-value","version":"1.0.0","main":"index.js","types":"index.d.ts"}',
+    "node_modules/archive-value/index.js": "export const value = 7;",
+    "node_modules/archive-value/index.d.ts": "export const value: number;",
+    "node_modules/archive-value/padding.json": JSON.stringify({ padding: "x".repeat(1100000) }),
+  } };
+  const archive = (kind: "script" | "artifact", source: string, server_source: string | null = null) => ({ format: "sidequery-artifacts-project", version: 1, kind, name: "exported-project", source, server_source, project });
+  const call = async (name: string, args: Record<string, unknown>) => {
+    const result = await client.callTool({ name, arguments: args });
+    if (result.isError) throw new Error(JSON.stringify(result));
+    return (result.structuredContent ?? JSON.parse((result.content as {text: string}[])[0]!.text)) as any;
+  };
+  const scriptSource = `import {value} from "./lib/value";
+export default { fetch(request, env) {
+  env.sql.exec("create table if not exists app_rows(value integer)");
+  if (new URL(request.url).pathname === "/write") env.sql.exec("insert into app_rows values(1)");
+  return Response.json({value, count: env.sql.exec("select count(*) as n from app_rows").toArray()[0].n, secret: env.secrets.TOKEN ?? null});
+}};`;
+  const scriptArchive = archive("script", scriptSource);
+  const originScript = await call("script_import", { new_name: "archive-origin", archive: scriptArchive });
+  expect(originScript).toMatchObject({ imported: true, ok: true, access: "private" });
+  await call("script_secrets", { name: "archive-origin", secrets: { TOKEN: "original-only" } });
+  await call("script_run", { name: "archive-origin", request: { path: "/write" } });
+  await call("script_schedule", { name: "archive-origin", action: "set", interval_seconds: 3600 });
+  await call("artifact_link", { kind: "script", name: "archive-origin", slug: "archive-origin", access: "public" });
+  const exportedScript = await call("script_export", { name: "archive-origin" });
+  expect(exportedScript).toEqual({ ...scriptArchive, name: "archive-origin" });
+  expect(Object.keys(exportedScript).sort()).toEqual(["format", "kind", "name", "project", "server_source", "source", "version"]);
+  const copiedScript = await call("script_import", { new_name: "archive-copy", archive: exportedScript });
+  expect(copiedScript.access).toBe("private");
+  const run = await call("script_run", { name: "archive-copy", request: { path: "/" } });
+  expect(JSON.parse(atob(run.response.body))).toEqual({ value: 7, count: 0, secret: null });
+  expect((await call("script_schedule", { name: "archive-copy" })).schedule).toBeNull();
+  expect((await client.callTool({ name: "script_import", arguments: { new_name: "archive-copy", archive: exportedScript } })).isError).toBe(true);
+  const apiScript = await fetch(`${origin}/api/tools?workspace=test`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "script_import", arguments: { new_name: "archive-api-copy", archive: exportedScript } }) });
+  expect(apiScript.status).toBe(200);
+  expect((await apiScript.json() as any).structuredContent).toMatchObject({ imported: true, ok: true, access: "private" });
+  const downloadedScript = await (await fetch(`${origin}/api/source?workspace=test&kind=script&name=archive-origin&format=project`)).json();
+  expect(downloadedScript).toEqual(exportedScript);
+
+  const clientSource = 'import {value} from "./lib/value"; export default function App() { return <div>{value}</div>; }';
+  const serverSource = `import {DurableObject} from "cloudflare:workers";
+export class ArtifactServer extends DurableObject { fetch(request: Request) {
+  this.ctx.storage.sql.exec("create table if not exists app_rows(value integer)");
+  if (new URL(request.url).pathname === "/write") this.ctx.storage.sql.exec("insert into app_rows values(1)");
+  return Response.json({count: this.ctx.storage.sql.exec("select count(*) as n from app_rows").toArray()[0].n});
+}}`;
+  const artifactArchive = archive("artifact", clientSource, serverSource);
+  expect(await call("artifact_import", { new_name: "archive-app", archive: artifactArchive })).toMatchObject({ imported: true, ok: true, access: "private" });
+  await call("artifact_request", { name: "archive-app", request: { path: "/write" } });
+  const upload = (await call("artifact_files", { name: "archive-app", request: { operation: "upload", name: "original.txt", size: 3, type: "text/plain" } })).result;
+  expect((await fetch(upload.url, { method: "PUT", body: "one" })).status).toBe(201);
+  const exportedArtifact = await call("artifact_export", { name: "archive-app" });
+  expect(exportedArtifact).toEqual({ ...artifactArchive, name: "archive-app" });
+  expect(await call("artifact_import", { new_name: "archive-app-copy", archive: exportedArtifact })).toMatchObject({ imported: true, ok: true, access: "private" });
+  const response = await call("artifact_request", { name: "archive-app-copy", request: { path: "/" } });
+  expect(JSON.parse(atob(response.response.body))).toEqual({ count: 0 });
+  expect((await call("artifact_files", { name: "archive-app", request: { operation: "list" } })).result.files).toHaveLength(1);
+  expect((await call("artifact_files", { name: "archive-app-copy", request: { operation: "list" } })).result.files).toEqual([]);
+  const downloadedArtifact = await (await fetch(`${origin}/api/source?workspace=test&name=archive-app&format=project`)).json();
+  expect(downloadedArtifact).toEqual(exportedArtifact);
+  const versions = await call("artifact_history", { name: "archive-app" });
+  expect(await call("artifact_export", { version_id: versions.versions[0].version_id })).toEqual(exportedArtifact);
+  expect((await client.callTool({ name: "artifact_import", arguments: { new_name: "archive-app-copy", archive: exportedArtifact } })).isError).toBe(true);
+  await expect(client.callTool({ name: "artifact_import", arguments: { new_name: "archive-reject", archive: { ...exportedArtifact, secrets: {} } } })).rejects.toThrow("Invalid tool arguments");
+}, 60000);

@@ -21,6 +21,7 @@ import { artifactGuideResult } from "../src/mcp/guide";
 import type { ArtifactFiles } from "./files";
 import { ArtifactFileError, validateFileRequest } from "./files";
 import type { ArtifactFileRequest } from "../src/sdk/files";
+import { parseProjectArchive, projectArchive } from "../src/project-archive";
 
 import { dispatchPlugin, pluginCatalog, PLUGIN_GUIDE, type PluginInvocationContext } from "./plugins";
 import type { PluginRequest } from "../src/plugins/types";
@@ -78,6 +79,19 @@ export class CloudArtifactService {
         return text({ versions, next_offset: versions.length === 100 ? offset + 100 : null });
       }
       case "artifact_version": return text(await this.library.version({ workspace: this.workspace, id: args.version_id as string, events_offset: args.events_offset as number | undefined }));
+      case "artifact_export": {
+        const archive = projectArchive("artifact", await this.snapshot({ name: args.name as string | undefined, version_id: args.version_id as string | undefined }));
+        return { ...text(archive), structuredContent: archive };
+      }
+      case "artifact_import": {
+        const archive = parseProjectArchive(args.archive, "artifact");
+        const target = this.artifacts.target("artifact", args.new_name as string);
+        const slug = args.slug as string | undefined ?? target.name;
+        if (this.hosted) await this.hosted.links.check(target, slug);
+        const mutation = await this.library.importDraft({ workspace: this.workspace, name: target.name, source: archive.source, server_source: archive.server_source, project: archive.project, runtime });
+        const generation = await this.hosted?.links.begin(target);
+        return this.mutationResult(mutation, generation, this.hosted ? { slug, access: "private" } : {});
+      }
       case "artifact_remix": {
         const target = this.artifacts.target("artifact", args.new_name as string);
         const slug = args.slug as string | undefined ?? target.name;

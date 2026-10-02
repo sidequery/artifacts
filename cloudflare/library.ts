@@ -239,6 +239,23 @@ export class ArtifactLibrary extends DurableObject<unknown> {
     });
   }
 
+  importDraft(input: { workspace: string; name: string; source: string; server_source: string | null; project: ArtifactProject; runtime: string }) {
+    const workspace = workspaceName(input.workspace), name = artifactName(input.name), runtime = runtimeName(input.runtime);
+    const source = sourceText(input.source), server_source = input.server_source === null ? null : sourceText(input.server_source);
+    const project = normalizeProject(input.project);
+    return this.state.storage.transactionSync(() => {
+      if (first(this.sql.exec("select name from drafts where workspace=? and name=? union all select name from artifacts where workspace=? and name=?", workspace, name, workspace, name))) throw new Error("Destination artifact already exists; choose a new name");
+      const timestamp = now();
+      this.sql.exec("insert into drafts(workspace,name,source,server_source,source_hash,project,state,created_at,updated_at) values(?,?,?,?,?,?,'{}',?,?)", workspace, name, source, server_source, sha256(source), this.projectStorage.encode(project), timestamp, timestamp);
+      const version = this.capture(workspace, name, source, server_source, project, runtime, "import", null, true);
+      return { ok: true, imported: true, workspace, name, path: sourcePath(workspace, name), source, server_source, project, source_hash: sha256(source), revision_token: projectRevision(source, server_source, project), state: {}, versionId: version.id, revision: version.revision };
+    });
+  }
+  draftRevision(input: { workspace: string; name: string }): string {
+    const draft = this.draft(workspaceName(input.workspace), artifactName(input.name));
+    return projectRevision(draft.source, draft.server_source, this.projectStorage.read(draft.project));
+  }
+
   remix(input: { workspace: string; name?: string; version_id?: string; new_name: string; runtime: string }) {
     const workspace = workspaceName(input.workspace), name = artifactName(input.new_name), runtime = runtimeName(input.runtime);
     if (Boolean(input.name) === Boolean(input.version_id)) throw new Error("provide name or version_id, but not both");

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import { flagBoolean, flagString, parseArgs, type ParsedArgs } from "./args";
@@ -14,6 +14,7 @@ import { createArtifactServer } from "./serve";
 import { ArtifactService } from "./service";
 import { historyPath } from "./history";
 import { PLUGIN_ROOT } from "./paths";
+import type { ProjectArchive } from "./project-archive-contract";
 
 type ServerManager = Pick<ServerDaemonManager, "start" | "stop" | "status" | "logs" | "uninstall">;
 
@@ -135,6 +136,27 @@ async function main(): Promise<void> {
     if (args.positionals.length !== (versionId ? 1 : 2)) throw new Error("use remix SOURCE NEW_NAME or remix NEW_NAME --version ID");
     const result = service.remix({ name: versionId ? undefined : args.positionals[0], version_id: versionId,
       new_name: args.positionals[versionId ? 0 : 1]! });
+    printJson(result);
+    if (!result.ok) process.exitCode = 1;
+    return;
+  }
+
+  if (args.command === "export") {
+    const versionId = flagString(args.flags, "version");
+    const name = args.positionals[0];
+    if (Boolean(name) === Boolean(versionId)) throw new Error("use export NAME or export --version ID");
+    const kind = (flagString(args.flags, "kind") ?? (name?.endsWith(".script.ts") ? "script" : "artifact")) as ProjectArchive["kind"];
+    const archive = service.exportProject({ name, version_id: versionId, kind });
+    const output = flagString(args.flags, "output");
+    if (output) { writeFileSync(resolve(output), JSON.stringify(archive, null, 2) + "\n", { flag: "wx" }); printJson({ ok: true, path: resolve(output) }); }
+    else printJson(archive);
+    return;
+  }
+
+  if (args.command === "import") {
+    const name = args.positionals[0]; requireArg(name, "missing new project name");
+    if (args.positionals.length !== 1 || !flagString(args.flags, "file") && !flagBoolean(args.flags, "stdin")) throw new Error("use import NEW_NAME --file ARCHIVE or --stdin");
+    const result = service.importProject(name, JSON.parse(await readContents(args)));
     printJson(result);
     if (!result.ok) process.exitCode = 1;
     return;
@@ -304,6 +326,10 @@ Usage:
   artifacts restore VERSION_ID
   artifacts remix SOURCE NEW_NAME
   artifacts remix NEW_NAME --version VERSION_ID
+  artifacts export NAME [--kind artifact|script] [--output ARCHIVE_JSON]
+  artifacts export --version VERSION_ID [--output ARCHIVE_JSON]
+  artifacts import NEW_NAME --file ARCHIVE_JSON
+  artifacts import NEW_NAME --stdin
   artifacts host [--port 4786] [--state-dir PATH]
   artifacts host install [--port 4786]
   artifacts host start [--port 4786] [--at-login]
