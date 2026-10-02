@@ -76,7 +76,7 @@ export class ManagedArtifactService {
   private async linkDetails(kind: "artifact" | "script", workspace: string, name: string) {
     const target = await this.links.admit({ libraryKey: this.libraryKey, workspace, kind, name });
     const link = await this.links.find(target);
-    if (link) return { slug: link.slug, access: link.access, url: `${this.publicOrigin}/${link.slug}` };
+    if (link) return { slug: link.slug, access: link.access, url: `${this.publicOrigin}/${link.slug}`, live: link.live, liveId: link.version_id ?? link.script_hash };
     const pending = await this.links.draft(target);
     return pending.slug ? { slug: pending.slug, access: pending.access ?? "private" } : {};
   }
@@ -98,7 +98,16 @@ export class ManagedArtifactService {
         }
       }
     }
-    for (const item of artifacts.values()) Object.assign(item, await this.linkDetails(item.kind!, item.workspace, item.name));
+    for (const item of artifacts.values()) {
+      Object.assign(item, await this.linkDetails(item.kind!, item.workspace, item.name));
+      if (item.working) {
+        const target = await this.links.admit({ libraryKey: this.libraryKey, workspace: item.workspace, kind: item.kind!, name: item.name });
+        const snapshot = item.kind === "script"
+          ? await this.env.SCRIPTS.getByName(target.libraryKey).readRange({ workspace: item.workspace, name: item.name, end_line: 1 })
+          : await this.env.LIBRARIES.getByName(target.libraryKey).preview({ workspace: item.workspace, name: item.name });
+        item.draftRevision = snapshot.revision_token;
+      }
+    }
     return { capabilities: { scripts: true, links: true, moves: true }, workspace: this.workspace,
       artifacts: [...artifacts.values()].sort((a, b) => a.name.localeCompare(b.name) || a.workspace.localeCompare(b.workspace)), nextOffset: hasMore ? offset + 100 : null };
   }

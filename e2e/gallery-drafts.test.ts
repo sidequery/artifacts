@@ -63,14 +63,14 @@ test("gallery retains complete unsaved projects and new scripts and offers confl
     expect(await page.getByRole("textbox", { name: "lib/value.ts", exact: true }).innerText()).toBe("unsaved helper");
     await page.getByText("Dependencies (0)", { exact: true }).click();
     expect(await page.getByRole("textbox", { name: "Project dependencies" }).inputValue()).toBe('{"example":"latest"}');
-    expect(await page.getByRole("button", { name: "Save artifact", exact: true }).isEnabled()).toBe(false);
+    expect(await page.getByRole("button", { name: "Save and deploy", exact: true }).isEnabled()).toBe(false);
     await page.getByRole("textbox", { name: "Project dependencies" }).fill("{}");
     await page.getByRole("combobox", { name: "Version", exact: true }).selectOption("old");
-    await page.getByRole("button", { name: "Restore revision", exact: true }).waitFor();
+    await page.getByRole("button", { name: "Restore and deploy", exact: true }).waitFor();
     expect(await client.innerText()).toBe("historical client");
     await page.getByRole("combobox", { name: "Version", exact: true }).selectOption("working");
     expect(await client.innerText()).toBe("unsaved client");
-    await page.getByRole("button", { name: "Save artifact", exact: true }).click();
+    await page.getByRole("button", { name: "Save and deploy", exact: true }).click();
     await page.getByRole("button", { name: "Compare saved project" }).waitFor();
     expect(calls[0]!.arguments).toMatchObject({ contents: "unsaved client", server: "unsaved server", expected_revision: token, project: { files: { "lib/value.ts": "unsaved helper" }, dependencies: {} } });
     await page.getByRole("button", { name: "Compare saved project" }).click();
@@ -80,7 +80,7 @@ test("gallery retains complete unsaved projects and new scripts and offers confl
     await page.getByRole("button", { name: "Reload saved project" }).click();
     await page.waitForFunction(() => document.querySelector('[role="textbox"][aria-label="report.artifact.tsx"]')?.textContent === "agent client");
     await client.fill("merged client");
-    await page.getByRole("button", { name: "Save artifact", exact: true }).click();
+    await page.getByRole("button", { name: "Save and deploy", exact: true }).click();
     await page.getByRole("status").filter({ hasText: "Artifact saved" }).waitFor();
     expect(calls.at(-1)!.arguments.expected_revision).toBe(latestToken);
   } finally { await browser.close(); server.stop(true); }

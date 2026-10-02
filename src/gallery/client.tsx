@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { authClient, signInUrl } from "../auth/client-api";
 import type { GalleryArtifact, GalleryData } from "./types";
 import { ExecutionControls } from "./execution-controls";
-import { ArtifactSourcePanel, LinkSettings, ScriptPanel, type ScriptView } from "./hosted";
+import { ArtifactSourcePanel, LinkSettings, ScriptPanel, liveRevisionLabel, type ScriptView } from "./hosted";
 import { artifactFileTransferUrl } from "../sdk/files";
 import { RemixPanel } from "./remix";
 import { Select } from "./select";
@@ -123,6 +123,13 @@ const styles = `
   .source-form > .script-fields { padding: 12px 16px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
   .source-actions { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--line); flex-shrink: 0; }
   .source-actions p { margin: 0; color: var(--muted); }
+  button.primary-action { background: #d8e3ec; color: #17202a; border-color: #d8e3ec; font-weight: 600; }
+  button.primary-action:disabled { opacity: .45; }
+  .deployment-status { margin: 6px 0 0; color: var(--muted); }
+  .save-feedback { padding: 8px 16px; flex-shrink: 0; max-height: 30vh; overflow: auto; }
+  .save-feedback p { margin: 0 0 6px; }
+  .save-feedback button { height: auto; text-align: left; text-decoration: underline; }
+  .save-feedback pre { white-space: pre-wrap; overflow-wrap: anywhere; }
   .source-actions .source-readonly { margin-right: auto; }
   .save-conflict { flex-shrink: 0; padding: 8px 16px; max-height: 35vh; overflow: auto; }
   .save-conflict button { border-color: var(--line); margin-right: 8px; }
@@ -660,6 +667,10 @@ function App() {
               <div className="detail-title">
                 <p className="detail-eyebrow">{creatingScript ? "Create" : selectedArtifact?.kind === "script" ? "HTTP script" : selectedArtifact ? "Interactive artifact" : "Library"}</p>
                 <h1 ref={detailHeading} tabIndex={-1}>{creatingScript ? "New script" : selectedArtifact?.name ?? "Your artifacts"}</h1>
+                {!creatingScript && selectedArtifact && gallery?.capabilities?.links ? <p className="deployment-status" role="status">
+                  {liveRevisionLabel(selectedArtifact)}
+                  {drafts.get(`${selectedArtifact.key}:working`)?.dirty ? " · Unsaved changes" : selectedArtifact.live && (drafts.get(`${selectedArtifact.key}:working`)?.content.revision_token ?? selectedArtifact.draftRevision) !== selectedArtifact.live.revision_token ? " · Saved draft; live revision unchanged" : ""}
+                </p> : null}
               </div>
               {!creatingScript && selectedArtifact && resolvedVersion ? <div className="detail-actions">
                 {gallery?.capabilities?.links ? <button type="button" aria-expanded={showLinks} aria-controls="link-settings-panel" onClick={() => setShowLinks(value => !value)}>Link settings</button> : null}

@@ -81,6 +81,8 @@ test("hosted conditional saves return conflicts and invalid drafts can be correc
   expect(stale.response.status).toBe(409);
   expect(stale.result.error).toContain("Project changed since");
   expect(await (await fetch(`${origin}/${name}`)).text()).toBe("working");
+  const gallery = await (await fetch(`${origin}/api/gallery`)).json() as { artifacts: { name: string; live: { revision: number; revision_token: string }; draftRevision: string }[] };
+  expect(gallery.artifacts.find(item => item.name === name)).toMatchObject({ live: { revision: 1, revision_token: token }, draftRevision: newerToken });
   const corrected = await write(good, newerToken);
   expect(corrected.result.isError).not.toBe(true);
   expect((await write(good, null)).response.status).toBe(409);

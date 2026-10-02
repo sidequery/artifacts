@@ -114,7 +114,7 @@ export class CloudScriptService {
           if (validation.ok) {
             try {
               const activated = await scripts.activate({ ...destination, source_hash: mutation.source_hash, code: compiled.js });
-              const link = await hosted.links.commit(target, generation, { ...settings, script_hash: activated.hash });
+              const link = await hosted.links.commit(target, generation, { ...settings, script_hash: activated.hash, live: activated.live });
               if (!link) {
                 const { source, project: snapshotProject, ...summary } = mutation;
                 const superseded = { ...summary, ...await this.artifacts.linkDetails(target), applied: true, ok: false, superseded: true, error: "A newer update superseded this URL activation" };

@@ -33,8 +33,10 @@ const theme = EditorView.theme({
 }, { dark: true });
 
 /** One view, with a separate document, selection, and undo history for each file. */
-export function SourceEditor({ filename, value, onChange, readOnly = false, disabled = false }: {
+export type SourceLocation = { file: string; line?: number; column?: number; request: number };
+export function SourceEditor({ filename, value, onChange, readOnly = false, disabled = false, location }: {
   filename: string; value: string; onChange: (value: string) => void; readOnly?: boolean; disabled?: boolean;
+  location?: SourceLocation;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const shortcutsId = useId();
@@ -70,6 +72,14 @@ export function SourceEditor({ filename, value, onChange, readOnly = false, disa
     const editor = view.current!;
     if (editor.state.doc.toString() !== value) editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: value }, annotations: [externalChange.of(true)] });
   }, [value]);
+  useEffect(() => {
+    if (!location) return;
+    const editor = view.current!;
+    const line = editor.state.doc.line(Math.max(1, Math.min(location.line ?? 1, editor.state.doc.lines)));
+    const position = Math.min(line.to, line.from + Math.max(0, (location.column ?? 1) - 1));
+    editor.dispatch({ selection: { anchor: position }, scrollIntoView: true });
+    editor.focus();
+  }, [location, filename]);
   return <div className="source-code-editor">
     <div ref={host} className="source-code-surface" />
     <div className="source-code-status"><span className="editor-shortcuts" id={shortcutsId}>Tab to indent · Esc then Tab to leave · ⌘/Ctrl F to find</span><button type="button" onClick={() => { if (view.current) openSearchPanel(view.current); }}>Find</button></div>

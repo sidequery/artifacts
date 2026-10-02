@@ -48,7 +48,7 @@ test("gallery edits scripts without execution and runs requests only on demand",
     await views.getByRole("button", { name: "Requests", exact: true }).click();
     await views.getByRole("button", { name: "Source", exact: true }).click();
     expect(await page.getByRole("textbox", { name: "script.ts", exact: true }).innerText()).toContain('new Response("changed")');
-    await page.getByRole("button", { name: "Save script", exact: true }).click();
+    await page.getByRole("button", { name: "Save and deploy", exact: true }).click();
     await page.getByRole("status").filter({ hasText: "Script saved" }).waitFor();
     expect(calls.map(call => call.name)).toEqual(["script_write"]);
     await views.getByRole("button", { name: "Requests", exact: true }).click();
@@ -66,7 +66,7 @@ test("gallery edits scripts without execution and runs requests only on demand",
     await page.getByRole("button", { name: "New script" }).click();
     await page.getByRole("textbox", { name: "Script name", exact: true }).fill("new-handler");
     await page.getByRole("textbox", { name: "Script slug" }).fill("new-handler");
-    await page.getByRole("button", { name: "Save script", exact: true }).click();
+    await page.getByRole("button", { name: "Save and deploy", exact: true }).click();
     await page.getByRole("button", { name: "new-handler Script", exact: true }).waitFor();
     expect(await page.getByRole("button", { name: "new-handler Script", exact: true }).getAttribute("aria-current")).toBe("true");
     expect(calls.filter(call => call.name === "script_run")).toHaveLength(1);
@@ -82,5 +82,42 @@ test("gallery edits scripts without execution and runs requests only on demand",
     await page.getByTitle("Preview of local").waitFor();
     expect(await page.getByRole("button", { name: "New script" }).count()).toBe(0);
     expect(await page.getByRole("textbox", { name: "URL slug" }).count()).toBe(0);
+  } finally { await browser.close(); server.stop(true); }
+}, 30000);
+
+test("invalid saved drafts show live targets and clickable helper diagnostics", async () => {
+  const build = await Bun.build({ entrypoints: [new URL("../src/gallery/client.tsx", import.meta.url).pathname], target: "browser" });
+  if (!build.success) throw new Error(build.logs.join("\n"));
+  const js = await build.outputs[0]!.text();
+  const artifact = { key: "handler", kind: "script", name: "handler", workspace: "default", working: true, versions: [], live: { id: "good", revision: 1, revision_token: "good" }, draftRevision: "good" };
+  const server = Bun.serve({ port: 0, hostname: "127.0.0.1", async fetch(request) {
+    const url = new URL(request.url);
+    if (url.pathname === "/client.js") return new Response(js, { headers: { "content-type": "text/javascript" } });
+    if (url.pathname === "/api/session") return Response.json({});
+    if (url.pathname === "/api/gallery") return Response.json({ workspace: "default", artifacts: [artifact], capabilities: { links: true, scripts: true } });
+    if (url.pathname === "/api/source") return Response.json({ source: "export default {};", revision_token: "good", project: { files: { "lib/value.ts": "export const value = 1;\nexport const broken = missing;\n" }, dependencies: {}, lock: {} } });
+    if (url.pathname === "/api/tools") {
+      artifact.draftRevision = "invalid";
+      return Response.json({ isError: true, structuredContent: { applied: true, ok: false, revision_token: "invalid", diagnostics: [{ severity: "error", file: "lib/value.ts", line: 2, column: 23, message: "Cannot find name 'missing'." }] } });
+    }
+    return new Response('<div id="root"></div><script type="module" src="/client.js"></script>', { headers: { "content-type": "text/html" } });
+  } });
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.goto(server.url.href);
+    await page.getByRole("textbox", { name: "script.ts", exact: true }).fill("invalid source");
+    await page.getByRole("button", { name: "Save and deploy", exact: true }).click();
+    await page.getByRole("alert").filter({ hasText: "Invalid draft saved; live revision unchanged." }).waitFor();
+    expect(await page.locator(".deployment-status").innerText()).toBe("Live revision 1 · Saved draft; live revision unchanged");
+    await page.getByRole("button", { name: "lib/value.ts:2:23", exact: false }).click();
+    const helper = page.getByRole("textbox", { name: "lib/value.ts", exact: true });
+    await helper.waitFor();
+    expect(await helper.evaluate(el => el === document.activeElement)).toBe(true);
+    expect(await helper.evaluate(() => window.getSelection()?.anchorNode?.parentElement?.textContent)).toContain("export const broken");
+    await page.getByText("Raw details", { exact: true }).click();
+    expect(await page.locator(".save-feedback pre").innerText()).toContain('"revision_token": "invalid"');
+    await page.getByRole("group", { name: "Script view" }).getByRole("button", { name: "Requests", exact: true }).click();
+    expect(await page.getByText("Run target:", { exact: false }).innerText()).toContain("Live revision 1");
   } finally { await browser.close(); server.stop(true); }
 }, 30000);

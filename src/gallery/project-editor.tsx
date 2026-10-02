@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { SourceEditor } from "./source-editor";
+import { SourceEditor, type SourceLocation } from "./source-editor";
 import { Select } from "./select";
 
 export type EditableProject = { files: Record<string, string>; dependencies: Record<string, string> };
@@ -19,7 +19,7 @@ export function editableProject(value: unknown): EditableProject {
   return { files: { ...project.files as Record<string, string> }, dependencies: { ...project.dependencies as Record<string, string> } };
 }
 
-export function ProjectEditor({ entries, project, onProjectChange, onEntryChange, readOnly = false, disabled = false, onValidityChange, dependencyText, onDependencyTextChange }: {
+export function ProjectEditor({ entries, project, onProjectChange, onEntryChange, readOnly = false, disabled = false, onValidityChange, dependencyText, onDependencyTextChange, location }: {
   entries: { id: string; filename: string; source: string }[];
   project: EditableProject;
   onProjectChange: (project: EditableProject) => void;
@@ -29,12 +29,21 @@ export function ProjectEditor({ entries, project, onProjectChange, onEntryChange
   onValidityChange: (valid: boolean) => void;
   dependencyText?: string;
   onDependencyTextChange?: (text: string) => void;
+  location?: SourceLocation;
 }) {
   const [selection, setSelection] = useState(entries[0]?.id ?? "");
   const [filename, setFilename] = useState("");
   const [fileError, setFileError] = useState("");
   const [dependencies, setDependencies] = useState(JSON.stringify(project.dependencies, null, 2));
   const [dependencyError, setDependencyError] = useState("");
+  useEffect(() => {
+    if (!location) return;
+    const file = location.file.replace(/^\//, "");
+    const entry = entries.find(item => item.filename === file)
+      ?? entries.find(item => file.endsWith(".artifact.server.ts") ? item.id === "server" : file.endsWith(".artifact.tsx") ? item.id === "client" : false);
+    if (entry) setSelection(entry.id);
+    else if (Object.hasOwn(project.files, file)) setSelection(`file:${file}`);
+  }, [location]);
   useEffect(() => {
     if (dependencyText === undefined) return;
     try { parseDependencies(dependencyText); setDependencyError(""); onValidityChange(true); }
@@ -58,7 +67,7 @@ export function ProjectEditor({ entries, project, onProjectChange, onEntryChange
       {entries.map(item => <button type="button" key={item.id} aria-pressed={selection === item.id} disabled={disabled} onClick={() => setSelection(item.id)}>{item.filename}</button>)}
       {Object.keys(project.files).length ? <Select aria-label="Helper file" disabled={disabled} value={helper === null ? "" : selection} onChange={event => { if (event.target.value) setSelection(event.target.value); }}><option value="">Helper files</option>{Object.keys(project.files).sort().map(path => <option key={path} value={`file:${path}`}>{path}</option>)}</Select> : null}
     </div>
-    <SourceEditor filename={entry?.filename ?? helper ?? "source.ts"} value={selectedSource} readOnly={readOnly} disabled={disabled} onChange={source => {
+    <SourceEditor filename={entry?.filename ?? helper ?? "source.ts"} value={selectedSource} location={location} readOnly={readOnly} disabled={disabled} onChange={source => {
       if (entry) onEntryChange(entry.id, source);
       else if (helper !== null) onProjectChange({ ...project, files: { ...project.files, [helper]: source } });
     }} />

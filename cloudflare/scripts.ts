@@ -129,7 +129,8 @@ export class ScriptLibrary extends DurableObject<unknown> {
       this.sql.exec("insert into compiled_scripts(workspace,name,hash,code) values(?,?,?,?) on conflict(workspace,name,hash) do nothing",row.workspace,row.name,hash,input.code);
       this.sql.exec("update scripts set active_code=?,active_hash=? where workspace=? and name=?",input.code,hash,row.workspace,row.name);
     });
-    return {ok:true,source_hash:row.source_hash,hash};
+    const version = this.sql.exec<{id: string; revision: number}>("select id,revision from script_versions where workspace=? and name=? and source_hash=? order by revision desc limit 1",row.workspace,row.name,row.source_hash).toArray()[0]!;
+    return {ok:true,source_hash:row.source_hash,hash,live:{...version,revision_token:projectRevision(row.source,null,this.projectStorage.read(row.project))}};
   }
   /** Internal execution lookup. Never return this response through management APIs. */
   active(input: {workspace: string; name: string; hash?: string}) {

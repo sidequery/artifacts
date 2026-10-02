@@ -123,7 +123,7 @@ test("gallery filters, previews revisions, and preserves mobile library navigati
     await noHorizontalOverflow(desktop);
     await screenshot(desktop, "gallery-desktop-source");
     await desktop.getByRole("combobox", { name: "Version", exact: true }).selectOption("campaign-revision-1");
-    await desktop.getByRole("button", { name: "Restore revision", exact: true }).waitFor();
+    await desktop.getByRole("button", { name: "Restore and deploy", exact: true }).waitFor();
     await desktop.waitForFunction(() => document.querySelector('[role="textbox"][aria-label="Campaign overview.artifact.tsx"]')?.textContent?.includes("Campaign revision 1"));
     expect(await source.getAttribute("aria-readonly")).toBe("true");
     await desktop.getByRole("group", { name: "Artifact view" }).getByRole("button", { name: "Preview", exact: true }).click();
@@ -165,7 +165,7 @@ test("gallery filters, previews revisions, and preserves mobile library navigati
     await mobileSource.waitFor();
     await mobileSource.fill(sourceFor(false).replace("Current campaign", "Mobile unsaved campaign"));
     await mobileSource.press("ControlOrMeta+Home");
-    for (const control of [mobile.getByRole("combobox", { name: "Version", exact: true }), mobile.getByRole("button", { name: "Save artifact", exact: true }), mobile.getByRole("button", { name: "Find", exact: true }), mobile.getByText("Manage helper files", { exact: true }), mobile.getByText("Dependencies (0)", { exact: true })]) {
+    for (const control of [mobile.getByRole("combobox", { name: "Version", exact: true }), mobile.getByRole("button", { name: "Save and deploy", exact: true }), mobile.getByRole("button", { name: "Find", exact: true }), mobile.getByText("Manage helper files", { exact: true }), mobile.getByText("Dependencies (0)", { exact: true })]) {
       await control.scrollIntoViewIfNeeded();
       const bounds = (await control.boundingBox())!;
       expect(bounds.x).toBeGreaterThanOrEqual(0);

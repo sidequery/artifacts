@@ -1,5 +1,5 @@
 import browserRuntime from "../dist/cloudflare/browser-runtime.json";
-import { assertProjectRevision, resolveProject, type ArtifactProject } from "./project";
+import { assertProjectRevision, emptyProject, projectRevision, resolveProject, type ArtifactProject } from "./project";
 import type { DurableObjectStub, DurableObjectNamespace } from "@cloudflare/workers-types";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { ArtifactLibrary, ArtifactEdit, CompiledArtifact } from "./library";
@@ -198,7 +198,7 @@ export class CloudArtifactService {
       const { _meta, ...details } = await this.preview(snapshot, compiled);
       const target = this.artifacts.target("artifact", mutation.name);
       if (generation != null && details.ok && "artifact" in details && (settings.slug !== undefined || await this.hosted!.links.find(target))) {
-        const link = await this.hosted!.links.commit(target, generation, { ...settings, version_id: details.artifact.versionId });
+        const link = await this.hosted!.links.commit(target, generation, { ...settings, version_id: details.artifact.versionId, live: { id: details.artifact.versionId, revision: details.artifact.revision, revision_token: projectRevision(mutation.source, mutation.server_source, mutation.project ?? emptyProject()) } });
         if (!link) {
           const superseded = { ...payload, ok: false, superseded: true, error: "A newer update superseded this URL activation" };
           return { ...text(superseded, true), structuredContent: superseded };
@@ -302,7 +302,7 @@ export class CloudArtifactService {
     if (!compiled.ok) return text({ ok: false, diagnostics: compiled.diagnostics, check: formatArtifactCheck(compiled.diagnostics) }, true);
     const { _meta, ...preview } = await this.preview(snapshot, compiled);
     if (preview.ok && "artifact" in preview) {
-      const link = await hosted.links.commit(target, generation, { ...settings, version_id: preview.artifact.versionId });
+      const link = await hosted.links.commit(target, generation, { ...settings, version_id: preview.artifact.versionId, live: { id: preview.artifact.versionId, revision: preview.artifact.revision, revision_token: projectRevision(snapshot.source, snapshot.server_source, snapshot.project ?? emptyProject()) } });
       if (!link) return text({ ok: false, superseded: true, error: "A newer update superseded this URL activation" }, true);
     }
     return { ...text({ ...preview, ...await this.artifacts.linkDetails(target) }), ...(_meta ? { _meta } : {}) };
