@@ -194,6 +194,6 @@ app.get("/gallery/preview", async c => {
 app.get("/", c => c.env.ASSETS.fetch(new Request(new URL("/index.html", c.req.url))));
 app.get("/gallery", c => c.env.ASSETS.fetch(new Request(new URL("/index.html", c.req.url))));
 app.get("/gallery.js", c => c.env.ASSETS.fetch(c.req.raw));
-app.onError((error, c) => c.json({ error: error.message }, error instanceof PluginError || error instanceof ArtifactFileError ? error.status : error instanceof ArtifactAuthConfigurationError ? 503 : /not found/.test(error.message) ? 404 : 400));
+app.onError((error, c) => c.json({ error: error.message }, error instanceof PluginError || error instanceof ArtifactFileError ? error.status : error instanceof ArtifactAuthConfigurationError ? 503 : error.message.startsWith("Project changed since") ? 409 : /not found/.test(error.message) ? 404 : 400));
 
 export default app;

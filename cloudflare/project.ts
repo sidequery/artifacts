@@ -36,6 +36,16 @@ export function projectSourceHash(source: string, project: ArtifactProject): str
   return createHash("sha256").update(Object.values(project).every(value => Object.keys(value).length === 0) ? source : JSON.stringify([source, project])).digest("hex");
 }
 
+/** A full-project save must also detect server, helper and dependency changes. */
+export function projectRevision(source: string, server: string | null, project: ArtifactProject): string {
+  return createHash("sha256").update(JSON.stringify([source, server, normalizeProject(project)])).digest("hex");
+}
+
+export const REVISION_CONFLICT = "Project changed since it was loaded. Reload the saved project or compare it with your edits before saving.";
+export function assertProjectRevision(expected: string | null | undefined, actual: string | null): void {
+  if (expected !== undefined && expected !== actual) throw new Error(REVISION_CONFLICT);
+}
+
 type Manifest = { name: string; version: string; dependencies?: Record<string,string>; peerDependencies?: Record<string,string>; peerDependenciesMeta?: Record<string,{optional?:boolean}>; dist?: { tarball: string; integrity?: string } };
 type Registry = { versions: Record<string,Manifest> };
 const registryOrigin = "https://registry.npmjs.org";

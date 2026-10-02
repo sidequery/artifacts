@@ -63,6 +63,29 @@ function payload(result: Awaited<ReturnType<Client["callTool"]>>) {
   return JSON.parse(content[0]!.text);
 }
 
+test("hosted conditional saves return conflicts and invalid drafts can be corrected with their new token", async () => {
+  const name = "guarded-handler";
+  const good = 'export default { fetch() { return new Response("working"); } };';
+  const write = async (contents: string, expected_revision?: string | null) => {
+    const response = await fetch(`${origin}/api/tools`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "script_write", arguments: { name, contents, expected_revision } }) });
+    return { response, result: await response.json() as { isError?: boolean; structuredContent?: { revision_token: string; applied?: boolean }; error?: string } };
+  };
+  const created = await write(good, null);
+  expect(created.response.status).toBe(200);
+  const token = created.result.structuredContent!.revision_token;
+  const invalid = await write('export default { fetch() { return missing; } };', token);
+  expect(invalid.result).toMatchObject({ isError: true, structuredContent: { applied: true } });
+  const newerToken = invalid.result.structuredContent!.revision_token;
+  expect(newerToken).not.toBe(token);
+  const stale = await write('export default { fetch() { return new Response("stale"); } };', token);
+  expect(stale.response.status).toBe(409);
+  expect(stale.result.error).toContain("Project changed since");
+  expect(await (await fetch(`${origin}/${name}`)).text()).toBe("working");
+  const corrected = await write(good, newerToken);
+  expect(corrected.result.isError).not.toBe(true);
+  expect((await write(good, null)).response.status).toBe(409);
+});
+
 test("official HTTP MCP client lists contracts, writes, edits, restores and retrieves raw history", async () => {
   const tools = (await client.listTools()).tools;
   expect(tools.some(tool => tool.name === "artifact_write")).toBe(true);

@@ -1,5 +1,5 @@
 import browserRuntime from "../dist/cloudflare/browser-runtime.json";
-import { resolveProject, type ArtifactProject } from "./project";
+import { assertProjectRevision, resolveProject, type ArtifactProject } from "./project";
 import type { DurableObjectStub, DurableObjectNamespace } from "@cloudflare/workers-types";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { ArtifactLibrary, ArtifactEdit, CompiledArtifact } from "./library";
@@ -30,6 +30,7 @@ type Snapshot = {
   server_source: string | null;
   project?: ArtifactProject;
   state: Record<string, unknown>; version_id?: string | null; compiled_id?: string | null;
+  revision_token?: string;
 };
 type Mutation = Snapshot & { ok: boolean; applied?: boolean; changed?: boolean; restored?: boolean; source_hash?: string; edits_applied?: number; versionId?: string; revision?: number };
 type Compiled = { ok: boolean; js?: string; diagnostics: Diagnostic[]; artifact?: CompiledArtifact };
@@ -87,11 +88,17 @@ export class CloudArtifactService {
       }
       case "artifact_write": {
         const target = this.artifacts.target("artifact", args.name as string);
+        // Reject an already stale save before superseding a pending activation.
+        // writeDraft repeats this check atomically after dependency resolution.
+        if (args.expected_revision !== undefined) {
+          const current = await this.snapshot({name: args.name as string}).catch(error => { if (error instanceof Error && error.message.includes("artifact not found")) return null; throw error; });
+          assertProjectRevision(args.expected_revision as string | null, current?.revision_token ?? null);
+        }
         if (args.slug !== undefined) await this.artifacts.requireHosted().links.check(target, args.slug as string);
         const generation = await this.hosted?.links.begin(target);
         const previous = args.project === undefined ? undefined : await this.snapshot({name: args.name as string}).catch(error => { if (error instanceof Error && error.message.includes("artifact not found")) return undefined; throw error; });
         const project = args.project === undefined ? undefined : await resolveProject(args.project, previous?.project, fetch, browserRuntime.sharedVersions);
-        return this.mutationResult(await this.library.writeDraft({ workspace: this.workspace, name: args.name as string, source: args.contents as string, server_source: args.server as string | null | undefined, project }), generation, { ...(args.slug === undefined ? {} : { slug: args.slug as string }), ...(args.access === undefined ? {} : { access: args.access as "private" | "public" }) });
+        return this.mutationResult(await this.library.writeDraft({ workspace: this.workspace, name: args.name as string, source: args.contents as string, server_source: args.server as string | null | undefined, project, expected_revision: args.expected_revision as string | null | undefined }), generation, { ...(args.slug === undefined ? {} : { slug: args.slug as string }), ...(args.access === undefined ? {} : { access: args.access as "private" | "public" }) });
       }
       case "artifact_edit": {
         const generation = await this.hosted?.links.begin(this.artifacts.target("artifact", args.name as string));

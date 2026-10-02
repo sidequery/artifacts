@@ -1,5 +1,5 @@
 import type { ScriptSchedule } from "./script-backend";
-import { resolveProject } from "./project";
+import { assertProjectRevision, resolveProject } from "./project";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { createHash } from "node:crypto";
 import type { ArtifactEdit } from "./library";
@@ -78,6 +78,10 @@ export class CloudScriptService {
       }
       case "script_remix": case "script_write": case "script_edit": case "script_restore": {
         const target = this.artifacts.target("script", tool === "script_remix" ? args.new_name as string : name);
+        if (tool === "script_write" && args.expected_revision !== undefined) {
+          const current = await scripts.readRange(input).catch(error => { if (error instanceof Error && error.message.includes("script not found")) return null; throw error; });
+          assertProjectRevision(args.expected_revision as string | null, current?.revision_token ?? null);
+        }
         // Read pending intent only after taking this operation's generation.
         // A concurrent explicit access change then either precedes this read or
         // supersedes this generation; it cannot be undone by stale metadata.
@@ -97,7 +101,7 @@ export class CloudScriptService {
         const destination = {...input,name:target.name};
         const previous = tool === "script_write" && args.project !== undefined ? await scripts.readRange(input).catch(error => { if (error instanceof Error && error.message.includes("script not found")) return undefined; throw error; }) : undefined;
         const project = tool === "script_write" && args.project !== undefined ? await resolveProject(args.project, previous?.project) : undefined;
-        const mutation = tool === "script_remix" ? await scripts.remix({workspace:this.artifacts.workspace,name:args.name as string | undefined,version_id:args.version_id as string | undefined,new_name:args.new_name as string}) : tool === "script_write" ? await scripts.writeDraft({ ...input, source: args.contents as string, project })
+        const mutation = tool === "script_remix" ? await scripts.remix({workspace:this.artifacts.workspace,name:args.name as string | undefined,version_id:args.version_id as string | undefined,new_name:args.new_name as string}) : tool === "script_write" ? await scripts.writeDraft({ ...input, source: args.contents as string, project, expected_revision: args.expected_revision as string | null | undefined })
           : tool === "script_edit" ? await scripts.editDraft({ ...input, file: args.file as string | undefined, edits: args.edits as ArtifactEdit[], expected_hash: args.expected_hash as string | undefined })
           : await scripts.restore({ workspace: this.artifacts.workspace, id: args.version_id as string });
         generation ??= await hosted.links.begin(target);

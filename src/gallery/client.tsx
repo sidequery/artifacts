@@ -9,6 +9,7 @@ import { RemixPanel } from "./remix";
 import { Select } from "./select";
 import { MovePanel } from "./move";
 import { SourceEditor } from "./source-editor";
+import { DraftProvider, confirmLeavingDrafts, useDrafts } from "./drafts";
 
 type Scope = "current" | "all";
 type DetailTab = "preview" | "source" | "activity" | "requests" | "secrets";
@@ -123,6 +124,8 @@ const styles = `
   .source-actions { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--line); flex-shrink: 0; }
   .source-actions p { margin: 0; color: var(--muted); }
   .source-actions .source-readonly { margin-right: auto; }
+  .save-conflict { flex-shrink: 0; padding: 8px 16px; max-height: 35vh; overflow: auto; }
+  .save-conflict button { border-color: var(--line); margin-right: 8px; }
   .script-panel label { color: var(--muted); font-size: 12px; }
   .script-panel :is(input, select) { color: var(--text); }
   .project-editor { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
@@ -280,6 +283,7 @@ function formatDate(value: string): string {
 }
 
 function App() {
+  const { drafts } = useDrafts();
   const [remixing, setRemixing] = useState(false);
   const [creatingScript, setCreatingScript] = useState(false);
   const [scope, setScope] = useState<Scope>("current");
@@ -545,6 +549,7 @@ function App() {
   };
 
   const signOut = async () => {
+    if (!confirmLeavingDrafts(drafts)) return;
     setSigningOut(true);
     setAccountError("");
     try {
@@ -584,6 +589,7 @@ function App() {
           {gallery?.workspace ? <span className="header-context" title={gallery.workspace}>{gallery.workspace}</span> : null}
           <div className="header-actions">
             {gallery?.libraryScope ? <Select aria-label="Library" value={gallery.libraryScope} onChange={event => {
+              if (!confirmLeavingDrafts(drafts)) return;
               const url = new URL(window.location.href);
               url.searchParams.set("library", event.target.value);
               window.location.assign(url.href);
@@ -636,6 +642,7 @@ function App() {
                   onClick={() => selectArtifact(artifact)} onFocus={event => event.currentTarget.scrollIntoView({ block: "nearest" })}>
                   <span className="artifact-row-copy">
                     <span className="artifact-name">{artifact.name}</span>
+                    {[...drafts.entries()].some(([key, draft]) => key.startsWith(`${artifact.key}:`) && draft.dirty) ? <span className="workspace-name">Unsaved changes</span> : null}
                     {scope === "all" ? <span className="workspace-name">{artifact.workspace}</span> : null}
                     {!artifact.working ? <span className="workspace-name">Archived</span> : null}
                   </span>
@@ -706,4 +713,4 @@ function App() {
 
 const root = document.getElementById("root");
 if (!root) throw new Error("missing #root");
-createRoot(root).render(<App />);
+createRoot(root).render(<DraftProvider><App /></DraftProvider>);

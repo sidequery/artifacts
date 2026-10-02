@@ -128,6 +128,9 @@ const projectProperty = { type: "object", properties: {
   dependencies: { type: "object", maxProperties: 32, additionalProperties: { type: "string" }, description: "npm package names mapped to exact versions, for example {hono: '4.13.7'}. Resolved only on dependency changes; source and transitive dependency contents are archived together." },
 }, additionalProperties: false };
 for (const tool of CLOUD_MCP_TOOLS) {
-  if (tool.name === "artifact_write" || tool.name === "script_write") tool.inputSchema.properties!.project = projectProperty;
+  if (tool.name === "artifact_write" || tool.name === "script_write") {
+    tool.inputSchema.properties!.project = projectProperty;
+    tool.inputSchema.properties!.expected_revision = {type:["string","null"],pattern:"^[a-f0-9]{64}$",description:"Full-project revision_token from a source snapshot. Rejects stale client/server/helper/dependency writes atomically. Null requires a new name; omit for an unconditional write."};
+  }
   if (["artifact_read", "artifact_edit", "script_read", "script_edit"].includes(tool.name)) tool.inputSchema.properties!.file = {type:"string", description:"Select a relative project.files helper module instead of the entrypoint."};
 }
