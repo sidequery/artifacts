@@ -12,6 +12,7 @@ import { MovePanel } from "./move";
 import { SourceEditor } from "./source-editor";
 import { DraftProvider, confirmLeavingDrafts, useDrafts } from "./drafts";
 import { ProjectImportPanel } from "./project-transfer";
+import { NativeAppsPanel } from "./native-apps";
 
 type Scope = "current" | "all";
 type DetailTab = "preview" | "source" | "activity" | "requests" | "secrets";
@@ -308,6 +309,7 @@ function App() {
   const { drafts } = useDrafts();
   const [remixing, setRemixing] = useState(false);
   const [creatingScript, setCreatingScript] = useState(false);
+  const [showNativeApps, setShowNativeApps] = useState(false);
   const [scope, setScope] = useState<Scope>("current");
   const [query, setQuery] = useState("");
   const [kindFilter, setKindFilter] = useState<KindFilter>("all");
@@ -613,6 +615,7 @@ function App() {
           <span className="wordmark">Artifacts</span>
           {gallery?.workspace ? <span className="header-context" title={gallery.workspace}>{gallery.workspace}</span> : null}
           <div className="header-actions">
+            {gallery?.capabilities?.nativeApps ? <button type="button" onClick={() => setShowNativeApps(true)}>Worker apps</button> : null}
             <button type="button" onClick={() => { setShowImport(true); setCreatingScript(false); setMobileDetail(true); }}>Import project</button>
             {gallery?.libraryScope ? <Select aria-label="Library" value={gallery.libraryScope} onChange={event => {
               if (!confirmLeavingDrafts(drafts)) return;
@@ -627,6 +630,7 @@ function App() {
             </div> : null}
           </div>
         </header>
+        {showNativeApps ? <NativeAppsPanel workspace={gallery?.workspace ?? "default"} onClose={() => setShowNativeApps(false)} /> : null}
 
         {galleryError && gallery ? <p role="alert" className="refresh-error error-message">Refresh failed: {galleryError}. Showing the last loaded files.</p> : null}
         {accountError ? <p role="alert" className="refresh-error error-message">{accountError}</p> : null}

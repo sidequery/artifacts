@@ -18,6 +18,7 @@ turn it into the filesystem/stdio implementation.
 | `src/httpTypes.ts`, `historyTypes.ts`, `diagnostics.ts`, `sandbox.ts` | Shared request/history contracts and source validation used by both execution paths |
 | `cloudflare/` | Worker application, HTTP MCP, authentication, storage, compilation and execution; also packaged for celld |
 | `scripts/` | Build, packaging, development and deployment utilities |
+| `cloudflare/native-worker/`, `scripts/native-worker/`, `examples/native-worker/` | Authenticated native Worker controller, provider reconciliation and local operator; see [native apps](native-workers.md) and the [development proof](native-worker-prototype.md) |
 | `e2e/` | Browser, Herdr and packaged-runtime integration harnesses; unit/service tests stay beside their source |
 
 ## Hosted services

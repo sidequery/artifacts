@@ -46,6 +46,7 @@ export class ManagedArtifactService {
   }
 
   async callTool(name: string, args: Record<string, unknown>): Promise<CallToolResult> {
+    if (name.startsWith("app_")) return this.nativeTool(name, args);
     if (["artifact_guide", "script_guide", "plugins_list", "plugin_guide", "artifact_plugin_call"].includes(name)) return this.physical({ libraryKey: this.libraryKey, workspace: this.workspace }).callTool(name, args);
     const kind = name.startsWith("script_") ? "script" : name === "artifact_link" ? args.kind as "artifact" | "script" : "artifact";
     if (["artifact_list", "script_list", "artifact_history", "script_history"].includes(name)) {
@@ -64,6 +65,38 @@ export class ManagedArtifactService {
       ? await this.links.admitRemix(selection, args.new_name as string)
       : await this.links.admit(selection, name === "artifact_write" || name === "script_write");
     return this.physical(target).callTool(name, args);
+  }
+
+  private nativeController() {
+    if (!this.env.NATIVE_APPS) throw new Error("Native apps are not enabled on this deployment");
+    return this.env.NATIVE_APPS.getByName("deployment");
+  }
+  private async nativeTool(tool: string, args: Record<string, unknown>): Promise<CallToolResult> {
+    if (tool === "app_guide") return text({ guide: "Native apps preserve the default Worker and named Durable Object exports. app_write accepts source, a strict app-owned manifest and optional project files/dependencies. Manifest fields: main (relative JS/TS path), compatibility_date, compatibility_flags, vars, secrets (names only), bindings (name -> {type:kv|r2|d1|queue|durable-object, resource:stable-name, class_name:DO export}), triggers:{crons:[],queues:[resource-name]}. Resource names permanently identify storage; binding/export renames preserve it and removed resources remain reserved. Set secrets with app_secrets. app_read/history/restore/reconcile manage persistent revisions and interrupted deployments. Restores retain current data and current secrets. Providers cannot change on an existing app. celld-local accepts trusted code only. URLs are private /apps/<name>/?workspace=<workspace>&library=<private|team>, require library authentication, stream HTTP and strip management credentials/cookies. Cloudflare uses native queue/cron delivery. celld-local operator does not support WebSockets. No destructive resource removal or schema/data rollback is provided." });
+    const controller = this.nativeController(), input = { owner: this.libraryKey, workspace: this.workspace, name: args.name as string };
+    let result: unknown;
+    switch (tool) {
+      case "app_list": result = await controller.list({ owner: this.libraryKey, workspace: this.workspace, offset: args.offset as number | undefined }); break;
+      case "app_read": result = await controller.read({ ...input, revision_id: args.revision_id as string | undefined }); break;
+      case "app_history": result = await controller.history({ ...input, offset: args.offset as number | undefined }); break;
+      case "app_write": result = await controller.write({ ...input, source: args.source as string, manifest: args.manifest, project: args.project, provider: args.provider as string | undefined, expected_revision: args.expected_revision as string | null | undefined }); break;
+      case "app_restore": result = await controller.restore({ ...input, revision_id: args.revision_id as string }); break;
+      case "app_reconcile": result = await controller.reconcile(input); break;
+      case "app_secrets": result = await controller.secrets({ ...input, secrets: args.secrets as Record<string, string | null> | undefined }); break;
+      case "app_move": {
+        if (args.library !== "private" && args.library !== "team") throw new Error("Library must be private or team");
+        result = await controller.move({ ...input, destination: args.library === "team" ? "team" : this.privateKey }); break;
+      }
+      default: throw new Error("Unknown app tool");
+    }
+    const payload = result as Record<string, unknown>;
+    const failed = payload.ok === false || (payload.deployment as { ok?: boolean } | undefined)?.ok === false;
+    return { ...text(result), structuredContent: payload, isError: failed };
+  }
+  nativeFetch(name: string, request: Request) {
+    const headers = new Headers(request.headers);
+    headers.set("x-artifacts-app-selection", JSON.stringify({ owner: this.libraryKey, workspace: this.workspace, name }));
+    return this.nativeController().fetch(new Request(request, { headers }));
   }
 
   pluginCall(request: PluginRequest) { return this.physical({ libraryKey: this.libraryKey, workspace: this.workspace }).pluginCall(request); }
@@ -113,7 +146,7 @@ export class ManagedArtifactService {
           : await this.env.LIBRARIES.getByName(target.libraryKey).draftRevision({ workspace: item.workspace, name: item.name });
       }
     }
-    return { capabilities: { scripts: true, links: true, moves: true }, workspace: this.workspace,
+    return { capabilities: { scripts: true, links: true, moves: true, nativeApps: !!this.env.NATIVE_APPS }, workspace: this.workspace,
       artifacts: [...artifacts.values()].sort((a, b) => a.name.localeCompare(b.name) || a.workspace.localeCompare(b.workspace)), nextOffset: hasMore ? offset + 100 : null };
   }
 }

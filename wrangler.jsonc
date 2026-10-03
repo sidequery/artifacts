@@ -51,6 +51,10 @@
       {
         "name": "FILE_BACKENDS",
         "class_name": "CanvasFiles"
+      },
+      {
+        "name": "NATIVE_APPS",
+        "class_name": "NativeApps"
       }
     ]
   },
@@ -78,6 +82,10 @@
     {
       "tag": "v4",
       "new_sqlite_classes": ["CanvasFiles"]
+    },
+    {
+      "tag": "v5",
+      "new_sqlite_classes": ["NativeApps"]
     }
   ],
   "r2_buckets": [

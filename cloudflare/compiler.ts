@@ -6,6 +6,8 @@ import browserPlugins from "../dist/cloudflare/plugin-browser.json";
 import browserRuntime from "../dist/cloudflare/browser-runtime.json";
 import { sandboxToDiagnostics, type Diagnostic } from "../src/diagnostics";
 import { scanArtifactSource } from "../src/sandbox";
+import type { AppManifest, ResourceLedger } from "./native-worker/manifest";
+import { classAlias } from "./native-worker/types";
 
 const sourcePath = "artifact.artifact.tsx";
 const serverPath = "artifact.artifact.server.ts";
@@ -180,7 +182,7 @@ export async function compileArtifactServerSource(source: string, project = empt
   return queueCompile(source, true, false, project);
 }
 
-async function queueCompile(source: string, server: boolean, script = false, project = emptyProject()) {
+async function queueCompile(source: string, server: boolean, script = false, project = emptyProject(), native?: { manifest: AppManifest; resources: ResourceLedger }) {
   // esbuild WASM and semantic checking share the isolate's 128 MiB budget.
   // Serialize builds and bound retained request sources under load.
   if (pendingCompilations >= 8) return { ok: false, diagnostics: [{ severity: "error" as const, message: "Compiler is busy; retry shortly", file: server ? serverPath : sourcePath }] };
@@ -190,8 +192,45 @@ async function queueCompile(source: string, server: boolean, script = false, pro
   // Wait on this request's own timer instead of another request's promise, so
   // disconnecting a preview cannot cancel the next build's esbuild operations.
   while (ticket !== activeCompilation) await new Promise(resolve => setTimeout(resolve, 5));
-  try { return await (script ? compileScript(source, project) : server ? compileServer(source, project) : compileSource(source, project)); }
+  try { return await (native ? compileNative(source, project, native.manifest, native.resources) : script ? compileScript(source, project) : server ? compileServer(source, project) : compileSource(source, project)); }
   finally { activeCompilation++; pendingCompilations--; }
+}
+
+export function compileNativeWorker(source: string, manifest: AppManifest, resources: ResourceLedger, project = emptyProject()) {
+  return queueCompile(source, true, false, normalizeProject(project), { manifest, resources });
+}
+
+async function compileNative(source: string, project: ArtifactProject, manifest: AppManifest, resources: ResourceLedger) {
+  try {
+    const entry = "__artifacts_native_entry.ts";
+    if (manifest.main === entry || Object.hasOwn(project.files, entry) || Object.hasOwn(project.files, manifest.main)) throw new Error("Project collides with the Worker entrypoint");
+    const aliases: string[] = [];
+    const current = Object.values(manifest.bindings);
+    for (const resource of Object.values(resources)) {
+      if (resource.type !== "durable-object") continue;
+      const binding = current.find(item => item.type === "durable-object" && resources[item.resource]?.id === resource.id);
+      aliases.push(binding?.type === "durable-object"
+        ? `export { ${binding.class_name} as ${classAlias(resource.id)} } from ${JSON.stringify("./" + manifest.main)};`
+        : `export class ${classAlias(resource.id)} extends DurableObject {}`);
+    }
+    const result = await createWorker({ files: { ...project.lock, ...project.files, [manifest.main]: source,
+      [entry]: `import { DurableObject } from "cloudflare:workers";\nexport { default } from ${JSON.stringify("./" + manifest.main)};\nexport * from ${JSON.stringify("./" + manifest.main)};\n${aliases.join("\n")}`,
+    }, entryPoint: entry, target: "es2022", sourcemap: false });
+    if (result.warnings?.length) throw new Error(result.warnings.join("\n"));
+    const js = result.modules[result.mainModule];
+    if (typeof js !== "string") throw new Error("Native Worker compiler did not return JavaScript");
+    const tree = ts.createSourceFile("worker.js", js, ts.ScriptTarget.ES2022, false, ts.ScriptKind.JS);
+    const check = (node: ts.Node) => {
+      const specifier = ts.isImportDeclaration(node) || ts.isExportDeclaration(node) ? node.moduleSpecifier
+        : ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword ? node.arguments[0] : undefined;
+      if (specifier && (!ts.isStringLiteral(specifier) || !/^(node:|cloudflare:)/.test(specifier.text))) throw new Error("Worker has an unresolved import");
+      ts.forEachChild(node, check);
+    };
+    check(tree);
+    return { ok: true, js, diagnostics: [] as Diagnostic[] };
+  } catch (error) {
+    return { ok: false, diagnostics: [{ severity: "error" as const, file: manifest.main, message: error instanceof Error ? error.message : "Worker compilation failed" }] };
+  }
 }
 
 function serverExportName(program: ts.Program): "ArtifactServer" | "CanvasServer" {

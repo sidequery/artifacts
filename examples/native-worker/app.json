@@ -1,0 +1,15 @@
+{
+  "main": "worker.ts",
+  "compatibility_date": "2026-09-06",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": { "GREETING": "native Worker" },
+  "secrets": ["API_TOKEN"],
+  "bindings": {
+    "COUNTERS": { "type": "durable-object", "resource": "counters", "class_name": "Counter" },
+    "CACHE": { "type": "kv", "resource": "cache" },
+    "FILES": { "type": "r2", "resource": "files" },
+    "DB": { "type": "d1", "resource": "database" },
+    "JOBS": { "type": "queue", "resource": "jobs" }
+  },
+  "triggers": { "crons": ["0 * * * *"], "queues": ["jobs"] }
+}

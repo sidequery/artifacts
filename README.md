@@ -135,6 +135,7 @@ inline views, targeted edits, history, and compatibility with older Canvas sourc
 - [Deploy to Cloudflare](docs/cloudflare.md)
 - [Deploy celld on your own infrastructure](docs/celld-deployment.md)
 - [Scripts, URLs, dependencies, remix, and schedules](docs/scripts.md)
+- [Native Worker apps, manifests, providers, and recovery](docs/native-workers.md)
 - [Complete project export and import](docs/project-portability.md)
 - [App backends and SQLite](docs/cloudflare.md#native-artifact-servers-and-storage)
 - [File storage](docs/files.md)
