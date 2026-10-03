@@ -64,23 +64,26 @@ export function parseRequestHeaders(text: string): [string, string][] {
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || Object.values(parsed).some(value => typeof value !== "string")) throw new Error("Headers must be a JSON object of string values.");
   return Object.entries(parsed);
 }
-export function LinkSettings({ artifact, onSaved }: { artifact: GalleryArtifact; onSaved: () => Promise<void> }) {
+export function LinkSettings({ artifact, onSaved, localUrl }: { artifact: GalleryArtifact; onSaved: () => Promise<void>; localUrl?: string }) {
   const [slug, setSlug] = useState(artifact.slug ?? "");
   const [access, setAccess] = useState(artifact.access ?? "private");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
+  const url = localUrl ?? (artifact.url ? new URL(artifact.url, window.location.origin).href : "");
   useEffect(() => { setSlug(artifact.slug ?? ""); setAccess(artifact.access ?? "private"); }, [artifact.slug, artifact.access]);
   return <form className="link-settings" onSubmit={async event => {
     event.preventDefault(); setBusy(true); setStatus("");
     try { await galleryTool(artifact.workspace, "artifact_link", { kind: artifact.kind ?? "artifact", name: artifact.name, slug, access }); await onSaved(); setStatus("Link saved"); }
     catch (error) { setStatus(message(error)); } finally { setBusy(false); }
   }}>
+    {url ? <div className="share-link-row"><label>Link<input aria-label="Share link" readOnly value={url} onFocus={event => event.target.select()} /></label><button type="button" onClick={async () => { try { await navigator.clipboard.writeText(url); setStatus("Link copied"); } catch { setStatus("Could not copy. Select the link above to copy it manually."); } }}>Copy link</button><a className="download-link" href={url} target="_blank" rel="noopener noreferrer">Open</a></div> : <p>No link yet. Choose an address and save it below.</p>}
+    {localUrl ? <p className="link-note">This link works only on this Mac while the local server is running. Publish the artifact to a hosted library to share it with other people.</p> : <>
     <label>URL slug<input aria-label="URL slug" required value={slug} onChange={event => setSlug(event.target.value)} /></label>
     <label>Link access<Select aria-label="URL access" value={access} onChange={event => setAccess(event.target.value as typeof access)}><option value="private">Private</option><option value="public">Public</option></Select></label>
     <button disabled={busy}>Save link</button>
-    {artifact.url ? <><a className="download-link" href={artifact.url} target="_blank" rel="noopener noreferrer">Open</a><button type="button" onClick={async () => { try { await navigator.clipboard.writeText(new URL(artifact.url!, window.location.origin).href); setStatus("URL copied"); } catch (error) { setStatus(message(error)); } }}>Copy URL</button></> : null}
-    <span role="status">{status}</span>
     <p className="link-note">Private links use the library’s access. Public links allow anyone through the app’s access check; deployment authentication may still apply. This setting does not move the item between libraries.</p>
+    </>}
+    <span role="status">{status}</span>
   </form>;
 }
 function ConflictActions({ sourceUrl, dirty, onReload }: { sourceUrl: string; dirty: boolean; onReload: (snapshot: SourceSnapshot) => void }) {
@@ -150,13 +153,13 @@ export function ScriptPanel({ artifact, workspace, version, sourceUrl, onSaved, 
   const [body, setBody] = useState("");
   const historical = !!artifact && version !== "working";
   useEffect(() => {
-    if (draft) return;
+    if (draft && (!artifact || historical || draft.dirty || !artifact.draftRevision || draft.content.revision_token === artifact.draftRevision)) return;
     if (!artifact) { buffer.reset({ source: initialSource, project: emptyEditableProject(), name: "", slug: "", access: "private" }); return; }
     if (!sourceUrl) return;
     const controller = new AbortController(); setError("");
-    void loadSourceSnapshot(sourceUrl, controller.signal).then(snapshot => { if (!controller.signal.aborted) buffer.reset(snapshot); }).catch(error => { if (!controller.signal.aborted) setError(message(error)); });
+    void loadSourceSnapshot(sourceUrl, controller.signal).then(snapshot => { if (!controller.signal.aborted) buffer.reset(snapshot, true); }).catch(error => { if (!controller.signal.aborted) setError(message(error)); });
     return () => controller.abort();
-  }, [sourceUrl, buffer.reset]);
+  }, [sourceUrl, artifact?.draftRevision, buffer.reset]);
   const sourceReady = !!draft;
   async function perform(action: () => Promise<void>) {
     setBusy(true); setError(""); setStatus("");
@@ -240,11 +243,11 @@ export function ArtifactSourcePanel({ artifact, version, sourceUrl, onSaved }: {
   const [status, setStatus] = useState("");
   const historical = version !== "working";
   useEffect(() => {
-    if (snapshot) return;
+    if (snapshot && (historical || buffer.draft?.dirty || !artifact.draftRevision || snapshot.revision_token === artifact.draftRevision)) return;
     const controller = new AbortController(); setError(""); setStatus(""); setProjectValid(true);
-    void loadSourceSnapshot(sourceUrl, controller.signal).then(value => { if (!controller.signal.aborted) buffer.reset(value); }).catch(error => { if (!controller.signal.aborted) setError(message(error)); });
+    void loadSourceSnapshot(sourceUrl, controller.signal).then(value => { if (!controller.signal.aborted) buffer.reset(value, true); }).catch(error => { if (!controller.signal.aborted) setError(message(error)); });
     return () => controller.abort();
-  }, [sourceUrl, buffer.reset]);
+  }, [sourceUrl, artifact.draftRevision, buffer.reset]);
   const loaded = !!snapshot;
   async function save() {
     if (!loaded || !snapshot) return;

@@ -7,6 +7,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { chromium, type Browser } from "playwright";
 import { prepareCelldConfig } from "../scripts/prepare-celld";
+import { openGallerySubscription } from "../src/test/gallery-subscription";
 
 const root = resolve(import.meta.dir, "..");
 const enabled = process.env.CELLD_INTEGRATION === "1";
@@ -141,6 +142,28 @@ afterAll(async () => {
   await stopCelld();
   if (project) await rm(project, { recursive: true, force: true });
 });
+
+celldTest("gallery subscriptions deliver MCP writes on celld and reconnect after restart", async () => {
+  const subscription = await openGallerySubscription(`${baseUrl}/api/gallery/subscribe`);
+  const other = await openGallerySubscription(`${baseUrl}/api/gallery/subscribe?workspace=other`);
+  const writeScript = () => withClient(async client => {
+    const result = await client.callTool({ name: "script_write", arguments: { name: "live-gallery", contents: 'export default { fetch() { return new Response("hello"); } };' } });
+    expect(result.isError, JSON.stringify(result.content)).not.toBe(true);
+  });
+  try {
+    await writeScript();
+    expect(await subscription.changes()).toContain("changed");
+    expect(await other.changes()).toEqual([]);
+  } finally { subscription.close(); other.close(); }
+  await stopCelld();
+  await startCelld();
+  const reconnected = await openGallerySubscription(`${baseUrl}/api/gallery/subscribe`);
+  try {
+    expect(await (await fetch(`${baseUrl}/api/gallery`)).text()).toContain("live-gallery");
+    await writeScript();
+    expect(await reconnected.changes()).toContain("changed");
+  } finally { reconnected.close(); }
+}, 120_000);
 
 celldTest("runs native artifact SQLite and KV across code update and celld restart", async () => {
   await withClient(async client => {

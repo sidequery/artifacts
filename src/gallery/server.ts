@@ -1,9 +1,11 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { assertRegularArtifact, artifactIdFromFile, ensureArtifactFileName, resolveArtifactFile, listArtifactFiles } from "../artifactFile";
 import type { ArtifactHistory } from "../history";
 import { PLUGIN_ROOT } from "../paths";
 import type { GalleryArtifact, GalleryData } from "./types";
+import { hash } from "../history";
+import { localProjectPath, localServerPath } from "../localProject";
 
 export function galleryData(history: ArtifactHistory, workspace: string, all: boolean): GalleryData {
   const artifacts = new Map<string, GalleryArtifact>();
@@ -23,9 +25,15 @@ export function galleryData(history: ArtifactHistory, workspace: string, all: bo
     const id = key(workspace, name);
     const artifact = artifacts.get(id) ?? { key: id, name, workspace, working: false, versions: [] };
     artifact.working = true;
+    artifact.url = `/a/${history.localLink(workspace, name)}`;
+    artifact.draftRevision = hash(JSON.stringify([path, localProjectPath(path), localServerPath(path)].map(file => {
+      if (!existsSync(file)) return null;
+      assertRegularArtifact(file);
+      return readFileSync(file, "utf8");
+    })));
     artifacts.set(id, artifact);
   }
-  return { workspace, artifacts: [...artifacts.values()].sort((a, b) => a.name.localeCompare(b.name) || a.workspace.localeCompare(b.workspace)) };
+  return { workspace, capabilities: { subscriptions: true }, artifacts: [...artifacts.values()].sort((a, b) => a.name.localeCompare(b.name) || a.workspace.localeCompare(b.workspace)) };
 }
 
 export function workingSource(workspace: string, name: string) {
@@ -42,5 +50,5 @@ export async function galleryBundle(): Promise<string> {
 }
 
 export function galleryHtml(): string {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sidequery Artifacts library</title><style>html,body{margin:0;background:#101719;color:#e9eeee;font-family:system-ui,sans-serif}*{box-sizing:border-box}</style></head><body><div id="root"></div><script type="module" src="/gallery.js"></script></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sidequery Artifacts library</title><style>html,body{margin:0;background:#f6f5f1;color:#1b1917;font-family:system-ui,sans-serif}*{box-sizing:border-box}</style></head><body><div id="root"></div><script type="module" src="/gallery.js"></script></body></html>`;
 }

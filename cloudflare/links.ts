@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { LibraryOwnership, type LibrarySelection, type OwnershipEnvironment } from "./ownership";
+import { GallerySubscriptions } from "./gallery-subscriptions";
 
 export type ArtifactTarget = { libraryKey: string; workspace: string; kind: "artifact" | "script"; name: string };
 export type LiveRevision = { id: string; revision: number; revision_token: string };
@@ -22,9 +23,11 @@ function readLink(value: string): ArtifactLink {
 /** Deployment-wide names; ownership is resolved before accessing any library. */
 export class ArtifactLinks extends DurableObject<unknown> {
   private readonly ownership: LibraryOwnership;
+  private readonly subscriptions: GallerySubscriptions;
   constructor(ctx: DurableObjectState, env: unknown) {
     super(ctx, env);
     this.ownership = new LibraryOwnership(ctx.storage.sql, env as OwnershipEnvironment);
+    this.subscriptions = new GallerySubscriptions(ctx);
     ctx.storage.sql.exec("create table if not exists links (slug text primary key, target text not null unique, value text not null)");
     ctx.storage.sql.exec("create table if not exists generations (target text primary key, generation integer not null)");
     ctx.storage.sql.exec("create table if not exists pending_links (target text primary key, value text not null)");
@@ -32,8 +35,18 @@ export class ArtifactLinks extends DurableObject<unknown> {
   owner(target: ArtifactTarget) { return this.ownership.owner(target); }
   admit(selection: LibrarySelection, create = false) { return this.ownership.admit(selection, create); }
   admitRemix(selection: LibrarySelection, newName: string) { return this.ownership.admitRemix(selection, newName); }
-  move(selection: LibrarySelection & { name: string }, destination: string) { return this.ownership.move(selection, destination); }
+  async move(selection: LibrarySelection & { name: string }, destination: string) {
+    const result = await this.ownership.move(selection, destination);
+    this.subscriptions.changed(selection.libraryKey, result.workspace);
+    this.subscriptions.changed(destination, result.workspace);
+    return result;
+  }
   catalog(input: Parameters<LibraryOwnership["catalog"]>[0]) { return this.ownership.catalog(input); }
+  fetch(request: Request) { return this.subscriptions.accept(request); }
+  changed(target: ArtifactTarget) { this.subscriptions.changed(this.ownership.owner(target), target.workspace); }
+  webSocketMessage(socket: WebSocket) { socket.close(1008, "Receive-only subscription"); }
+  webSocketClose(socket: WebSocket, code: number, reason: string) { socket.close(code, reason); }
+  webSocketError(socket: WebSocket) { socket.close(1011, "Subscription disconnected"); }
 
   get(slug: string): ArtifactLink | null {
     const row = this.ctx.storage.sql.exec<{ value: string }>("select value from links where slug = ?", slug).toArray()[0];

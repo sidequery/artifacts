@@ -52,9 +52,9 @@ export function useDrafts() {
 export function useProjectDraft(key: string) {
   const { drafts, set } = useDrafts();
   const draft = drafts.get(key);
-  const reset = useCallback((content: DraftContent) => {
+  const reset = useCallback((content: DraftContent, onlyIfClean = false) => {
     const dependencyText = JSON.stringify(content.project.dependencies, null, 2);
-    set(key, () => ({ content, dependencyText, baseline: signature(content, dependencyText), dirty: false }));
+    set(key, current => onlyIfClean && current?.dirty ? current : ({ content, dependencyText, baseline: signature(content, dependencyText), dirty: false }));
   }, [key, set]);
   const update = (change: Partial<DraftContent>, dependencyText?: string) => set(key, current => {
     if (!current) return current;

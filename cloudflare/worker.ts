@@ -134,6 +134,10 @@ app.get("/api/gallery", async c => {
   if (!Number.isSafeInteger(offset) || offset < 0) return c.json({ error: "Invalid offset" }, 400);
   return c.json({ ...await c.get("service").gallery(c.req.query("all") === "1", offset), libraryScope: c.get("libraryScope") });
 });
+app.get("/api/gallery/subscribe", c => {
+  if (c.req.header("Upgrade")?.toLowerCase() !== "websocket") return c.text("WebSocket required", 426);
+  return c.get("service").subscribeGallery(c.req.query("all") === "1");
+});
 app.post("/api/library/move", async c => {
   let input: { kind: "artifact" | "script"; name: string; library: "private" | "team" };
   try { input = JSON.parse(await readRequestText(c.req.raw, 8192)); }

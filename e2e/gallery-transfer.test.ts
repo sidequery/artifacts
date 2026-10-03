@@ -23,15 +23,24 @@ test("gallery imports a fresh complete project and exports its saved snapshot th
     await page.getByRole("button", { name: "Import as new project", exact: true }).click();
     await page.getByRole("status").filter({ hasText: "Project imported." }).waitFor();
     await page.getByRole("button", { name: "Import as new project", exact: true }).hover();
-    expect(await page.getByRole("button", { name: "Import as new project", exact: true }).evaluate(element => getComputedStyle(element).backgroundColor)).toBe("rgb(237, 243, 248)");
+    expect(await page.getByRole("button", { name: "Import as new project", exact: true }).evaluate(element => getComputedStyle(element).backgroundColor)).toBe("rgb(42, 39, 35)");
     expect(await page.getByRole("heading", { level: 1 }).innerText()).toBe("portable-import");
     if (process.env.GALLERY_SCREENSHOT_DIR) { await mkdir(process.env.GALLERY_SCREENSHOT_DIR, { recursive: true }); await page.screenshot({ path: join(process.env.GALLERY_SCREENSHOT_DIR, "gallery-project-import.png"), fullPage: true }); }
     await page.getByRole("button", { name: "Close import", exact: true }).click();
-    const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("link", { name: "Export project", exact: true }).click()]);
+    const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("link", { name: "Download", exact: true }).click()]);
     expect(download.suggestedFilename()).toBe("portable-import.artifact-project.json");
     const path = join(directory, "export.json"); await download.saveAs(path);
     expect(await Bun.file(path).json()).toEqual({ ...archive, name: "portable-import" });
-    expect(await page.getByRole("link", { name: "Download entrypoint", exact: true }).getAttribute("href")).not.toContain("format=project");
+    expect(await page.getByRole("link", { name: "Download", exact: true }).getAttribute("href")).toContain("format=project");
+    await page.getByRole("button", { name: "Share", exact: true }).click();
+    const shareUrl = await page.getByRole("textbox", { name: "Share link", exact: true }).inputValue();
+    expect(shareUrl).toBe(`${server.url}/a/portable-import`);
+    expect((await fetch(shareUrl)).status).toBe(200);
+    expect(await page.getByText("This link works only on this Mac", { exact: false }).isVisible()).toBe(true);
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await page.getByRole("button", { name: "Copy link", exact: true }).click();
+    await page.getByRole("status").filter({ hasText: "Link copied" }).waitFor();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(shareUrl);
     const snapshot = await fetch(`${server.url}/api/source?name=portable-import&format=project`);
     expect(await snapshot.json()).toEqual({ ...archive, name: "portable-import" });
     if (process.env.GALLERY_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.GALLERY_SCREENSHOT_DIR, "gallery-project-source.png"), fullPage: true });

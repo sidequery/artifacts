@@ -26,8 +26,24 @@ test("history survives reconnect, scopes artifacts, and records distinct serves 
     expect(history.version(other.id, dir)).toBeNull();
     expect(history.list(dir)).toHaveLength(1);
     expect(history.db.query("select name from sqlite_master where type = 'table' order by name").all()).toEqual([
-      { name: "artifact_remixes" }, { name: "artifacts" }, { name: "serve_events" }, { name: "versions" },
+      { name: "artifact_remixes" }, { name: "artifacts" }, { name: "local_artifact_links" }, { name: "serve_events" }, { name: "versions" },
     ]);
+  } finally { history.close(); }
+});
+
+test("local slugs are readable, unique across folders, and stable after reopening", () => {
+  const path = join(tempDir(), "history.sqlite");
+  let history = new ArtifactHistory(path);
+  expect(history.localLink("one", "Launch checklist")).toBe("launch-checklist");
+  expect(history.localLink("one", "launch-checklist")).toBe("launch-checklist-2");
+  expect(history.localLink("two", "Launch checklist")).toBe("launch-checklist-3");
+  expect(history.localLink("one", "Résumé report!")).toBe("resume-report");
+  expect(history.localLink("one", "!!!")).toBe("artifact");
+  history.close();
+  history = new ArtifactHistory(path);
+  try {
+    expect(history.localLink("one", "Launch checklist")).toBe("launch-checklist");
+    expect(history.localLinkTarget("launch-checklist-3")).toEqual({ workspace: "two", name: "Launch checklist" });
   } finally { history.close(); }
 });
 

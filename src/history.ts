@@ -83,6 +83,10 @@ export class ArtifactHistory {
           artifact_id text primary key references artifacts(id),
           source_version_id text not null references versions(id)
         );
+        create table if not exists local_artifact_links (
+          slug text primary key, workspace text not null, name text not null,
+          unique(workspace, name)
+        );
         create index if not exists serve_events_version on serve_events(version_id, served_at);
         pragma user_version = 1;
       `);
@@ -93,6 +97,22 @@ export class ArtifactHistory {
   }
 
   close() { this.db.close(); }
+
+  localLink(workspace: string, name: string): string {
+    return this.db.transaction(() => {
+      const existing = this.db.query("select slug from local_artifact_links where workspace = ? and name = ?").get(workspace, name) as { slug: string } | null;
+      if (existing) return existing.slug;
+      const base = name.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 80).replace(/-$/, "") || "artifact";
+      let slug = base, suffix = 2;
+      while (this.db.query("select 1 from local_artifact_links where slug = ?").get(slug)) slug = `${base}-${suffix++}`;
+      this.db.query("insert into local_artifact_links (slug, workspace, name) values (?, ?, ?)").run(slug, workspace, name);
+      return slug;
+    }).immediate();
+  }
+
+  localLinkTarget(slug: string) {
+    return this.db.query("select workspace, name from local_artifact_links where slug = ?").get(slug) as { workspace: string; name: string } | null;
+  }
 
   capture(input: { workspace: string; name: string; sourcePath: string; source: string; server_source?: string | null; project?: ArtifactProject; runtime: string; reason?: string; restoredFrom?: string; force?: boolean }): Version {
     return this.db.transaction(() => {

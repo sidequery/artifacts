@@ -146,6 +146,17 @@ inline views, targeted edits, history, and compatibility with older Canvas sourc
 
 ## Development
 
+Preview the gallery with an isolated sample library:
+
+```sh
+bun install --frozen-lockfile
+bun run demo
+```
+
+Open [localhost:4788](http://127.0.0.1:4788). Each launch creates temporary
+sample files and history, separate from your existing library. Set `DEMO_PORT`
+to use another port. Stop with Ctrl-C.
+
 ```sh
 bun install --frozen-lockfile
 bun run dev:cloudflare

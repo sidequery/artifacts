@@ -12,6 +12,7 @@ import { parseProjectArchive, projectArchive } from "./project-archive";
 import { readToolBody } from "../cloudflare/http";
 import { artifactHtml } from "./html";
 import { galleryBundle, galleryData, galleryHtml, workingSource } from "./gallery/server";
+import { watchGallery } from "./gallery/local-subscriptions";
 
 export type ArtifactServer = { url: string; port: number; stop: () => void };
 export type ArtifactActionEvent = { type: string; [key: string]: unknown };
@@ -75,12 +76,20 @@ export async function createArtifactServer(opts: CreateArtifactServerOptions): P
     }), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
   }
 
-  let server: ReturnType<typeof Bun.serve>;
+  let server: Bun.Server<{ all: boolean }>;
+  let stopWatching: (() => void) | undefined;
   try {
-    server = Bun.serve({
+    server = Bun.serve<{ all: boolean }>({
       port: opts.port ?? 0,
       hostname: opts.hostname ?? "127.0.0.1",
-      async fetch(request) {
+      websocket: {
+        open(socket) { socket.subscribe(socket.data.all ? "gallery:all" : "gallery:current"); socket.send("ready"); },
+        message(socket, message) {
+          if (message === "ping") socket.send("pong");
+          else socket.close(1008, "Receive-only subscription");
+        },
+      },
+      async fetch(request, server) {
         try {
           const url = new URL(request.url);
           if (url.pathname === "/health") return json({ ok: true });
@@ -113,6 +122,12 @@ export async function createArtifactServer(opts: CreateArtifactServerOptions): P
           }
 
           if (opts.gallery && request.method === "GET") {
+            if (url.pathname === "/api/gallery/subscribe") {
+              const origin = request.headers.get("origin");
+              if (origin !== url.origin) return json({ error: "Origin is not allowed" }, 403);
+              if (server.upgrade(request, { data: { all: url.searchParams.get("all") === "1" } })) return;
+              return new Response("WebSocket required", { status: 426 });
+            }
             if (url.pathname === "/" || url.pathname === "/gallery") return new Response(galleryHtml(), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
             if (url.pathname === "/gallery.js") {
               galleryJs ??= galleryBundle().catch(error => { galleryJs = undefined; throw error; });
@@ -165,7 +180,10 @@ export async function createArtifactServer(opts: CreateArtifactServerOptions): P
             return versionPage(version, event ? JSON.parse(event.initial_state) : {}, true, compiled.runtime);
           }
 
-          const match = url.pathname.match(/^\/c\/([^/]+)(?:\/(.*))?$/);
+          const share = url.pathname.match(/^\/a\/([a-z0-9-]+)(?:\/(.*))?$/);
+          const target = share ? history.localLinkTarget(share[1]!) : null;
+          if (share && (!target || target.workspace !== artifactsDir)) return new Response("artifact not found", { status: 404 });
+          const match = share && target ? [share[0], encodeURIComponent(target.name), share[2]] : url.pathname.match(/^\/c\/([^/]+)(?:\/(.*))?$/);
           if (!match) return new Response("not found", { status: 404 });
           let artifactId: string;
           try {
@@ -210,7 +228,8 @@ export async function createArtifactServer(opts: CreateArtifactServerOptions): P
         }
       },
     });
-  } catch (error) { history.close(); throw error; }
+    if (opts.gallery) stopWatching = watchGallery(history, artifactsDir, all => server.publish(all ? "gallery:all" : "gallery:current", "changed"));
+  } catch (error) { server!?.stop(true); history.close(); throw error; }
 
   let stopped = false;
   return {
@@ -219,6 +238,7 @@ export async function createArtifactServer(opts: CreateArtifactServerOptions): P
     stop() {
       if (stopped) return;
       stopped = true;
+      stopWatching?.();
       server.stop(true);
       history.close();
       builds.clear();
