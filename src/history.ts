@@ -1,4 +1,4 @@
-import { readLocalProject } from "./localProject";
+import { readLocalProject, readLocalServer } from "./localProject";
 import { normalizeProject, projectSourceHash, type ArtifactProject } from "../cloudflare/project";
 import { Database } from "bun:sqlite";
 import { createHash, randomUUID } from "node:crypto";
@@ -88,22 +88,24 @@ export class ArtifactHistory {
       `);
       const columns = this.db.query("pragma table_info(versions)").all() as { name: string }[];
       if (!columns.some(column => column.name === "project_json")) this.db.exec("alter table versions add column project_json text");
+      if (!columns.some(column => column.name === "server_source")) this.db.exec("alter table versions add column server_source text");
     }).immediate();
   }
 
   close() { this.db.close(); }
 
-  capture(input: { workspace: string; name: string; sourcePath: string; source: string; project?: ArtifactProject; runtime: string; reason?: string; restoredFrom?: string; force?: boolean }): Version {
+  capture(input: { workspace: string; name: string; sourcePath: string; source: string; server_source?: string | null; project?: ArtifactProject; runtime: string; reason?: string; restoredFrom?: string; force?: boolean }): Version {
     return this.db.transaction(() => {
       const workspace = resolve(input.workspace);
       this.db.query("insert or ignore into artifacts values (?, ?, ?, ?, ?)").run(randomUUID(), workspace, input.name, resolve(input.sourcePath), new Date().toISOString());
       const artifact = this.db.query("select id from artifacts where workspace = ? and name = ?").get(workspace, input.name) as { id: string };
       const project = input.project ?? readLocalProject(input.sourcePath);
-      const sourceHash = projectSourceHash(input.source, project);
+      const server = input.server_source === undefined ? readLocalServer(input.sourcePath) : input.server_source;
+      const sourceHash = server === null ? projectSourceHash(input.source, project) : hash(JSON.stringify([input.source, server, project]));
       const latest = this.db.query("select id, revision, source_hash from versions where artifact_id = ? order by revision desc limit 1").get(artifact.id) as Version | null;
       if (!input.force && latest && latest.source_hash === sourceHash) return this.version(latest.id)!;
       const id = randomUUID();
-      this.db.query("insert into versions (id, artifact_id, revision, source, source_hash, runtime, created_at, reason, restored_from, project_json) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(id, artifact.id, (latest?.revision ?? 0) + 1, input.source, sourceHash, input.runtime, new Date().toISOString(), input.reason ?? "served", input.restoredFrom ?? null, JSON.stringify(project));
+      this.db.query("insert into versions (id, artifact_id, revision, source, source_hash, runtime, created_at, reason, restored_from, project_json, server_source) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(id, artifact.id, (latest?.revision ?? 0) + 1, input.source, sourceHash, input.runtime, new Date().toISOString(), input.reason ?? "served", input.restoredFrom ?? null, JSON.stringify(project), server);
       return this.version(id)!;
     }).immediate();
   }

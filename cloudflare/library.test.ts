@@ -8,8 +8,34 @@ let runtime: Miniflare;
 type CallResult<T> = { result?: T; error?: string };
 type DraftResult = {
   ok: boolean; workspace: string; name: string; source: string; source_hash: string;
+  revision_token: string;
   server_source: string | null; state: Record<string, unknown>; path: string;
 };
+
+test("full-project conditional writes guard server, helper, dependency and lock changes atomically", async () => {
+  const request = <T>(method: string, input: unknown) => call<T>(method, input, "conditional");
+  const rejects = (method: string, input: unknown) => fails(method, input, "Project changed since", "conditional");
+  const identity = { workspace: "conditional-project", name: "report" };
+  const project = { files: { "lib/value.ts": "export const value = 1;" }, dependencies: {}, lock: {} };
+  let current = await request<DraftResult>("writeDraft", { ...identity, source: "client\n", server_source: "server", project, expected_revision: null });
+  expect((await request<DraftResult>("preview", identity)).revision_token).toBe(current.revision_token);
+  await rejects("writeDraft", { ...identity, source: "overwrite", expected_revision: null });
+  for (const change of [
+    { server_source: "changed server" },
+    { project: { ...project, files: { "lib/value.ts": "export const value = 2;" } } },
+    { project: { ...project, dependencies: { example: "1.0.0" }, lock: { "node_modules/example/index.js": "version one" } } },
+    { project: { ...project, dependencies: { example: "1.0.0" }, lock: { "node_modules/example/index.js": "changed lock" } } },
+  ]) {
+    const previous = current;
+    current = await request<DraftResult>("writeDraft", { ...identity, source: "client\n", ...change });
+    expect(current.revision_token).not.toBe(previous.revision_token);
+    await rejects("writeDraft", { ...identity, source: "stale browser", server_source: "stale server", project, expected_revision: previous.revision_token });
+    expect(await request("preview", identity)).toMatchObject({ source: current.source, server_source: current.server_source, revision_token: current.revision_token });
+  }
+  const results = await Promise.allSettled(["first", "second"].map(source => request("writeDraft", { ...identity, source, expected_revision: current.revision_token })));
+  expect(results.filter(result => result.status === "fulfilled")).toHaveLength(1);
+  expect(results.filter(result => result.status === "rejected")).toHaveLength(1);
+});
 type VersionResult = {
   version: { id: string; revision: number; source: string; server_source: string | null; workspace: string; name: string };
   event: { id: string; version_id: string; mode: string; initial_state: string };

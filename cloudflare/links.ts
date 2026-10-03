@@ -2,7 +2,8 @@ import { DurableObject } from "cloudflare:workers";
 import { LibraryOwnership, type LibrarySelection, type OwnershipEnvironment } from "./ownership";
 
 export type ArtifactTarget = { libraryKey: string; workspace: string; kind: "artifact" | "script"; name: string };
-export type LinkUpdate = { slug?: string; access?: "private" | "public"; version_id?: string; script_hash?: string };
+export type LiveRevision = { id: string; revision: number; revision_token: string };
+export type LinkUpdate = { slug?: string; access?: "private" | "public"; version_id?: string; script_hash?: string; live?: LiveRevision };
 export type ArtifactLink = ArtifactTarget & LinkUpdate & { slug: string; access: "private" | "public"; generation: number };
 const reserved = new Set(["api", "mcp", "gallery", "health", "sign-in", "consent"]);
 export function validateSlug(value: unknown): string {

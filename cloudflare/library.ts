@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { createHash } from "node:crypto";
 import { ProjectStorage } from "./project-storage";
-import { emptyProject, normalizeProject, type ArtifactProject } from "./project";
+import { assertProjectRevision, emptyProject, normalizeProject, projectRevision, type ArtifactProject } from "./project";
 import type { HistoryEntry, ServeEvent, Version } from "../src/historyTypes";
 
 export const MAX_SOURCE_BYTES = 256 * 1024;
@@ -218,13 +218,14 @@ export class ArtifactLibrary extends DurableObject<unknown> {
     }));
   }
 
-  writeDraft(input: { workspace: string; name: string; source: string; server_source?: string | null; project?: ArtifactProject }) {
+  writeDraft(input: { workspace: string; name: string; source: string; server_source?: string | null; project?: ArtifactProject; expected_revision?: string | null }) {
     const workspace = workspaceName(input.workspace); const name = artifactName(input.name);
     const source = sourceText(input.source, true); const source_hash = sha256(source); const timestamp = now();
     const requestedServer = input.server_source === undefined ? undefined
       : input.server_source === null ? null : sourceText(input.server_source);
     return this.state.storage.transactionSync(() => {
       const current = first(this.sql.exec<DraftRow>("select * from drafts where workspace = ? and name = ?", workspace, name));
+      assertProjectRevision(input.expected_revision, current ? projectRevision(current.source, current.server_source, this.projectStorage.read(current.project)) : null);
       const server_source = requestedServer === undefined ? current?.server_source ?? null : requestedServer;
       const project = input.project === undefined ? current?.project ?? this.projectStorage.encode(emptyProject()) : this.projectStorage.encode(input.project);
       this.sql.exec(`insert into drafts (workspace,name,source,server_source,source_hash,project,state,created_at,updated_at)
@@ -234,8 +235,25 @@ export class ArtifactLibrary extends DurableObject<unknown> {
       workspace, name, source, server_source, source_hash, project, timestamp, timestamp);
       const saved = this.draft(workspace, name);
       return { ok: true, path: sourcePath(workspace, name), workspace, name, source, server_source: saved.server_source,
-        source_hash, project: this.projectStorage.read(saved.project), state: JSON.parse(saved.state) as Record<string, unknown> };
+        source_hash, project: this.projectStorage.read(saved.project), revision_token: projectRevision(source, saved.server_source, this.projectStorage.read(saved.project)), state: JSON.parse(saved.state) as Record<string, unknown> };
     });
+  }
+
+  importDraft(input: { workspace: string; name: string; source: string; server_source: string | null; project: ArtifactProject; runtime: string }) {
+    const workspace = workspaceName(input.workspace), name = artifactName(input.name), runtime = runtimeName(input.runtime);
+    const source = sourceText(input.source), server_source = input.server_source === null ? null : sourceText(input.server_source);
+    const project = normalizeProject(input.project);
+    return this.state.storage.transactionSync(() => {
+      if (first(this.sql.exec("select name from drafts where workspace=? and name=? union all select name from artifacts where workspace=? and name=?", workspace, name, workspace, name))) throw new Error("Destination artifact already exists; choose a new name");
+      const timestamp = now();
+      this.sql.exec("insert into drafts(workspace,name,source,server_source,source_hash,project,state,created_at,updated_at) values(?,?,?,?,?,?,'{}',?,?)", workspace, name, source, server_source, sha256(source), this.projectStorage.encode(project), timestamp, timestamp);
+      const version = this.capture(workspace, name, source, server_source, project, runtime, "import", null, true);
+      return { ok: true, imported: true, workspace, name, path: sourcePath(workspace, name), source, server_source, project, source_hash: sha256(source), revision_token: projectRevision(source, server_source, project), state: {}, versionId: version.id, revision: version.revision };
+    });
+  }
+  draftRevision(input: { workspace: string; name: string }): string {
+    const draft = this.draft(workspaceName(input.workspace), artifactName(input.name));
+    return projectRevision(draft.source, draft.server_source, this.projectStorage.read(draft.project));
   }
 
   remix(input: { workspace: string; name?: string; version_id?: string; new_name: string; runtime: string }) {
@@ -280,6 +298,7 @@ export class ArtifactLibrary extends DurableObject<unknown> {
     return {
       path: input.file ?? (part === "client" ? sourcePath(workspace, name) : serverSourcePath(workspace, name)),
       part, file: input.file, project, source_hash: input.file === undefined && part === "client" ? row.source_hash : sha256(selected),
+      revision_token: projectRevision(row.source, row.server_source, project),
       total_lines: lines.length,
       start_line: start, end_line: actualEnd, source: lines.slice(start - 1, actualEnd).join(""),
       next_line: actualEnd < lines.length ? actualEnd + 1 : null,
@@ -459,7 +478,7 @@ export class ArtifactLibrary extends DurableObject<unknown> {
     if (input.name) {
       if (input.event_id !== undefined) throw new Error("event_id requires version_id");
       const name = artifactName(input.name); const draft = this.draft(workspace, name);
-      return { workspace, name, path: sourcePath(workspace, name), source: draft.source, server_source: draft.server_source, project: this.projectStorage.read(draft.project),
+      return { workspace, name, path: sourcePath(workspace, name), source: draft.source, server_source: draft.server_source, project: this.projectStorage.read(draft.project), revision_token: projectRevision(draft.source, draft.server_source, this.projectStorage.read(draft.project)),
         state: JSON.parse(draft.state) as Record<string, unknown>, version_id: null, event_id: null, compiled_id: null };
     }
     const version = this.findVersion(workspace, input.version_id!);
@@ -468,7 +487,7 @@ export class ArtifactLibrary extends DurableObject<unknown> {
       ? first(this.sql.exec<ServeEvent>("select * from serve_events where id = ? and version_id = ?", input.event_id, version.id))
       : first(this.sql.exec<ServeEvent>("select * from serve_events where version_id = ? order by (mode = 'live') desc, rowid desc limit 1", version.id));
     if (input.event_id && !event) throw new Error("serve event not found for version");
-    return { workspace, name: version.name, path: version.source_path, source: version.source, server_source: version.server_source, project: version.project,
+    return { workspace, name: version.name, path: version.source_path, source: version.source, server_source: version.server_source, project: version.project, revision_token: projectRevision(version.source, version.server_source, version.project),
       state: event ? JSON.parse(event.initial_state) as Record<string, unknown> : {}, version_id: version.id, event_id: event?.id ?? null, compiled_id: version.compiled_id };
   }
 

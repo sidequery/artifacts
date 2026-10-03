@@ -1,6 +1,19 @@
 import { ARTIFACTS_APP_META } from "./app-contract";
+import { PROJECT_ARCHIVE_SCHEMA } from "../project-archive-contract";
 
 export const MCP_TOOLS = [
+  {
+    name: "artifact_export",
+    description: "Export a complete versioned project archive: client, server, helper modules and exact dependency snapshot. Select name or version_id. Never includes UI state, database/files, secrets or URL policy.",
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    inputSchema: { type: "object", properties: { name: { type: "string" }, version_id: { type: "string" } }, oneOf: [{ required: ["name"] }, { required: ["version_id"] }], additionalProperties: false },
+  },
+  {
+    name: "artifact_import",
+    _meta: ARTIFACTS_APP_META,
+    description: "Import a complete project archive under a fresh new_name. Never overwrites source or historical identities, copies no live data, and creates a private URL in hosted runtimes. Preserves archived dependency bytes without fetching or installing packages. Invalid source remains an imported draft with diagnostics. Filesystem runtimes preserve server code for later deployment but do not execute it.",
+    inputSchema: { type: "object", properties: { new_name: { type: "string" }, archive: PROJECT_ARCHIVE_SCHEMA }, required: ["new_name", "archive"], additionalProperties: false },
+  },
   {
     name: "artifact_guide",
     description: "Read the Sidequery Artifacts SDK contract: exports, host APIs, component conventions, restrictions, and validation behavior. Call before creating an artifact if you have not read it in this conversation.",

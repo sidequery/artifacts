@@ -6,7 +6,7 @@ export const ARTIFACTS_GUIDE_EXPORTS = [
   "Pill", "Row", "Select", "Spacer", "Stack", "Stat", "Table", "Text", "TextArea",
   "TextInput", "Toggle", "artifactFetch", "pluginCall", "Routes", "Route", "Outlet", "Navigate", "NavLink", "useNavigate", "useParams", "useLocation", "useSearchParams", "useMatch", "useResolvedPath", "artifactPaletteDark", "artifactPaletteLight", "artifactTypography",
   "mergeStyle", "themeFromKind", "tokensFromPalette", "useArtifactAction", "useArtifactState", "useState", "useReducer", "useRef", "useMemo", "useCallback", "useEffect", "useHostTheme",
-  "artifactFiles", "MAX_ARTIFACTS_FILE_BYTES",
+  "artifactFiles", "MAX_ARTIFACTS_FILE_BYTES", "getArtifactCapabilities",
 ];
 export const LEGACY_GUIDE_EXPORTS = [
   "useCanvasAction", "useCanvasState", "canvasFetch", "canvasFiles", "MAX_CANVAS_FILE_BYTES",
@@ -48,6 +48,8 @@ artifactFetch(path: string, init?: RequestInit): Promise<Response> sends a reque
 
 Server requests require a hosted runtime with a native artifacts server. Local Bun CLI, local stdio MCP and local gallery views do not execute servers and report requests as unavailable. Hosted MCP Apps and the hosted gallery support them. Hosted artifact_write accepts server TypeScript exporting class ArtifactServer extends DurableObject from "cloudflare:workers", alongside browser contents.
 
+getArtifactCapabilities() returns {server, files, plugins, hostActions, statePersistence} for the current view without making requests. The booleans describe installed bridges; individual operations still follow the current access policy. statePersistence is "persistent" when UI state is saved through the host, otherwise "session". Gallery and MCP UI state is temporary; use server SQLite for durable app data. Query capabilities before showing controls that require server, file, plugin or host-action support.
+
 Each artifact with a server gets one native SQLite database. Different artifact names get separate databases; multiple tabs and server restarts use the same database. Use this.ctx.storage.sql.exec(sql, ...bindings) with ? placeholders for values; cursors support .toArray() and .one(). Use this.ctx.storage.kv.get/put/delete for key/value data and this.ctx.storage.transactionSync(() => { ... }) for synchronous SQL/KV transactions. Initialize tables with create table if not exists.
 
 Artifacts has no application-schema migration runner. For schema changes, keep a schema version in the database and apply pending changes plus the version update in one this.ctx.storage.transactionSync during server initialization, before serving requests. Saving source does not execute migrations; they run when that server is next requested. Prefer additive changes compatible with older source because source restore does not reverse migrations.
@@ -79,7 +81,7 @@ Files use the same library + workspace + artifact identity as the database and s
 
 For browser TSX, embed data in the source or use artifactFetch when a hosted native server is available. Direct network calls (fetch, XMLHttpRequest, WebSocket), eval, new Function, process/Bun APIs, localStorage and sessionStorage are disallowed. The browser import restrictions above do not apply to native server source, which imports DurableObject from "cloudflare:workers".
 
-artifact_write creates or replaces the full source and then validates it. artifact_edit applies exact replacements and then validates; use artifact_read's source_hash as expected_hash to guard edits. A failed typecheck can leave source applied: inspect applied/ok and diagnostics, fix the source, and validate again. Do not treat an error as a rollback. Successful writes/edits show an inline preview in MCP Apps hosts. artifact_typecheck and artifact_compile check existing artifacts; artifact_open shows one. artifact_history lists revisions; artifact_version reads archived source; artifact_restore restores source as a new revision while retaining current state. Hosted revisions include both client and server source.
+artifact_write creates or replaces the full source and then validates it. artifact_edit applies exact replacements and then validates; use artifact_read's source_hash as expected_hash to guard edits. A failed typecheck can leave source applied: inspect applied/ok and diagnostics, fix the source, and validate again. Do not treat an error as a rollback. Successful writes/edits show an inline preview in MCP Apps hosts. artifact_typecheck and artifact_compile check existing artifacts; artifact_open shows one. artifact_history lists revisions; artifact_version reads archived source; artifact_restore restores source as a new revision while retaining current state. Hosted revisions include both client and server source. artifact_export returns a complete version 1 project archive including helpers and exact package source/type snapshots, with no runtime data or secrets. artifact_import accepts that archive and a fresh new_name; hosted imports start private with new storage. Filesystem imports preserve backend source for deployment but do not execute it.
 `;
 }
 

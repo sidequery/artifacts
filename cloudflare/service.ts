@@ -1,5 +1,5 @@
 import browserRuntime from "../dist/cloudflare/browser-runtime.json";
-import { resolveProject, type ArtifactProject } from "./project";
+import { assertProjectRevision, emptyProject, projectRevision, resolveProject, type ArtifactProject } from "./project";
 import type { DurableObjectStub, DurableObjectNamespace } from "@cloudflare/workers-types";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { ArtifactLibrary, ArtifactEdit, CompiledArtifact } from "./library";
@@ -21,6 +21,7 @@ import { artifactGuideResult } from "../src/mcp/guide";
 import type { ArtifactFiles } from "./files";
 import { ArtifactFileError, validateFileRequest } from "./files";
 import type { ArtifactFileRequest } from "../src/sdk/files";
+import { parseProjectArchive, projectArchive } from "../src/project-archive";
 
 import { dispatchPlugin, pluginCatalog, PLUGIN_GUIDE, type PluginInvocationContext } from "./plugins";
 import type { PluginRequest } from "../src/plugins/types";
@@ -30,6 +31,7 @@ type Snapshot = {
   server_source: string | null;
   project?: ArtifactProject;
   state: Record<string, unknown>; version_id?: string | null; compiled_id?: string | null;
+  revision_token?: string;
 };
 type Mutation = Snapshot & { ok: boolean; applied?: boolean; changed?: boolean; restored?: boolean; source_hash?: string; edits_applied?: number; versionId?: string; revision?: number };
 type Compiled = { ok: boolean; js?: string; diagnostics: Diagnostic[]; artifact?: CompiledArtifact };
@@ -77,6 +79,19 @@ export class CloudArtifactService {
         return text({ versions, next_offset: versions.length === 100 ? offset + 100 : null });
       }
       case "artifact_version": return text(await this.library.version({ workspace: this.workspace, id: args.version_id as string, events_offset: args.events_offset as number | undefined }));
+      case "artifact_export": {
+        const archive = projectArchive("artifact", await this.snapshot({ name: args.name as string | undefined, version_id: args.version_id as string | undefined }));
+        return { ...text(archive), structuredContent: archive };
+      }
+      case "artifact_import": {
+        const archive = parseProjectArchive(args.archive, "artifact");
+        const target = this.artifacts.target("artifact", args.new_name as string);
+        const slug = args.slug as string | undefined ?? target.name;
+        if (this.hosted) await this.hosted.links.check(target, slug);
+        const mutation = await this.library.importDraft({ workspace: this.workspace, name: target.name, source: archive.source, server_source: archive.server_source, project: archive.project, runtime });
+        const generation = await this.hosted?.links.begin(target);
+        return this.mutationResult(mutation, generation, this.hosted ? { slug, access: "private" } : {});
+      }
       case "artifact_remix": {
         const target = this.artifacts.target("artifact", args.new_name as string);
         const slug = args.slug as string | undefined ?? target.name;
@@ -87,11 +102,17 @@ export class CloudArtifactService {
       }
       case "artifact_write": {
         const target = this.artifacts.target("artifact", args.name as string);
+        // Reject an already stale save before superseding a pending activation.
+        // writeDraft repeats this check atomically after dependency resolution.
+        if (args.expected_revision !== undefined) {
+          const current = await this.snapshot({name: args.name as string}).catch(error => { if (error instanceof Error && error.message.includes("artifact not found")) return null; throw error; });
+          assertProjectRevision(args.expected_revision as string | null, current?.revision_token ?? null);
+        }
         if (args.slug !== undefined) await this.artifacts.requireHosted().links.check(target, args.slug as string);
         const generation = await this.hosted?.links.begin(target);
         const previous = args.project === undefined ? undefined : await this.snapshot({name: args.name as string}).catch(error => { if (error instanceof Error && error.message.includes("artifact not found")) return undefined; throw error; });
         const project = args.project === undefined ? undefined : await resolveProject(args.project, previous?.project, fetch, browserRuntime.sharedVersions);
-        return this.mutationResult(await this.library.writeDraft({ workspace: this.workspace, name: args.name as string, source: args.contents as string, server_source: args.server as string | null | undefined, project }), generation, { ...(args.slug === undefined ? {} : { slug: args.slug as string }), ...(args.access === undefined ? {} : { access: args.access as "private" | "public" }) });
+        return this.mutationResult(await this.library.writeDraft({ workspace: this.workspace, name: args.name as string, source: args.contents as string, server_source: args.server as string | null | undefined, project, expected_revision: args.expected_revision as string | null | undefined }), generation, { ...(args.slug === undefined ? {} : { slug: args.slug as string }), ...(args.access === undefined ? {} : { access: args.access as "private" | "public" }) });
       }
       case "artifact_edit": {
         const generation = await this.hosted?.links.begin(this.artifacts.target("artifact", args.name as string));
@@ -191,7 +212,7 @@ export class CloudArtifactService {
       const { _meta, ...details } = await this.preview(snapshot, compiled);
       const target = this.artifacts.target("artifact", mutation.name);
       if (generation != null && details.ok && "artifact" in details && (settings.slug !== undefined || await this.hosted!.links.find(target))) {
-        const link = await this.hosted!.links.commit(target, generation, { ...settings, version_id: details.artifact.versionId });
+        const link = await this.hosted!.links.commit(target, generation, { ...settings, version_id: details.artifact.versionId, live: { id: details.artifact.versionId, revision: details.artifact.revision, revision_token: projectRevision(mutation.source, mutation.server_source, mutation.project ?? emptyProject()) } });
         if (!link) {
           const superseded = { ...payload, ok: false, superseded: true, error: "A newer update superseded this URL activation" };
           return { ...text(superseded, true), structuredContent: superseded };
@@ -295,7 +316,7 @@ export class CloudArtifactService {
     if (!compiled.ok) return text({ ok: false, diagnostics: compiled.diagnostics, check: formatArtifactCheck(compiled.diagnostics) }, true);
     const { _meta, ...preview } = await this.preview(snapshot, compiled);
     if (preview.ok && "artifact" in preview) {
-      const link = await hosted.links.commit(target, generation, { ...settings, version_id: preview.artifact.versionId });
+      const link = await hosted.links.commit(target, generation, { ...settings, version_id: preview.artifact.versionId, live: { id: preview.artifact.versionId, revision: preview.artifact.revision, revision_token: projectRevision(snapshot.source, snapshot.server_source, snapshot.project ?? emptyProject()) } });
       if (!link) return text({ ok: false, superseded: true, error: "A newer update superseded this URL activation" }, true);
     }
     return { ...text({ ...preview, ...await this.artifacts.linkDetails(target) }), ...(_meta ? { _meta } : {}) };

@@ -1,9 +1,14 @@
-import { useState } from "react";
-import { SourceEditor } from "./source-editor";
+import { useEffect, useState } from "react";
+import { SourceEditor, type SourceLocation } from "./source-editor";
 import { Select } from "./select";
 
 export type EditableProject = { files: Record<string, string>; dependencies: Record<string, string> };
 export const emptyEditableProject = (): EditableProject => ({ files: {}, dependencies: {} });
+function parseDependencies(value: string): Record<string, string> {
+  const parsed: unknown = JSON.parse(value);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || Object.entries(parsed).some(([name, version]) => !/^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/.test(name) || typeof version !== "string" || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version))) throw new Error("Enter a JSON object mapping package names to exact versions.");
+  return parsed as Record<string, string>;
+}
 export function editableProject(value: unknown): EditableProject {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Source response is missing the project snapshot.");
   const project = value as Record<string, unknown>;
@@ -14,7 +19,7 @@ export function editableProject(value: unknown): EditableProject {
   return { files: { ...project.files as Record<string, string> }, dependencies: { ...project.dependencies as Record<string, string> } };
 }
 
-export function ProjectEditor({ entries, project, onProjectChange, onEntryChange, readOnly = false, disabled = false, onValidityChange }: {
+export function ProjectEditor({ entries, project, onProjectChange, onEntryChange, readOnly = false, disabled = false, onValidityChange, dependencyText, onDependencyTextChange, location }: {
   entries: { id: string; filename: string; source: string }[];
   project: EditableProject;
   onProjectChange: (project: EditableProject) => void;
@@ -22,12 +27,28 @@ export function ProjectEditor({ entries, project, onProjectChange, onEntryChange
   readOnly?: boolean;
   disabled?: boolean;
   onValidityChange: (valid: boolean) => void;
+  dependencyText?: string;
+  onDependencyTextChange?: (text: string) => void;
+  location?: SourceLocation;
 }) {
   const [selection, setSelection] = useState(entries[0]?.id ?? "");
   const [filename, setFilename] = useState("");
   const [fileError, setFileError] = useState("");
   const [dependencies, setDependencies] = useState(JSON.stringify(project.dependencies, null, 2));
   const [dependencyError, setDependencyError] = useState("");
+  useEffect(() => {
+    if (!location) return;
+    const file = location.file.replace(/^\//, "");
+    const entry = entries.find(item => item.filename === file)
+      ?? entries.find(item => file.endsWith(".artifact.server.ts") ? item.id === "server" : file.endsWith(".artifact.tsx") ? item.id === "client" : false);
+    if (entry) setSelection(entry.id);
+    else if (Object.hasOwn(project.files, file)) setSelection(`file:${file}`);
+  }, [location]);
+  useEffect(() => {
+    if (dependencyText === undefined) return;
+    try { parseDependencies(dependencyText); setDependencyError(""); onValidityChange(true); }
+    catch (error) { setDependencyError(error instanceof Error ? error.message : String(error)); onValidityChange(false); }
+  }, [dependencyText, onValidityChange]);
   const entry = entries.find(item => item.id === selection);
   const helper = selection.startsWith("file:") ? selection.slice(5) : null;
   const selectedSource = entry?.source ?? (helper === null ? "" : project.files[helper] ?? "");
@@ -46,7 +67,7 @@ export function ProjectEditor({ entries, project, onProjectChange, onEntryChange
       {entries.map(item => <button type="button" key={item.id} aria-pressed={selection === item.id} disabled={disabled} onClick={() => setSelection(item.id)}>{item.filename}</button>)}
       {Object.keys(project.files).length ? <Select aria-label="Helper file" disabled={disabled} value={helper === null ? "" : selection} onChange={event => { if (event.target.value) setSelection(event.target.value); }}><option value="">Helper files</option>{Object.keys(project.files).sort().map(path => <option key={path} value={`file:${path}`}>{path}</option>)}</Select> : null}
     </div>
-    <SourceEditor filename={entry?.filename ?? helper ?? "source.ts"} value={selectedSource} readOnly={readOnly} disabled={disabled} onChange={source => {
+    <SourceEditor filename={entry?.filename ?? helper ?? "source.ts"} value={selectedSource} location={location} readOnly={readOnly} disabled={disabled} onChange={source => {
       if (entry) onEntryChange(entry.id, source);
       else if (helper !== null) onProjectChange({ ...project, files: { ...project.files, [helper]: source } });
     }} />
@@ -56,12 +77,11 @@ export function ProjectEditor({ entries, project, onProjectChange, onEntryChange
     </div>{fileError ? <p role="alert" className="error-message">{fileError}</p> : null}</details> : null}
     <details className="project-dependencies"><summary>Dependencies ({Object.keys(project.dependencies).length})</summary>
       <p className="muted">Use package names and exact versions, for example {`{"lodash-es": "4.17.21"}`}.</p>
-      <label>Dependencies (JSON)<textarea aria-label="Project dependencies" spellCheck={false} readOnly={locked} value={dependencies} onChange={event => {
-        const value = event.target.value; setDependencies(value);
+      <label>Dependencies (JSON)<textarea aria-label="Project dependencies" spellCheck={false} readOnly={locked} value={dependencyText ?? dependencies} onChange={event => {
+        const value = event.target.value; setDependencies(value); onDependencyTextChange?.(value);
         try {
-          const parsed: unknown = JSON.parse(value);
-          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || Object.entries(parsed).some(([name, version]) => !/^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/.test(name) || typeof version !== "string" || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version))) throw new Error("Enter a JSON object mapping package names to exact versions.");
-          onProjectChange({ ...project, dependencies: parsed as Record<string, string> }); setDependencyError(""); onValidityChange(true);
+          const parsed = parseDependencies(value);
+          onProjectChange({ ...project, dependencies: parsed }); setDependencyError(""); onValidityChange(true);
         } catch (error) { setDependencyError(error instanceof Error ? error.message : String(error)); onValidityChange(false); }
       }} /></label>
       {dependencyError ? <p role="alert" className="error-message">{dependencyError}</p> : null}

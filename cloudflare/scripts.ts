@@ -2,7 +2,7 @@ import { ProjectStorage } from "./project-storage";
 import { DurableObject } from "cloudflare:workers";
 import { sha256, MAX_SOURCE_BYTES, type ArtifactEdit } from "./library";
 
-import { emptyProject, normalizeProject, projectSourceHash, type ArtifactProject } from "./project";
+import { assertProjectRevision, emptyProject, normalizeProject, projectRevision, projectSourceHash, type ArtifactProject } from "./project";
 
 const bytes = (value: string) => new TextEncoder().encode(value).byteLength;
 function text(value: unknown, label: string, max = 4096): string {
@@ -58,9 +58,16 @@ export class ScriptLibrary extends DurableObject<unknown> {
     this.sql.exec(`insert into scripts(workspace,name,source,source_hash,updated_at,project) values(?,?,?,?,?,?) on conflict(workspace,name) do update set source=excluded.source,source_hash=excluded.source_hash,updated_at=excluded.updated_at,project=excluded.project`,workspace,name,code,source_hash,updated_at,this.projectStorage.encode(project));
     const previous = this.sql.exec<{revision: number; source_hash: string}>("select revision,source_hash from script_versions where workspace=? and name=? order by revision desc limit 1",workspace,name).toArray()[0];
     if (previous?.source_hash !== source_hash || reason === "restore") this.sql.exec("insert into script_versions(id,workspace,name,revision,source,source_hash,created_at,reason,restored_from,project) values(?,?,?,?,?,?,?,?,?,?)",crypto.randomUUID(),workspace,name,(previous?.revision ?? 0)+1,code,source_hash,updated_at,reason,restoredFrom,this.projectStorage.encode(project));
-    return {ok:true,workspace,name,path:`${workspace}/${name}.script.ts`,source:code,project,source_hash,updated_at};
+    return {ok:true,workspace,name,path:`${workspace}/${name}.script.ts`,source:code,project,source_hash,revision_token:projectRevision(code,null,project),updated_at};
   }
-  writeDraft(input: {workspace: string; name: string; source: string; project?: ArtifactProject}) { return this.ctx.storage.transactionSync(() => this.save(input,"edit")); }
+  writeDraft(input: {workspace: string; name: string; source: string; project?: ArtifactProject; expected_revision?: string | null}) {
+    return this.ctx.storage.transactionSync(() => {
+      const {workspace,name} = key(input);
+      const current = this.sql.exec<Row>("select * from scripts where workspace=? and name=?",workspace,name).toArray()[0];
+      assertProjectRevision(input.expected_revision, current ? projectRevision(current.source,null,this.projectStorage.read(current.project)) : null);
+      return this.save(input,"edit");
+    });
+  }
   remix(input: {workspace: string; name?: string; version_id?: string; new_name: string}) {
     const {workspace,name} = key({workspace:input.workspace,name:input.new_name});
     if (Boolean(input.name) === Boolean(input.version_id)) throw new Error("provide name or version_id, but not both");
@@ -77,6 +84,17 @@ export class ScriptLibrary extends DurableObject<unknown> {
       return {...result,remixed:true,origin:{source_name:origin.name,source_version_id:origin.id}};
     });
   }
+  importDraft(input: { workspace: string; name: string; source: string; project: ArtifactProject }) {
+    const { workspace, name } = key(input);
+    return this.ctx.storage.transactionSync(() => {
+      if (this.sql.exec("select name from scripts where workspace=? and name=? union all select name from script_versions where workspace=? and name=?", workspace, name, workspace, name).toArray().length) throw new Error("Destination script already exists; choose a new name");
+      return { ...this.save({ ...input, workspace, name }, "import"), imported: true };
+    });
+  }
+  draftRevision(input: { workspace: string; name: string }): string {
+    const row = this.row(input);
+    return projectRevision(row.source, null, this.projectStorage.read(row.project));
+  }
   listDrafts(input: {workspace?: string; offset?: number; limit?: number} = {}) {
     const {offset,limit} = page(input), workspace = input.workspace === undefined ? null : text(input.workspace,"workspace");
     return this.sql.exec<{workspace: string; name: string; source_hash: string; updated_at: string; active_hash: string | null}>("select workspace,name,source_hash,updated_at,active_hash from scripts where (? is null or workspace=?) order by workspace,name limit ? offset ?",workspace,workspace,limit,offset).toArray().map(row=>({...row,id:row.name,path:`${row.workspace}/${row.name}.script.ts`,kind:"script" as const}));
@@ -89,7 +107,7 @@ export class ScriptLibrary extends DurableObject<unknown> {
     const start = input.start_line ?? 1, end = input.end_line ?? start+199;
     if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start<1 || end<start || start>lines.length) throw new Error("invalid line range");
     const actualEnd = Math.min(end,lines.length);
-    return {workspace:row.workspace,name:row.name,path:input.file ?? `${row.workspace}/${row.name}.script.ts`,file:input.file,project,source:lines.slice(start-1,actualEnd).join(""),source_hash:input.file === undefined ? row.source_hash : sha256(selected),total_lines:lines.length,start_line:start,end_line:actualEnd,next_line:actualEnd<lines.length?actualEnd+1:null};
+    return {workspace:row.workspace,name:row.name,path:input.file ?? `${row.workspace}/${row.name}.script.ts`,file:input.file,project,source:lines.slice(start-1,actualEnd).join(""),source_hash:input.file === undefined ? row.source_hash : sha256(selected),revision_token:projectRevision(row.source,null,project),total_lines:lines.length,start_line:start,end_line:actualEnd,next_line:actualEnd<lines.length?actualEnd+1:null};
   }
   editDraft(input: {workspace: string; name: string; file?: string; edits: ArtifactEdit[]; expected_hash?: string}) {
     return this.ctx.storage.transactionSync(() => {
@@ -122,7 +140,8 @@ export class ScriptLibrary extends DurableObject<unknown> {
       this.sql.exec("insert into compiled_scripts(workspace,name,hash,code) values(?,?,?,?) on conflict(workspace,name,hash) do nothing",row.workspace,row.name,hash,input.code);
       this.sql.exec("update scripts set active_code=?,active_hash=? where workspace=? and name=?",input.code,hash,row.workspace,row.name);
     });
-    return {ok:true,source_hash:row.source_hash,hash};
+    const version = this.sql.exec<{id: string; revision: number}>("select id,revision from script_versions where workspace=? and name=? and source_hash=? order by revision desc limit 1",row.workspace,row.name,row.source_hash).toArray()[0]!;
+    return {ok:true,source_hash:row.source_hash,hash,live:{...version,revision_token:projectRevision(row.source,null,this.projectStorage.read(row.project))}};
   }
   /** Internal execution lookup. Never return this response through management APIs. */
   active(input: {workspace: string; name: string; hash?: string}) {
@@ -157,7 +176,8 @@ export class ScriptLibrary extends DurableObject<unknown> {
     const workspace=text(input.workspace,"workspace"), id=text(input.id,"version id");
     const row=this.sql.exec<VersionRow>("select * from script_versions where workspace=? and id=?",workspace,id).toArray()[0];
     if (!row) throw new Error("version not found in this workspace");
-    return {...row,project:this.projectStorage.read(row.project),origin:this.sql.exec<{source_name: string;source_version_id: string}>("select source_name,source_version_id from script_remix_origins where workspace=? and name=?",workspace,row.name).toArray()[0] ?? null};
+    const project = this.projectStorage.read(row.project);
+    return {...row,project,revision_token:projectRevision(row.source,null,project),origin:this.sql.exec<{source_name: string;source_version_id: string}>("select source_name,source_version_id from script_remix_origins where workspace=? and name=?",workspace,row.name).toArray()[0] ?? null};
   }
   restore(input: {workspace: string; id: string}) {
     return this.ctx.storage.transactionSync(() => {

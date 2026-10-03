@@ -8,6 +8,7 @@ import type { ArtifactHttpRequest } from "../src/httpTypes";
 import type { ArtifactFileRequest } from "../src/sdk/files";
 import type { GalleryArtifact, GalleryData } from "../src/gallery/types";
 import { CloudArtifactService } from "./service";
+import { parseProjectArchive } from "../src/project-archive";
 
 const text = (value: unknown): CallToolResult => ({ content: [{ type: "text", text: JSON.stringify(value, null, 2) }] });
 type Selection = { name?: string; version_id?: string; event_id?: string };
@@ -54,6 +55,11 @@ export class ManagedArtifactService {
       return text({ [history ? "versions" : kind === "script" ? "scripts" : "artifacts"]: rows, next_offset: rows.length === 100 ? offset + 100 : null });
     }
     const selection = this.selection(kind, { name: args.name as string | undefined, version_id: args.version_id as string | undefined });
+    if (name.endsWith("_import")) {
+      parseProjectArchive(args.archive, kind);
+      const target = await this.links.admit(this.selection(kind, { name: args.new_name as string }), true);
+      return this.physical(target).callTool(name, args);
+    }
     const target = name.endsWith("_remix")
       ? await this.links.admitRemix(selection, args.new_name as string)
       : await this.links.admit(selection, name === "artifact_write" || name === "script_write");
@@ -76,7 +82,7 @@ export class ManagedArtifactService {
   private async linkDetails(kind: "artifact" | "script", workspace: string, name: string) {
     const target = await this.links.admit({ libraryKey: this.libraryKey, workspace, kind, name });
     const link = await this.links.find(target);
-    if (link) return { slug: link.slug, access: link.access, url: `${this.publicOrigin}/${link.slug}` };
+    if (link) return { slug: link.slug, access: link.access, url: `${this.publicOrigin}/${link.slug}`, live: link.live, liveId: link.version_id ?? link.script_hash };
     const pending = await this.links.draft(target);
     return pending.slug ? { slug: pending.slug, access: pending.access ?? "private" } : {};
   }
@@ -98,7 +104,15 @@ export class ManagedArtifactService {
         }
       }
     }
-    for (const item of artifacts.values()) Object.assign(item, await this.linkDetails(item.kind!, item.workspace, item.name));
+    for (const item of artifacts.values()) {
+      Object.assign(item, await this.linkDetails(item.kind!, item.workspace, item.name));
+      if (item.working) {
+        const target = await this.links.admit({ libraryKey: this.libraryKey, workspace: item.workspace, kind: item.kind!, name: item.name });
+        item.draftRevision = item.kind === "script"
+          ? await this.env.SCRIPTS.getByName(target.libraryKey).draftRevision({ workspace: item.workspace, name: item.name })
+          : await this.env.LIBRARIES.getByName(target.libraryKey).draftRevision({ workspace: item.workspace, name: item.name });
+      }
+    }
     return { capabilities: { scripts: true, links: true, moves: true }, workspace: this.workspace,
       artifacts: [...artifacts.values()].sort((a, b) => a.name.localeCompare(b.name) || a.workspace.localeCompare(b.workspace)), nextOffset: hasMore ? offset + 100 : null };
   }

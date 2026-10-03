@@ -15,6 +15,22 @@ async function call(method: string,input: unknown,library="alice") {
   return value.result;
 }
 const identity={workspace:"default",name:"handler"};
+test("conditional script saves guard the whole project and preserve history and activation on conflicts", async () => {
+  const input = { workspace: "conditional", name: "handler" };
+  const project = { files: { "lib/value.ts": "export const value = 1;" }, dependencies: {}, lock: {} };
+  const first = await call("writeDraft", { ...input, source: "original", project, expected_revision: null });
+  expect((await call("readRange", input)).revision_token).toBe(first.revision_token);
+  await call("activate", { ...input, source_hash: first.source_hash, code: "last working code" });
+  const second = await call("writeDraft", { ...input, source: "original", project: { ...project, files: { "lib/value.ts": "agent edit" } } });
+  await expect(call("writeDraft", { ...input, source: "stale browser", project, expected_revision: first.revision_token })).rejects.toThrow("Project changed since");
+  expect((await call("readRange", input)).revision_token).toBe(second.revision_token);
+  expect(await call("history", input)).toHaveLength(2);
+  expect((await call("active", input)).code).toBe("last working code");
+  await expect(call("writeDraft", { ...input, source: "name collision", expected_revision: null })).rejects.toThrow("Project changed since");
+  const writes = await Promise.allSettled(["first writer", "second writer"].map(source => call("writeDraft", { ...input, source, expected_revision: second.revision_token })));
+  expect(writes.filter(result => result.status === "fulfilled")).toHaveLength(1);
+  expect(writes.filter(result => result.status === "rejected")).toHaveLength(1);
+});
 test("versioned drafts, atomic edits, last valid activation, secrets and library isolation",async()=>{
   const first=await call("writeDraft",{...identity,source:"first source"});
   const firstActivation=await call("activate",{...identity,source_hash:first.source_hash,code:"valid-code"});

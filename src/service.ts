@@ -1,7 +1,9 @@
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { PLUGIN_ROOT } from "./paths";
-import { readLocalProject, writeLocalProject, localProjectPath } from "./localProject";
+import { readLocalProject, writeLocalProject, localProjectPath, localServerPath, readLocalServer, writeLocalServer } from "./localProject";
+import { parseProjectArchive, projectArchive } from "./project-archive";
+import type { ProjectArchive } from "./project-archive-contract";
 import { resolveProject } from "../cloudflare/project";
 import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
@@ -191,6 +193,55 @@ export class ArtifactService {
     finally { archive.close(); }
   }
 
+  exportProject(input: { name?: string; version_id?: string; kind?: ProjectArchive["kind"] }): ProjectArchive {
+    if (Boolean(input.name) === Boolean(input.version_id)) throw new Error("provide name or version_id, but not both");
+    const kind = input.kind ?? "artifact";
+    if (input.version_id) {
+      if (kind !== "artifact") throw new Error("Filesystem script archives do not have source history");
+      return projectArchive(kind, this.version(input.version_id));
+    }
+    if (kind !== "artifact" && kind !== "script") throw new Error("kind must be artifact or script");
+    const name = input.name!;
+    const path = kind === "artifact" ? this.resolve(ensureArtifactFileName(name)) : this.scriptPath(name);
+    assertRegularArtifact(path);
+    return projectArchive(kind, { name: kind === "artifact" ? artifactIdFromFile(path) : basename(path, ".script.ts"), source: readFileSync(path, "utf8"), server_source: kind === "artifact" ? readLocalServer(path) : null, project: readLocalProject(path) });
+  }
+
+  private scriptPath(name: string): string {
+    if (typeof name !== "string" || !name.trim() || /[/\\\0]/.test(name) || name === "." || name === "..") throw new Error("Invalid script name");
+    const filename = name.endsWith(".script.ts") ? name : `${name}.script.ts`;
+    if (new TextEncoder().encode(filename).byteLength > 255) throw new Error("Script name is too long");
+    return join(this.artifactsDir, filename);
+  }
+
+  importProject(newName: string, input: unknown) {
+    const archive = parseProjectArchive(input);
+    const path = archive.kind === "artifact" ? join(this.artifactsDir, ensureArtifactFileName(newName)) : this.scriptPath(newName);
+    const name = archive.kind === "artifact" ? artifactIdFromFile(path) : basename(path, ".script.ts");
+    const history = new ArtifactHistory(historyPath(this.env));
+    try {
+      history.db.transaction(() => {
+        if (history.db.query("select id from artifacts where workspace=? and name=?").get(resolve(this.artifactsDir), name)) throw new Error("Destination already exists in history; choose a new name");
+        const candidates = [join(this.artifactsDir, `${name}.artifact.tsx`), join(this.artifactsDir, `${name}.canvas.tsx`), join(this.artifactsDir, `${name}.script.ts`)];
+        for (const candidate of candidates.flatMap(source => [source, localProjectPath(source), source.replace(/\.tsx$/, ".data.json"), ...(source.endsWith(".tsx") ? [localServerPath(source)] : [])])) {
+          try { lstatSync(candidate); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") continue; throw error; }
+          throw new Error("Destination source or state already exists; choose a new name");
+        }
+        ensureArtifactsDir(this.artifactsDir);
+        const created: string[] = [];
+        try {
+          writeLocalProject(path, archive.project, true); created.push(localProjectPath(path));
+          if (archive.server_source !== null) { writeLocalServer(path, archive.server_source, true); created.push(localServerPath(path)); }
+          writeFileSync(path, archive.source, { flag: "wx" }); created.push(path);
+          if (archive.kind === "artifact") history.capture({ workspace: this.artifactsDir, name, sourcePath: path, source: archive.source, server_source: archive.server_source, project: archive.project, runtime: runtimeIdentity(), reason: "import" });
+        } catch (error) { for (const file of created.reverse()) unlinkSync(file); throw error; }
+      }).immediate();
+      const diagnostics = archive.kind === "artifact" ? typecheckArtifact(path) : [];
+      return { ok: diagnostics.length === 0, applied: true, imported: true, name, kind: archive.kind, path, check: archive.kind === "artifact" ? formatArtifactCheck(diagnostics) : "Script source imported; a hosted runtime is required to validate and execute it.", diagnostics,
+        ...(archive.kind === "script" || archive.server_source !== null ? { runtime_notice: "Filesystem previews do not execute server code or scripts. Deploy this archive in a hosted runtime to validate and run them." } : {}) };
+    } finally { history.close(); }
+  }
+
   version(id: string) {
     const archive = new ArtifactHistory(historyPath(this.env));
     try {
@@ -215,7 +266,7 @@ export class ArtifactService {
         }
         // Reject orphaned state and dangling links too: a remix always starts fresh.
         const destinations = [join(this.artifactsDir, `${name}.artifact.tsx`), join(this.artifactsDir, `${name}.canvas.tsx`)];
-        for (const candidate of destinations.flatMap(source => [source, localProjectPath(source), source.replace(/\.tsx$/, ".data.json")])) {
+        for (const candidate of destinations.flatMap(source => [source, localProjectPath(source), localServerPath(source), source.replace(/\.tsx$/, ".data.json")])) {
           try { lstatSync(candidate); }
           catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") continue; throw error; }
           throw new Error("destination artifact or state already exists; choose a new name");
@@ -233,13 +284,16 @@ export class ArtifactService {
             source: readFileSync(sourcePath, "utf8"), runtime, reason: "before-remix" });
         }
         const version = archive.capture({ workspace: this.artifactsDir, name, sourcePath: path,
-          source: sourceVersion.source, project: sourceVersion.project, runtime, reason: "remix" });
+          source: sourceVersion.source, server_source: sourceVersion.server_source ?? null, project: sourceVersion.project, runtime, reason: "remix" });
         archive.db.query("insert into artifact_remixes values (?, ?)").run(version.artifact_id, sourceVersion.id);
         ensureArtifactsDir(this.artifactsDir);
         // Exclusive creation never follows or replaces a competing destination link/file.
         writeLocalProject(path, sourceVersion.project!, true);
-        try { writeFileSync(path, sourceVersion.source, { flag: "wx" }); }
-        catch (error) { unlinkSync(localProjectPath(path)); throw error; }
+        let serverCreated = false;
+        try {
+          if (sourceVersion.server_source != null) { writeLocalServer(path, sourceVersion.server_source, true); serverCreated = true; }
+          writeFileSync(path, sourceVersion.source, { flag: "wx" });
+        } catch (error) { if (serverCreated) unlinkSync(localServerPath(path)); unlinkSync(localProjectPath(path)); throw error; }
         return version;
       }).immediate();
       const diagnostics = typecheckArtifact(path);
@@ -269,6 +323,7 @@ export class ArtifactService {
       ensureArtifactsDir(this.artifactsDir);
       replaceArtifactSource(path, target.source, current);
       writeLocalProject(path, target.project!);
+      writeLocalServer(path, target.server_source ?? null);
       const revision = archive.capture({ workspace: this.artifactsDir, name: target.name, sourcePath: path, source: target.source, runtime, reason: "restore", restoredFrom: id, force: true });
       const diagnostics = typecheckArtifact(path);
       return { ok: diagnostics.length === 0, restored: true, path, versionId: revision.id, revision: revision.revision, check: formatArtifactCheck(diagnostics), diagnostics };

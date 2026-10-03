@@ -105,6 +105,15 @@ Hosted Cloudflare and celld deployments use the same project contract. Local art
 
 Agents can call `script_guide` to retrieve the authoring contract through MCP.
 
+Hosted `artifact_read`, `script_read`, and JSON source snapshots include a
+`revision_token` for the complete project. Pass it as `expected_revision` on a
+full write to reject changes made since the read, including backend, helper and
+dependency changes. `expected_revision: null` requires a new name. Omit the field
+for existing unconditional-write behavior. Browser editors use this guard,
+retain unsaved buffers while switching items or revisions, and warn before
+leaving the gallery. A conflict offers comparison with saved source or an
+explicit reload; your edits remain available until you choose to discard them.
+
 ## Remix
 
 Select a working copy or historical revision in the gallery, then **Remix** and choose a new name. MCP offers `artifact_remix` and `script_remix`, with `new_name` and exactly one of `name` or `version_id`. Hosted calls optionally accept a new `slug`; otherwise it defaults to the destination name. Sources and destinations belong to the authenticated library and selected workspace.

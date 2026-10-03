@@ -1,16 +1,18 @@
 import { useState } from "react";
 import type { GalleryArtifact } from "./types";
+import { confirmLeavingDrafts, useDrafts } from "./drafts";
 
 export function MovePanel({ artifact, library, onCancel }: {
   artifact: GalleryArtifact; library: "private" | "team"; onCancel: () => void;
 }) {
+  const { drafts } = useDrafts();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const destination = library === "private" ? "team" : "private";
   const target = destination === "team" ? "team library" : "my personal library";
   return <form className="library-move" aria-label="Move between libraries" onSubmit={async event => {
     event.preventDefault();
-    if (busy) return;
+    if (busy || !confirmLeavingDrafts(drafts)) return;
     setBusy(true); setError("");
     try {
       const params = new URLSearchParams({library, workspace: artifact.workspace});

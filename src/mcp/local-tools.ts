@@ -8,6 +8,7 @@ const PROTOCOL_VERSION = "2025-06-18";
 
 export { MCP_TOOLS } from "./tools";
 import { MCP_TOOLS } from "./tools";
+import { parseProjectArchive } from "../project-archive";
 
 export async function handleMcpRequest(
   request: JsonRpcRequest,
@@ -55,6 +56,12 @@ async function callTool(
   args: Record<string, unknown>,
 ): Promise<{ content: Array<{ type: "text"; text: string }>; isError?: boolean; structuredContent?: Record<string, unknown>; _meta?: Record<string, unknown> }> {
   if (name === "artifact_guide") return artifactGuideResult();
+  if (name === "artifact_export") return text(JSON.stringify(service.exportProject({ name: args.name as string | undefined, version_id: args.version_id as string | undefined })));
+  if (name === "artifact_import") {
+    const archive = parseProjectArchive(args.archive, "artifact");
+    const result = service.importProject(args.new_name as string, archive);
+    return withPreview(service, result, { name: result.name });
+  }
   if (name === "artifact_read" || name === "artifact_edit") {
     if (typeof args.name !== "string") throw new Error("artifact name must be a string");
     if (name === "artifact_read") {

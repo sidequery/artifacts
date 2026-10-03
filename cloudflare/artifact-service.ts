@@ -26,7 +26,7 @@ export class ArtifactService {
 
   async linkDetails(target: ArtifactTarget) {
     const link = await this.hosted?.links.find(target);
-    if (link) return { slug: link.slug, access: link.access, url: `${this.hosted!.publicOrigin ?? this.hosted!.origin}/${link.slug}` };
+    if (link) return { slug: link.slug, access: link.access, url: `${this.hosted!.publicOrigin ?? this.hosted!.origin}/${link.slug}`, live: link.live, liveId: link.version_id ?? link.script_hash };
     const pending = await this.hosted?.links.draft(target);
     return pending?.slug ? { slug: pending.slug, access: pending.access ?? "private" } : {};
   }
