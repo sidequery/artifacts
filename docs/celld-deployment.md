@@ -1,8 +1,8 @@
 # Deploying Artifacts with celld
 
-The bundled runtime is pinned to celld 0.5.0. This guidance follows the
-[upstream deployment documentation](https://github.com/denoland/celld/blob/v0.5.0/docs/README.md)
-and [security model](https://github.com/denoland/celld/blob/v0.5.0/docs/security.md).
+The bundled runtime is pinned to celld 0.6.1. This guidance follows the
+[upstream deployment documentation](https://github.com/denoland/celld/blob/v0.6.1/docs/README.md)
+and [security model](https://github.com/denoland/celld/blob/v0.6.1/docs/security.md).
 
 For provider setup, MCP sign-in, database requirements, and library permissions,
 start with [authentication and access](authentication.md#configure-celld).
@@ -28,7 +28,7 @@ For production or multiple machines, use celld's bucket-backed node mode:
 1. Choose a supported object store with conditional writes and consistent reads.
    Upstream qualifies Amazon S3, Cloudflare R2, Google Cloud Storage, Tigris, and
    Azure Blob Storage. Not every S3-compatible provider meets the requirements;
-   consult the [storage guarantees](https://github.com/denoland/celld/blob/v0.5.0/docs/guarantees.md).
+   consult the [storage guarantees](https://github.com/denoland/celld/blob/v0.6.1/docs/guarantees.md).
 2. Prepare the Artifacts Worker with `bun run build:package`, configure application
    [authentication](authentication.md#configure-celld) and runtime variables, and
    deploy the prepared Wrangler project
@@ -47,9 +47,12 @@ For production or multiple machines, use celld's bucket-backed node mode:
    (40 seconds by default), with enough time for the expected drain and handoff.
 6. Update app code through `celld deploy`. Running nodes adopt deployments in
    place; a failed build leaves the previous deployment serving. For runtime
-   upgrades, follow the release-specific shutdown requirements. Upgrading from
-   0.4.1 to 0.5.0 requires stopping the whole fleet before starting upgraded nodes;
-   see the [0.5.0 release notes](https://github.com/denoland/celld/releases/tag/v0.5.0).
+   upgrades, follow the release-specific shutdown requirements. The
+   [0.6.0 release](https://github.com/denoland/celld/releases/tag/v0.6.0) requires
+   stopping the whole fleet when upgrading from 0.5.1 with fleet durability;
+   bucket durability supports a rolling update. The
+   [0.6.1 release](https://github.com/denoland/celld/releases/tag/v0.6.1) supports
+   a rolling update from 0.6.0. For older installations, check intervening releases.
 
 Two or more nodes reduce write latency through peer durability; a single node
 waits for bucket persistence. Monitor memory headroom, cold activation queues,

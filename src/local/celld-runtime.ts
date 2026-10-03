@@ -5,14 +5,14 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { gunzipSync } from "node:zlib";
 
-export const CELLD_VERSION = "0.5.0";
+export const CELLD_VERSION = "0.6.1";
 type Artifact = { target: string; archiveSha256: string; binarySha256: string };
-// Archive digests from the GitHub v0.5.0 release API; executable digests computed
+// Archive digests from the GitHub v0.6.1 release API; executable digests computed
 // from those verified archives. Pin both so cached executables are checked too.
 const artifacts: Record<string, Artifact> = {
-  "darwin-arm64": { target: "aarch64-apple-darwin", archiveSha256: "07f6dbded0a2ffe3d7626842908ea81ed517fe94b0cfae784fd0c053d8952e80", binarySha256: "77e5d6f129c1bf49e8d71ac5b68298fb8c8c247392add28a90c4cca6d9957786" },
-  "linux-arm64": { target: "aarch64-unknown-linux-gnu", archiveSha256: "bd3965f78f96c755b64b0280746a7c26116fa9df01a9e57c5930e9752945c993", binarySha256: "9942da9973a0ca15260921295bbbdbb80a2f66f2eccac4984e748aefc252bd7e" },
-  "linux-x64": { target: "x86_64-unknown-linux-gnu", archiveSha256: "1039eee3737bb432ca0cd399fc55cc0aab4e653b2beae26009e455fea4e5334c", binarySha256: "ca451f33a58a393ec580a186af4f0ef8e9b9e665d253f1f95a7d556213b33bea" },
+  "darwin-arm64": { target: "aarch64-apple-darwin", archiveSha256: "3033cc4f428433f4239ac616a04092cd4b6c7db19f2f5ba9926c86ec56c34c95", binarySha256: "91f6d7a470720c300efddf75e666f121c0f51bbaf7a245d9d76efffaefeecf57" },
+  "linux-arm64": { target: "aarch64-unknown-linux-gnu", archiveSha256: "ab99053bcced225bb5b54f428792260c905b782b8a61947362a12ce3a9c22def", binarySha256: "45827115ef4e05527a1d0aa5ac8c64d75fc6a8d1dcde9c837e97f67898aa0e98" },
+  "linux-x64": { target: "x86_64-unknown-linux-gnu", archiveSha256: "79a8253cff5d4e8a4a9f7a2611e393390f7fe9025f00e88467875b007c44866b", binarySha256: "810b2a0b70e3420daee80f1d5378de5ba28651f0371ec7aa70b6c5de77e70d9e" },
 };
 
 export function celldArtifact(platform: string = process.platform, arch: string = process.arch): Artifact {

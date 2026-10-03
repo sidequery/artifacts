@@ -19,6 +19,7 @@ jobs:
           bun-version: 1.4.0
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
+      - run: bun run test:native-worker
       - run: bun run test
       - run: bun x playwright install --with-deps chromium
       - run: bun run test:mcp-ui
@@ -29,16 +30,17 @@ jobs:
       # Rebuild the default deployment before the normal runtime and package checks.
       - run: bun run test:cloudflare
       - run: bun run typecheck:cloudflare
-      - name: Install celld 0.5.0
+      - name: Install celld 0.6.1
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download v0.5.0 --repo denoland/celld --pattern celld-x86_64-unknown-linux-gnu.gz --dir "$RUNNER_TEMP"
+          gh release download v0.6.1 --repo denoland/celld --pattern celld-x86_64-unknown-linux-gnu.gz --dir "$RUNNER_TEMP"
           gzip -d "$RUNNER_TEMP/celld-x86_64-unknown-linux-gnu.gz"
           chmod +x "$RUNNER_TEMP/celld-x86_64-unknown-linux-gnu"
           echo "CELLD_BIN=$RUNNER_TEMP/celld-x86_64-unknown-linux-gnu" >> "$GITHUB_ENV"
       - run: CELLD_PACKAGE_INTEGRATION=1 bun run test:package:prebuilt
       - run: bun run test:celld
+      - run: NATIVE_WORKER_CELLD=1 bun test scripts/native-worker cloudflare/native-worker.test.ts --timeout 180000
 
   executable:
     strategy:

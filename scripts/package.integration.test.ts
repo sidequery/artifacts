@@ -138,7 +138,9 @@ test("published tarball runs the CLI, gallery, and stdio MCP outside a checkout"
     expect(listing.stdout).toContain("package/docs/releasing.md");
     expect(listing.stdout).toContain("package/src/cli.ts");
     expect(listing.stdout).not.toMatch(/\.test\.[cm]?[jt]sx?$/m);
-    expect(listing.stdout).not.toContain("package/scripts/");
+    expect(listing.stdout).toContain("package/scripts/native-worker/operator.ts");
+    expect(listing.stdout).toContain("package/cloudflare/native-worker/manifest.ts");
+    expect(listing.stdout).not.toContain("package/scripts/build-package.ts");
     expect(listing.stdout).not.toContain("package/deployments/");
     expect(listing.stdout).not.toContain("package/dist/runner-status/");
 
@@ -238,11 +240,28 @@ try {
             : undefined;
       if (!target) throw new Error(`CELLD_PACKAGE_INTEGRATION is unsupported on ${process.platform}/${process.arch}`);
       if (process.env.CELLD_BIN) {
-        const managedBinary = join(isolatedEnv.ARTIFACTS_DATA_HOME, "runtimes", "celld", "0.5.0", target, "celld");
+        const managedBinary = join(isolatedEnv.ARTIFACTS_DATA_HOME, "runtimes", "celld", "0.6.1", target, "celld");
         mkdirSync(dirname(managedBinary), { recursive: true });
         copyFileSync(process.env.CELLD_BIN, managedBinary);
         chmodSync(managedBinary, 0o700);
       }
+
+      await run([process.execPath, "-e", `
+        import { CelldOperator } from "./node_modules/@sidequery/artifacts/scripts/native-worker/operator.ts";
+        import { createHash, randomUUID } from "node:crypto";
+        const token = "installed-operator-fixture-with-32-characters";
+        const operator = new CelldOperator({ root: ${JSON.stringify(join(temporary, "operator"))}, token });
+        try {
+          await operator.start();
+          const server = operator.serve({ port: 0 });
+          const code = 'export default {fetch(){return new Response("installed Worker");}};';
+          const revision = { id: createHash("sha256").update(code).digest("hex"), source: code, code, created_at: new Date().toISOString(),
+            manifest: {main:"worker.js",compatibility_date:"2026-09-06",compatibility_flags:[],vars:{},secrets:[],bindings:{},triggers:{crons:[],queues:[]}} };
+          const result = await operator.deploy({app:randomUUID(),revision,resources:{},secrets:{}}, server.url.origin);
+          const response = await fetch(result.endpoint, {headers:{authorization:"Bearer " + token}});
+          if (!response.ok || await response.text() !== "installed Worker") throw new Error("Installed operator did not serve its Worker");
+        } finally { await operator.close(); }
+      `], consumer, { ...isolatedEnv, PATH: "/usr/bin:/bin" });
 
       const httpSmoke = join(clientDirectory, "http-smoke.ts");
       await Bun.write(httpSmoke, `

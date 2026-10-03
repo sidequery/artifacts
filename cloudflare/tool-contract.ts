@@ -141,3 +141,19 @@ for (const tool of CLOUD_MCP_TOOLS) {
   }
   if (["artifact_read", "artifact_edit", "script_read", "script_edit"].includes(tool.name)) tool.inputSchema.properties!.file = {type:"string", description:"Select a relative project.files helper module instead of the entrypoint."};
 }
+
+const appName = { name: { type: "string", minLength: 1, maxLength: 255 } };
+const revisionId = { type: "string", pattern: "^[a-f0-9]{64}$" };
+addScriptTool("app_guide", "Read the native Worker manifest, ownership, private HTTP, deployment recovery and provider guide.", {});
+addScriptTool("app_list", "List native Worker apps and deployment status in the authenticated library/workspace. Returns 100 per page and configured providers; never runs app code.", pageProperty);
+addScriptTool("app_write", "Create or update an ordinary native Worker. Preserve default handler and named DO exports. Strict manifest declares app-owned native bindings; provider defaults to a configured provider and is fixed for an existing app. Stable resource names retain data on binding/class rename, removal and restoration. Persisted intent recovers provider mutations; failures require app_reconcile. Call app_guide first.", {
+  ...appName, source: { type: "string", maxLength: 262144 }, manifest: { type: "object", maxProperties: 8 }, project: projectProperty,
+  provider: { type: "string", enum: ["cloudflare", "celld-local"] }, expected_revision: { ...revisionId, type: ["string", "null"], description: "Full source/manifest/project revision_token from app_read. Null requires a new app; omit for unconditional write." },
+}, ["name", "source", "manifest"]);
+addScriptTool("app_read", "Read native Worker source, manifest, helper/dependency snapshot and deployment status. Optional revision_id reads immutable source; secrets and provider credentials are never returned.", { ...appName, revision_id: revisionId }, ["name"]);
+addScriptTool("app_history", "List immutable compiled native Worker revisions, 100 per page. Secrets and resource data are separate from source history.", { ...appName, ...pageProperty }, ["name"]);
+addScriptTool("app_restore", "Redeploy historical native Worker source against retained resources and current app secrets. Does not roll back schema/data or undo namespace migrations.", { ...appName, revision_id: revisionId }, ["name", "revision_id"]);
+addScriptTool("app_reconcile", "Resume the current desired native Worker deployment after provider errors or interruption. Reuses reserved resource identities; never deletes storage.", appName, ["name"]);
+addScriptTool("app_secrets", "Atomically set/delete app secrets (null deletes); omit secrets to list names. Values are only passed into declared native env bindings and never returned/history-exported. Existing desired code is redeployed to apply changes.", { ...appName, secrets: { type: "object", maxProperties: 32, additionalProperties: { type: ["string", "null"], maxLength: 4096 } } }, ["name"]);
+addScriptTool("app_move", "Move an app between authenticated private/team libraries without changing its physical app identity, resources, secrets or revisions. The former owner immediately loses future management and HTTP access.", { ...appName, library: { type: "string", enum: ["private", "team"] } }, ["name", "library"]);
+for (const tool of CLOUD_MCP_TOOLS.filter(tool => ["app_guide", "app_list", "app_read", "app_history"].includes(tool.name))) tool.annotations = { readOnlyHint: true };

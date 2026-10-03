@@ -22,12 +22,14 @@ import galleryBridge from "../dist/cloudflare/gallery-request.json";
 import { ArtifactLinks } from "./links";
 import { ScriptLibrary } from "./scripts";
 import { ScriptBackend } from "./script-backend";
+import { NativeApps, type NativeEnvironment } from "./native-worker/controller";
 import { artifactRoute } from "./artifact-routes";
 import * as toolValidators from "../dist/cloudflare/tool-validators.js";
-export { ArtifactLibrary, ArtifactBackend, ArtifactFiles, ArtifactLinks, ScriptLibrary, ScriptBackend };
+export { ArtifactLibrary, ArtifactBackend, ArtifactFiles, ArtifactLinks, ScriptLibrary, ScriptBackend, NativeApps };
 // Deployed Durable Object exports retain their storage identities.
 export { ArtifactLibrary as CanvasLibrary, ArtifactBackend as CanvasBackend, ArtifactFiles as CanvasFiles };
-export type Env = AuthEnvironment & BetterAuthEnvironment & {
+export type Env = AuthEnvironment & BetterAuthEnvironment & NativeEnvironment & {
+  NATIVE_APPS?: DurableObjectNamespace<NativeApps>;
   LIBRARIES: DurableObjectNamespace<ArtifactLibrary>;
   BACKENDS: DurableObjectNamespace<ArtifactBackend>;
   LINKS: DurableObjectNamespace<ArtifactLinks>;
@@ -110,6 +112,13 @@ app.use("*", async (c, next) => {
 app.get("/api/session", c => {
   const user = c.get("user");
   return c.json({ authMode: user ? "better-auth" : "access", user: user ? { id: user.id, name: user.name, email: user.email } : null });
+});
+for (const path of ["/apps/:name", "/apps/:name/*"]) app.all(path, c => {
+  const url = new URL(c.req.url);
+  const base = `/apps/${encodeURIComponent(c.req.param("name")!)}`;
+  url.pathname = url.pathname.slice(base.length) || "/";
+  url.searchParams.delete("workspace"); url.searchParams.delete("library");
+  return c.get("service").nativeFetch(c.req.param("name")!, new Request(url, c.req.raw));
 });
 
 app.all("/mcp", async c => {
