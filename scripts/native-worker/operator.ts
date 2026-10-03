@@ -160,7 +160,7 @@ export class CelldOperator {
   private runtimes = new Map<string, Runtime>();
   private mutations = new Map<string, Promise<unknown>>();
   private restartCounts = new Map<string, number>();
-  private restartTimers = new Set<ReturnType<typeof setTimeout>>();
+  private restartTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private server?: ReturnType<typeof Bun.serve>;
 
   constructor(private readonly options: Options) {
@@ -305,6 +305,9 @@ export class CelldOperator {
       journal.resources = deployment.resources;
       // Persist intent before replacing code, bindings, or the running process.
       await this.save(deployment.app, journal);
+      const pendingRestart = this.restartTimers.get(deployment.app);
+      if (pendingRestart) clearTimeout(pendingRestart);
+      this.restartTimers.delete(deployment.app);
       this.restartCounts.delete(deployment.app);
       await this.activate(deployment.app, journal);
       return { revision: deployment.revision.id, endpoint: `${origin}/apps/${deployment.app}/` };
@@ -366,6 +369,35 @@ export class CelldOperator {
     await rename(join(staging, "wrangler.jsonc"), join(project, "wrangler.jsonc"));
   }
 
+  private scheduleRestart(app: string) {
+    if (this.closed || this.restartTimers.has(app)) return;
+    const attempts = (this.restartCounts.get(app) ?? 0) + 1;
+    if (attempts > 3) return;
+    this.restartCounts.set(app, attempts);
+    const timer = setTimeout(() => {
+      void this.serial(app, async () => {
+        // A deployment can supersede even a timer already queued for this app.
+        if (this.restartTimers.get(app) !== timer) return;
+        this.restartTimers.delete(app);
+        if (this.closed) return;
+        const runtime = this.runtimes.get(app);
+        if (runtime?.ready && !runtime.stopping && runtime.child.exitCode === null) return;
+        try {
+          const journal = await this.journal(app);
+          if (!journal.active) return;
+          await this.stop(app);
+          await this.stopOrphan(app);
+          await this.install(app, journal.active);
+          await this.launch(app);
+        } catch {
+          console.error(`Native app ${app} could not restart`);
+          this.scheduleRestart(app);
+        }
+      }).catch(() => console.error(`Native app ${app} restart scheduling failed`));
+    }, attempts * 1000);
+    this.restartTimers.set(app, timer);
+  }
+
   private async launch(app: string) {
     if (this.closed) throw new Error("Operator is stopping");
     const listener = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } });
@@ -389,18 +421,7 @@ export class CelldOperator {
     void child.exited.then(() => {
       if (!runtime.ready || runtime.stopping || this.closed || this.runtimes.get(app) !== runtime) return;
       this.runtimes.delete(app);
-      const attempts = (this.restartCounts.get(app) ?? 0) + 1;
-      this.restartCounts.set(app, attempts);
-      if (attempts > 3) return;
-      const timer = setTimeout(() => {
-        this.restartTimers.delete(timer);
-        void this.serial(app, async () => {
-          if (this.closed || this.runtimes.has(app)) return;
-          const journal = await this.journal(app);
-          if (journal.active) { await this.stopOrphan(app); await this.install(app, journal.active); await this.launch(app); }
-        }).catch(() => console.error(`Native app ${app} could not restart`));
-      }, attempts * 1000);
-      this.restartTimers.add(timer);
+      this.scheduleRestart(app);
     });
     const deadline = Date.now() + (this.options.startupTimeoutMs ?? 45_000);
     while (Date.now() < deadline && child.exitCode === null) {
@@ -467,7 +488,7 @@ export class CelldOperator {
 
   async close() {
     this.closed = true;
-    for (const timer of this.restartTimers) clearTimeout(timer);
+    for (const timer of this.restartTimers.values()) clearTimeout(timer);
     this.restartTimers.clear();
     this.server?.stop(true);
     await Promise.allSettled(this.mutations.values());

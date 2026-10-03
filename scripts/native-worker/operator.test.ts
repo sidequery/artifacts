@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { classAlias, resourceName, type NativeDeployment } from "../../cloudflare/native-worker/types";
 import { parseManifest, planResources } from "../../cloudflare/native-worker/manifest";
 import { CelldOperator, validateDeployment } from "./operator";
+import { ensureCelldRuntime } from "../../src/local/celld-runtime";
 
 const token = "operator-only-test-token-with-at-least-32-characters";
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -207,6 +208,67 @@ test.skipIf(process.env.NATIVE_WORKER_CELLD !== "1")("celld operator deploys nat
     expect(await response.json() as Record<string, unknown>).toEqual({ greeting: "second", count: 4, cached: "4", file: "4", rows: 4 });
   } finally { await operator.close(); await rm(directory, { recursive: true, force: true }); }
 }, 180_000);
+
+for (const failedStarts of [1, 3]) test.skipIf(process.env.NATIVE_WORKER_CELLD !== "1")(`automatic recovery retries ${failedStarts} failed startups within its budget and preserves storage`, async () => {
+  const directory = await mkdtemp(join(tmpdir(), "native-operator-retries-"));
+  const binary = process.env.CELLD_BIN ?? await ensureCelldRuntime({ dataRoot: join(directory, "runtime") });
+  const wrapper = join(directory, "celld-launcher");
+  const failures = join(directory, "remaining-failures");
+  const launches = join(directory, "launches");
+  const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+  await writeFile(failures, "0");
+  await writeFile(launches, "");
+  // Fail actual dev startups before readiness, while passing through version
+  // checks and successful launches to the real celld binary.
+  await writeFile(wrapper, `#!/bin/sh
+if [ "$1" = dev ]; then
+  printf 'launch\\n' >> ${quote(launches)}
+  remaining=$(cat ${quote(failures)})
+  if [ "$remaining" -gt 0 ]; then
+    printf '%s' "$((remaining - 1))" > ${quote(failures)}
+    exit 1
+  fi
+fi
+exec ${quote(binary)} "$@"
+`, { mode: 0o700 });
+  const operator = new CelldOperator({ root: join(directory, "operator"), token, binary: wrapper });
+  try {
+    await operator.start();
+    const server = operator.serve({ port: 0 });
+    const input = deployment();
+    const result = await operator.deploy(input, server.url.origin);
+    const call = (path = "") => fetch(result.endpoint + path, { headers: { authorization: `Bearer ${token}` } });
+    expect((await (await call()).json() as any).count).toBe(1);
+    await writeFile(failures, String(failedStarts));
+    const pid = Number(await readFile(join(directory, "operator", "apps", input.app, "runtime.pid"), "utf8"));
+    process.kill(pid, "SIGTERM");
+    const launchCount = async () => (await readFile(launches, "utf8")).trim().split("\n").length;
+    const expectedLaunches = failedStarts === 1 ? 3 : 4;
+    const deadline = Date.now() + 20_000;
+    let response: Response | undefined;
+    do {
+      await Bun.sleep(100);
+      response = await call("headers");
+      if (await launchCount() === expectedLaunches && (failedStarts === 3 || response.ok)) break;
+      await response.body?.cancel();
+    } while (Date.now() < deadline);
+    expect(await launchCount()).toBe(expectedLaunches);
+    if (failedStarts === 1) {
+      expect(response!.status).toBe(200);
+      await response!.body?.cancel();
+      expect((await (await call()).json() as any).count).toBe(2);
+    } else {
+      await response?.body?.cancel();
+      // Allow enough time for an erroneous fourth retry to run.
+      await Bun.sleep(4500);
+      expect(await launchCount()).toBe(4);
+      expect((await call()).status).toBe(503);
+      await operator.deploy(input, server.url.origin);
+      expect((await (await call()).json() as any).count).toBe(2);
+      expect(await launchCount()).toBe(5);
+    }
+  } finally { await operator.close(); await rm(directory, { recursive: true, force: true }); }
+}, 60_000);
 
 test.skipIf(process.env.NATIVE_WORKER_CELLD !== "1")("routing preserves WorkerEntrypoint class fetch context and native queue handlers", async () => {
   const directory = await mkdtemp(join(tmpdir(), "native-operator-entrypoint-"));
