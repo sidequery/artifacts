@@ -15,7 +15,7 @@ test(
       return;
     }
 
-    const build = Bun.spawn(["docker", "build", "-t", "artifacts-e2e", "."], {
+    const build = Bun.spawn(["docker", "build", "-f", "e2e/Dockerfile", "-t", "artifacts-e2e", "."], {
       cwd: PLUGIN_ROOT,
       stdout: "inherit",
       stderr: "inherit",

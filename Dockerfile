@@ -1,47 +1,28 @@
-FROM debian:bookworm-slim
-
-ENV DEBIAN_FRONTEND=noninteractive
-ENV SHELL=/bin/bash
-ENV TERM=xterm-256color
-ENV HERDR_E2E=1
-ENV HERDR_SESSION=artifact-e2e
-ENV PATH="/usr/local/bin:${PATH}"
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    bash \
-    ca-certificates \
-    curl \
-    git \
-    libasound2 \
-    libgbm1 \
-    libgtk-3-0 \
-    libnss3 \
-    util-linux \
-    unzip \
-    fonts-liberation \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN curl -fsSL https://bun.sh/install | bash
-
-RUN curl -fsSL https://herdr.dev/install.sh | sh
-
-RUN install -m 0755 /root/.bun/bin/bun /usr/local/bin/bun \
-    && install -m 0755 /root/.local/bin/herdr /usr/local/bin/herdr \
-    && useradd --create-home --shell /bin/bash artifact
-
-RUN curl -fsSL https://terminal-browser.sh/install \
-    | XDG_DATA_HOME=/opt XDG_BIN_HOME=/usr/local/bin AGENT_SKILLS_HOME=/tmp/terminal-browser-skills TERMINAL_BROWSER_SKIP_EDITOR_SETUP=1 bash
-
+# syntax=docker/dockerfile:1
+FROM oven/bun:1.4.0 AS build
 WORKDIR /src
-COPY package.json bun.lock tsconfig.json herdr-plugin.toml ./
-COPY src ./src
-COPY e2e ./e2e
-COPY examples ./examples
-COPY skills ./skills
-
+COPY package.json bun.lock ./
+COPY patches ./patches
 RUN bun install --frozen-lockfile
+COPY . .
+RUN bun run build:cloudflare --minify && bun run scripts/prepare-container.ts \
+    && find dist/worker-app -name '*.map' -delete \
+    && mkdir -p /state
 
-ENV HOME=/home/artifact
-USER artifact
-
-CMD ["bun", "e2e/inside.ts"]
+FROM gcr.io/distroless/cc-debian13:nonroot AS runtime
+LABEL org.opencontainers.image.source="https://github.com/sidequery/artifacts" \
+      org.opencontainers.image.description="Sidequery Artifacts with celld" \
+      org.opencontainers.image.licenses="MIT"
+COPY --from=build --chown=65532:65532 /state/ /app/.celld/
+COPY --from=build /src/dist/container/bin/ /usr/local/bin/
+COPY --from=build /src/dist/worker-app/ /app/dist/worker-app/
+COPY --from=build /src/dist/cloudflare/assets/ /app/dist/cloudflare/assets/
+COPY --from=build /src/dist/container/wrangler.jsonc /app/wrangler.jsonc
+ENV CELLD_ESBUILD=/usr/local/bin/esbuild CELLD_IDLE_EVICT_S=60
+WORKDIR /app
+USER 65532:65532
+VOLUME ["/app/.celld"]
+EXPOSE 4786
+STOPSIGNAL SIGTERM
+ENTRYPOINT ["/usr/local/bin/celld"]
+CMD ["dev", "/app", "--host", "0.0.0.0", "--port", "4786", "--no-watch", "--logs"]
