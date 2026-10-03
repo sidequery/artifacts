@@ -14,6 +14,7 @@ import galleryBridge from "../dist/cloudflare/gallery-request.json";
 import navigationHost from "../dist/cloudflare/navigation-host.json";
 import { artifactApiRequest, artifactApiResponse } from "./artifact-api";
 import { SCRIPT_HEADER } from "./script-backend";
+import { ARTIFACT_HEADER } from "./backend";
 
 export async function identify(request: Request, env: Env): Promise<{ privateKey: string; user: PluginUser } | Response> {
   if (env.AUTH_MODE && !["access", "better-auth"].includes(env.AUTH_MODE)) return Response.json({ error: "Invalid AUTH_MODE" }, { status: 503 });
@@ -90,15 +91,14 @@ export async function artifactRoute(request: Request, env: Env): Promise<Respons
   if (url.pathname === `/${slug}/api` || url.pathname.startsWith(`/${slug}/api/`)) {
     const origin = request.headers.get("Origin");
     if (origin && origin !== url.origin) return new Response("Origin is not allowed", { status: 403 });
-    const selection = { name: link.name, version_id: link.version_id };
-    if ((await service.snapshot({ version_id: link.version_id })).server_source === null) return Response.json({ error: "Artifact has no server" }, { status: 404 });
-    let input: ArtifactHttpRequest;
-    try { input = await artifactApiRequest(request, `/${slug}`, link.access === "private"); }
-    catch (error) {
-      if (error instanceof RangeError) return Response.json({ error: error.message }, { status: 413 });
-      throw error;
-    }
-    return artifactApiResponse(await service.request(selection, input), request.method);
+    const snapshot = await service.snapshot({ version_id: link.version_id });
+    if (snapshot.server_source === null) return Response.json({ error: "Artifact has no server" }, { status: 404 });
+    if (!snapshot.compiled_id) return Response.json({ error: "Artifact has no saved server bundle" }, { status: 409 });
+    const input = artifactApiRequest(request, `/${slug}`, link.access === "private");
+    input.headers.set(ARTIFACT_HEADER, JSON.stringify({ libraryKey: link.libraryKey, workspace: link.workspace, name: link.name,
+      compiled_id: snapshot.compiled_id, version_id: link.version_id, original: input.headers.get(ARTIFACT_HEADER) }));
+    const backend = env.BACKENDS.getByName(JSON.stringify([link.libraryKey, link.workspace, link.name]));
+    return artifactApiResponse(await backend.fetch(input), request.method);
   }
   if (url.pathname === `/${slug}/_artifact/plugins`) {
     if (request.method !== "POST") return new Response("Method not allowed", { status: 405, headers: { Allow: "POST" } });

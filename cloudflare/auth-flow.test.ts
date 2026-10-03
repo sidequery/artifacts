@@ -402,12 +402,16 @@ test("ownership transfer preserves live resources and revokes former library acc
     const decode = (result: any) => JSON.parse(atob(result.structuredContent.response.body));
     const artifact = "ownership-artifact", script = "ownership-script";
     const project = { files: { "helper.ts": "export const retained = 17;" }, dependencies: {} };
-    const created = await tool(alice, "artifact_write", { name: artifact, slug: artifact, contents: counterClient, server: counterServer, project });
+    const server = counterServer.replace("extends DurableObject {", "extends DurableObject<ArtifactEnv> {")
+      .replace('pathname !== "/counter"', 'pathname !== "/counter" && new URL(request.url).pathname !== "/api/counter"')
+      .replace("value: row.value,", 'value: row.value, secret: this.env.secrets.TOKEN ?? null, authorization: request.headers.get("authorization"), cookie: request.headers.get("cookie"),');
+    const created = await tool(alice, "artifact_write", { name: artifact, slug: artifact, contents: counterClient, server, project });
     const version = (created._meta as any).artifact.versionId;
     const scriptSource = 'export default { fetch(request: Request, env: ScriptEnv) { env.sql.exec("create table if not exists counted(n integer)"); if(request.method === "POST") env.sql.exec("insert into counted values(1)"); return Response.json({count:env.sql.exec("select count(*) as n from counted").one().n,secret:env.secrets.TOKEN ?? null}); }}';
     await tool(alice, "script_write", { name: script, contents: scriptSource, project });
     const scriptVersion = payload(await tool(alice, "script_history", { name: script })).versions[0].id;
     await tool(alice, "script_secrets", { name: script, secrets: { TOKEN: "transfer-retained" } });
+    await tool(alice, "artifact_secrets", { name: artifact, secrets: { TOKEN: "artifact-transfer-retained" } });
     expect(decode(await tool(alice, "artifact_request", { name: artifact, request: { path: "/counter", method: "POST" } })).value).toBe(1);
     const firstRun = await tool(alice, "script_run", { name: script, request: { path: "/", method: "POST" } });
     expect((firstRun.structuredContent as any).response.status, JSON.stringify(await tool(alice, "script_logs", { name: script }))).toBe(200);
@@ -421,6 +425,7 @@ test("ownership transfer preserves live resources and revokes former library acc
     const oldDownload = (await tool(alice, "artifact_files", { name: artifact, request: { operation: "download", id: grant.result.file.id } })).structuredContent as any;
     expect((await bobContext.request.get(`${origin}/${artifact}`)).status()).toBe(404);
     expect((await move(bobContext, "artifact", artifact, "private", "team")).status()).toBe(404);
+    expect((await bob.callTool({ name: "artifact_secrets", arguments: { name: artifact, secrets: { TOKEN: "forbidden" } } })).isError).toBe(true);
     for (const [kind, name] of [["artifact", artifact], ["script", script]]) {
       const response = await move(aliceContext, kind!, name!, "private", "team");
       expect(response.status(), await response.text()).toBe(200);
@@ -437,6 +442,11 @@ test("ownership transfer preserves live resources and revokes former library acc
     }
     expect((await alice.callTool({ name: "artifact_edit", arguments: { name: artifact, edits: [{ old_text: "Counter", new_text: "Forbidden" }] } })).isError).toBe(true);
     expect((await alice.callTool({ name: "script_secrets", arguments: { name: script, secrets: { TOKEN: "forbidden" } } })).isError).toBe(true);
+    expect((await alice.callTool({ name: "artifact_secrets", arguments: { name: artifact, secrets: { TOKEN: "forbidden" } } })).isError).toBe(true);
+    expect((await tool(teamBob, "artifact_secrets", { name: artifact })).structuredContent).toEqual({ ok: true, names: ["TOKEN"] });
+    const privateApi = await bobContext.request.get(`${origin}/${artifact}/api/counter`, { headers: { Authorization: "management-credential" } });
+    expect(privateApi.status()).toBe(200);
+    expect(await privateApi.json()).toMatchObject({ secret: "artifact-transfer-retained", authorization: null, cookie: null });
     for (const [kind, name, id] of [["artifact", artifact, version], ["script", script, scriptVersion]]) {
       const source = await bobContext.request.get(`${origin}/api/source?workspace=test&library=team&kind=${kind}&version=${id}&format=json`);
       expect(source.status()).toBe(200);
@@ -448,6 +458,7 @@ test("ownership transfer preserves live resources and revokes former library acc
       expect(payload(await tool(teamBob, `${kind}_runs`, { name })).runs.length).toBeGreaterThan(0);
     }
     expect(decode(await tool(teamBob, "artifact_request", { name: artifact, request: { path: "/counter" } })).value).toBe(2);
+    expect(decode(await tool(teamBob, "artifact_request", { name: artifact, request: { path: "/counter" } })).secret).toBe("artifact-transfer-retained");
     expect(decode(await tool(teamBob, "script_run", { name: script, request: { path: "/" } }))).toEqual({ count: 2, secret: "transfer-retained" });
     const files = (await tool(teamBob, "artifact_files", { version_id: version, request: { operation: "list" } })).structuredContent as any;
     expect(files.result.files[0].id).toBe(grant.result.file.id);

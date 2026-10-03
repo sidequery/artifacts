@@ -1,42 +1,20 @@
-import type { ArtifactHttpRequest, ArtifactHttpResponse } from "../src/httpTypes";
-
-const MAX_BODY = 256 * 1024;
-
-/** Adapt a standalone API request to the same bounded envelope used by the SDK. */
-export async function artifactApiRequest(request: Request, basePath: string, privateLink: boolean): Promise<ArtifactHttpRequest> {
-  const headers = new Headers(request.headers);
-  for (const name of ["cookie", "cf-access-jwt-assertion", "cf-access-client-id", "cf-access-client-secret"]) headers.delete(name);
-  if (privateLink) headers.delete("authorization");
+/** Direct APIs use native HTTP; browser and MCP bridges keep bounded envelopes. */
+export function artifactApiRequest(request: Request, basePath: string, privateLink: boolean): Request {
   const url = new URL(request.url);
-  const reader = request.body?.getReader();
-  let binary = "";
-  try {
-    if (reader) while (true) {
-      const chunk = await reader.read();
-      if (chunk.done) break;
-      if (binary.length + chunk.value.byteLength > MAX_BODY) {
-        await reader.cancel();
-        throw new RangeError("Artifact request body exceeds 256 KiB");
-      }
-      for (let i = 0; i < chunk.value.length; i += 8192) binary += String.fromCharCode(...chunk.value.subarray(i, i + 8192));
-    }
-  } finally { reader?.releaseLock(); }
-  return { path: url.pathname.slice(basePath.length) + url.search, method: request.method, headers: [...headers], ...(reader ? { body: btoa(binary) } : {}) };
+  url.pathname = url.pathname.slice(basePath.length);
+  const input = new Request(url, request);
+  for (const name of ["cookie", "cf-access-jwt-assertion", "cf-access-client-id", "cf-access-client-secret"]) input.headers.delete(name);
+  if (privateLink) input.headers.delete("authorization");
+  return input;
 }
 
-export function artifactApiResponse(input: Omit<ArtifactHttpResponse, "headers"> & { headers: string[][] }, method: string): Response {
-  // Durable Object RPC widens tuple arrays to string[][] on the caller side.
-  const headers = new Headers(input.headers as [string, string][]);
+export function artifactApiResponse(response: Response, method: string): Response {
+  const headers = new Headers(response.headers);
   headers.delete("set-cookie");
   headers.append("content-security-policy", "sandbox allow-scripts allow-forms");
   headers.set("x-content-type-options", "nosniff");
   headers.set("cache-control", "private, no-store");
-  let body: Uint8Array<ArrayBuffer> | null = null;
-  if (input.body !== undefined && method !== "HEAD" && ![204, 205, 304].includes(input.status)) {
-    if (input.body.length > Math.ceil(MAX_BODY / 3) * 4) throw new RangeError("Artifact response body exceeds 256 KiB");
-    const binary = atob(input.body);
-    if (binary.length > MAX_BODY) throw new RangeError("Artifact response body exceeds 256 KiB");
-    body = Uint8Array.from(binary, char => char.charCodeAt(0));
-  }
-  return new Response(body, { status: input.status, statusText: input.statusText, headers });
+  const bodyless = method === "HEAD" || [204, 205, 304].includes(response.status);
+  if (bodyless) void response.body?.cancel();
+  return new Response(bodyless ? null : response.body, { status: response.status, statusText: response.statusText, headers });
 }

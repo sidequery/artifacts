@@ -65,206 +65,35 @@ selected identity using `bun x wrangler whoami`, then run
 The account ID selects infrastructure ownership; it is not a user credential.
 Set a distinct `name` in `wrangler.jsonc` if the account needs multiple instances.
 
-Deployment authorization and application sign-in are separate. The native deploy
-flow provisions the Worker, assets and configured SQLite Durable Object
-migrations. Better Auth additionally requires a D1 database and its SQL migration.
-Choose one application authentication mode in `wrangler.jsonc`:
-
-- `AUTH_MODE = "access"` keeps the existing Cloudflare Access integration and is
-  the checked-in default.
-- `AUTH_MODE = "better-auth"` runs Better Auth in this Worker with the identity
-  providers and D1 database owned by this deployment.
-
-There is no central Artifacts account or authentication service in either mode.
+Deployment authorization and application sign-in are separate. Configure
+[authentication and access](authentication.md) before using the gallery or MCP
+on a network deployment. That guide covers provider credentials, database
+migrations, admission rules, library permissions, and troubleshooting.
 
 ### Cloudflare Access mode
 
-Configure Access before using the gallery or MCP server:
-
-1. Enable Cloudflare Access for this Worker and every hostname that reaches it,
-   including its `workers.dev` URL and any custom domains or preview URLs.
-2. Add the Cloudflare identity provider and a policy granting the intended
-   account members access. A shared-account deployment can authorize the team
-   to use the same gallery and centralized MCP endpoint.
-3. Enable Access managed OAuth for the application so MCP clients can use the
-   standard OAuth sign-in flow. Use the complete Worker hostname as the
-   application's coverage, including `/mcp` and gallery assets.
-4. Set `ACCESS_TEAM_DOMAIN` to the team's `name.cloudflareaccess.com` domain and
-   `ACCESS_AUD` to this Access application's audience, then redeploy. These are
-   identifiers, not secrets. Keep `ENVIRONMENT` set to `production`.
-
-Without these variables, Access mode returns 503. With them, every protected
-request must have an RS256 Access assertion with the matching issuer and audience.
-Managed OAuth validates the MCP client's token at the edge and forwards the
-signed assertion. Raw identity headers and unsigned JWT payloads are not trusted.
-`/health` is a public runtime check and exposes no library data.
+The checked-in configuration defaults to `AUTH_MODE="access"`. Set up an Access
+application and user policy, enable managed OAuth for MCP, and configure
+`ACCESS_TEAM_DOMAIN` and `ACCESS_AUD`. Follow the
+[Cloudflare Access setup](authentication.md#set-up-cloudflare-access).
 
 ### Better Auth mode
 
-Better Auth is hosted at the Artifacts deployment's own `/api/auth` routes and uses
-the `AUTH_DB` D1 binding for users, sessions, OAuth grants, signing keys and rate
-limits. It accepts provider sign-in only; email/password registration is disabled.
+Set `AUTH_MODE="better-auth"` to host provider sign-in in this deployment.
+Configure the public origin, an identity provider, a deployment secret, an
+admission rule, and an `AUTH_DB` D1 binding. Apply the checked-in migrations
+before serving traffic. Follow the
+[Better Auth setup](authentication.md#set-up-better-auth), including
+[local development](authentication.md#local-better-auth-development).
 
-Set `BETTER_AUTH_URL` to the stable, public origin users and MCP clients actually
-open, for example `https://artifact.example.com`. It must be an HTTPS origin with no
-path, query or fragment. HTTP is accepted only for loopback development hosts.
-For example, production `vars` can select the mode, canonical URL and an admission
-rule:
+### Connect users and agents
 
-```json
-{
-  "ENVIRONMENT": "production",
-  "AUTH_MODE": "better-auth",
-  "BETTER_AUTH_URL": "https://artifact.example.com",
-  "BETTER_AUTH_ALLOWED_DOMAINS": "example.com",
-  "BETTER_AUTH_TRUSTED_IP_HEADER": "cf-connecting-ip"
-}
-```
-
-Register provider callbacks against the same origin:
-
-```text
-https://artifact.example.com/api/auth/callback/google
-https://artifact.example.com/api/auth/callback/github
-https://artifact.example.com/api/auth/callback/company
-```
-
-Generate a deployment-specific secret of at least 32 characters and store it with
-the provider credentials as a Worker secret. Do not commit these values:
-
-```sh
-openssl rand -base64 32
-bun x wrangler secret put BETTER_AUTH_SECRET
-bun x wrangler secret put BETTER_AUTH_SOCIAL_PROVIDERS
-```
-
-`BETTER_AUTH_SOCIAL_PROVIDERS` is JSON passed through to Better Auth's native
-`socialProviders` option. These are complete Google and GitHub shapes; replace
-the placeholders with one or both provider applications:
-
-```json
-{"google":{"clientId":"<google-client-id>","clientSecret":"<google-client-secret>"}}
-```
-
-```json
-{"github":{"clientId":"<github-client-id>","clientSecret":"<github-client-secret>"}}
-```
-
-You may combine them in one object or use any other social provider supported by
-the installed Better Auth version. For a discovery-based OpenID Connect provider,
-set `BETTER_AUTH_OIDC_PROVIDERS` to a JSON array and store it as a Worker secret:
-
-```json
-[{"providerId":"company","name":"Company SSO","discoveryUrl":"https://id.example.com/.well-known/openid-configuration","clientId":"<oidc-client-id>","clientSecret":"<oidc-client-secret>","scopes":["openid","profile","email"],"requireIdTokenVerification":true}]
-```
-
-```sh
-bun x wrangler secret put BETTER_AUTH_OIDC_PROVIDERS
-```
-
-Both JSON settings are deployment configuration, so the Artifacts server and sign-in
-page do not contain a fixed provider list. If a provider needs callbacks, custom
-profile mapping or another Better Auth plugin, extend `teamProviderOptions` in
-[`cloudflare/team-auth.ts`](../cloudflare/team-auth.ts) with ordinary TypeScript.
-
-Provider authentication and admission are separate. Configure at least one of:
-
-- `BETTER_AUTH_ALLOWED_EMAILS`: comma- or whitespace-separated exact addresses.
-- `BETTER_AUTH_ALLOWED_DOMAINS`: comma- or whitespace-separated email domains.
-- `BETTER_AUTH_ALLOW_ALL_USERS=true`: admit every identity authenticated by the
-  configured providers. Use this only when those providers already enforce the
-  intended tenant or membership boundary.
-
-The email and domain rules require the provider to return a verified email. With
-no admission setting, no user is admitted. Provider hints such as Google's hosted
-domain can narrow provider sign-in, but do not replace Artifacts admission policy.
-
-Auth endpoints use persistent database rate limits. On Cloudflare, the example
-trusts the edge-owned `cf-connecting-ip` header. On celld, set
-`BETTER_AUTH_TRUSTED_IP_HEADER` only to a header that a trusted proxy replaces;
-otherwise omit it and requests share a per-path rate-limit bucket. Provider
-access and refresh tokens are encrypted with Better Auth's native storage option.
-
-Create the remote D1 database once. Access-mode deployments do not need this
-resource. Add the returned ID and the checked-in migration directory to
-`wrangler.jsonc` only when enabling Better Auth:
-
-```sh
-bun x wrangler d1 create artifacts-auth --binding AUTH_DB
-```
-
-```json
-{
-  "d1_databases": [
-    {
-      "binding": "AUTH_DB",
-      "database_name": "artifacts-auth",
-      "database_id": "<database-id-returned-by-wrangler>",
-      "migrations_dir": "cloudflare/migrations"
-    }
-  ]
-}
-```
-
-Apply the checked-in migrations before the first Better Auth deployment:
-
-```sh
-bun x wrangler d1 migrations apply AUTH_DB --remote
-bun run deploy:cloudflare
-```
-
-Apply migrations to workerd's local D1 before starting Better Auth locally:
-
-```sh
-bun x wrangler d1 migrations apply AUTH_DB --local
-bun run dev:cloudflare
-```
-
-Put local values in the ignored `.dev.vars` file, including
-`AUTH_MODE="better-auth"`, `BETTER_AUTH_URL="http://127.0.0.1:4785"`, a strong
-`BETTER_AUTH_SECRET`, provider JSON and an admission rule. Future schema changes
-use the same local/remote migration commands; do not regenerate or reapply the
-initial migration as a replacement for migration history.
-Runtime schema introspection is disabled because celld v0.4.1 rejects the
-table-valued PRAGMA queries it uses. Apply migrations before serving traffic;
-startup does not automatically detect or repair a missing or outdated schema.
-Better Auth issues RS256 tokens on both runtimes because celld v0.4.1 cannot
-verify its default Ed25519 signatures. Signing keys remain managed by Better
-Auth in `AUTH_DB`. Auth instances are request-local to avoid celld's concurrent
-handler hang when sharing an instance.
-Generate future schema deltas with
-`bun run scripts/generate-auth-migration.ts cloudflare/migrations/0002_description.sql`.
-
-An OAuth-capable MCP client pointed at
-`https://artifact.example.com/mcp?workspace=<workspace>` discovers this deployment's
-authorization metadata, opens the same provider sign-in used by the gallery, and
-asks the user to approve Artifacts access. Browser sessions and MCP access tokens map
-to the same Better Auth user ID. Signing out invalidates the session used to
-authorize both surfaces.
-Public MCP clients can register dynamically with PKCE. Desktop clients that omit
-OIDC's optional `application_type` are recognized from their loopback or private
-scheme callback; Better Auth still validates every callback URI. HTTPS web-client
-registrations and explicit application types keep Better Auth's native behavior.
-
-Open the deployed hostname for the gallery. Configure the centralized MCP server
-URL as `https://<instance-hostname>/mcp?workspace=<workspace>` for a private library,
-or `https://<instance-hostname>/mcp?library=team&workspace=<workspace>` for the team
-library. You can register both endpoints in a client. The gallery has a **My
-library / Team library** selector. Private is the default and is isolated by the
-verified identity from the selected auth mode; passing a different user ID cannot
-select another person's data. Every user admitted to the deployment can read and
-edit the team library. Workspace names organize content inside a library and do
-not grant access. Each deployment represents one team; use separate instances and
-admission policies for unrelated teams. Infrastructure account administrators can
-still administer the underlying storage.
-
-Switching auth modes does not migrate private identities. Existing Access private
-libraries remain keyed by the Access issuer and subject; Better Auth private
-libraries use its user ID. The old data is not deleted, but Artifacts does not infer
-that an Access subject and a Better Auth account represent the same person. Plan
-an explicit data migration before changing modes if users must retain the same
-private library. The shared team-library key is unchanged, so authorized users in
-the new mode continue to address the existing team library.
+Open the deployed hostname for the gallery. Add `https://<instance-hostname>/mcp`
+to an OAuth-capable MCP client for a personal library, or append
+`?library=team&workspace=<workspace>` for the shared team library. See
+[connection instructions and supported credentials](authentication.md#connect-to-an-existing-deployment).
+Before switching modes on an existing deployment, read
+[the identity migration note](authentication.md#changing-authentication-modes-and-upgrading).
 
 Hosted MCP supports inline Artifact views, raw-source reads/writes/guarded edits,
 semantic diagnostics, history, archived views and restore. It rejects the local
@@ -321,8 +150,40 @@ provisions the storage classes; it does not manage user tables inside an artifac
 
 Generated servers do not receive the outer Worker's ordinary bindings. In
 particular, do not assume D1, R2 or custom environment bindings are available.
-Global outbound access is disabled. The supported persistent boundary is the
-artifact Durable Object's own SQL/KV storage.
+The server supports outbound `fetch` and Workers-compatible `node:` imports.
+Persistent application data uses the artifact Durable Object's own SQL/KV storage.
+The same CPU and subrequest limits as scripts apply on Cloudflare (30 seconds CPU,
+50 subrequests); the pinned celld runtime does not enforce these per-worker budgets.
+
+Declare `ArtifactServer extends DurableObject<ArtifactEnv>` to use
+`this.env.secrets.NAME`. Configure values in the gallery's **Secrets** tab or with
+`artifact_secrets({name, secrets: {API_TOKEN: "value", OLD_TOKEN: null}})`;
+omitting `secrets` lists names only. Up to 32 keys, 4 KiB per value, and 32 KiB
+total are supported. Secrets belong to the artifact, outside source history,
+exports and app storage. Source edits, restores and library moves retain them;
+remixes and imports start empty. Secret updates reload the server without
+resetting its database. Never include secrets in app responses.
+
+```ts
+import { DurableObject } from "cloudflare:workers";
+
+export class ArtifactServer extends DurableObject<ArtifactEnv> {
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    if (url.pathname !== "/api/customer") {
+      return Response.json({ error: "Not found" }, { status: 404 });
+    }
+    return fetch("https://api.example.com/customer", {
+      headers: { authorization: `Bearer ${this.env.secrets.API_TOKEN}` },
+    });
+  }
+}
+```
+
+Direct `/slug/api/*` URLs preserve native HTTP streaming and support larger
+bodies, subject to runtime/proxy limits. `artifactFetch` and MCP
+`artifact_request` use buffered envelopes capped at 256 KiB. See
+[HTTP routing](routing.md#http-apis) for path and credential handling.
 
 Browser code imports `artifactFetch` from `sidequery/artifacts`:
 

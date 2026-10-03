@@ -51,6 +51,12 @@ export class CloudArtifactService {
     if (name.startsWith("script_")) return this.scripts.callTool(name, args);
     if (name === "artifact_link") return this.artifactLink(args);
     switch (name) {
+      case "artifact_secrets": {
+        const snapshot = await this.snapshot({ name: args.name as string });
+        const backend = this.backends.getByName(JSON.stringify([this.libraryKey, this.workspace, snapshot.name]));
+        const payload = await backend.secrets({ secrets: args.secrets as Record<string, string | null> | undefined });
+        return { ...text(payload), structuredContent: { ...payload } };
+      }
       case "artifact_files": {
         const result = await this.fileRequest(args as { name?: string; version_id?: string }, args.request as ArtifactFileRequest);
         return { ...text({ result }), structuredContent: { result } };

@@ -57,6 +57,9 @@ Do not assume an in-memory global persists between requests or updates. On Cloud
 
 ## Access
 
+For provider setup, MCP OAuth, and the credentials accepted by private URLs, see
+[authentication and access](authentication.md).
+
 Links default to **Private** and use the artifact's existing library permissions. Management APIs and the gallery remain authenticated. Setting a link to **Public** allows external callers to invoke or view it; a public script can implement its own authentication through request headers or signatures.
 
 If Cloudflare Access protects the deployment's entire hostname, configure an Access bypass for the intended public paths so external callers can reach the Worker. The artifact's access setting does not override an Access policy that blocks the request before it reaches the application.

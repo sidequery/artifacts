@@ -132,6 +132,9 @@ export class ArtifactServer extends DurableObject {
   expect(server.diagnostics).toEqual([]);
   expect(server.ok).toBe(true);
   expect(server.js).toContain("cloudflare:workers");
+  const networkServer = await call('import { DurableObject } from "cloudflare:workers"; import { createHash } from "node:crypto"; export class ArtifactServer extends DurableObject<ArtifactEnv> { async fetch(request: Request) { const response = await fetch("https://example.com", { headers: { authorization: this.env.secrets.TOKEN } }); return new Response(createHash("sha256").update(await response.text()).digest("hex")); } }', "compile-server");
+  expect(networkServer.diagnostics).toEqual([]);
+  expect(networkServer.ok).toBe(true);
   for (const valid of [
     source.replace('import { DurableObject }', 'import { DurableObject as NativeDO }').replace('extends DurableObject', 'extends NativeDO'),
     source.replace('import { DurableObject } from "cloudflare:workers";', 'import * as workers from "cloudflare:workers";').replace('extends DurableObject', 'extends workers.DurableObject'),

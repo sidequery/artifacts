@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { authClient, signInUrl } from "../auth/client-api";
 import type { GalleryArtifact, GalleryData } from "./types";
 import { ExecutionControls } from "./execution-controls";
+import { SecretControls } from "./secrets";
 import { AgentOnboarding, ArtifactSourcePanel, LinkSettings, ScriptPanel, liveRevisionLabel, type ScriptView } from "./hosted";
 import { artifactFileTransferUrl } from "../sdk/files";
 import { RemixPanel } from "./remix";
@@ -441,7 +442,7 @@ function App() {
 
   const activeTab: DetailTab = selectedArtifact?.kind === "script"
     ? tab === "preview" ? "source" : tab
-    : tab === "requests" || tab === "secrets" ? "preview" : tab;
+    : tab === "requests" || (tab === "secrets" && !gallery?.capabilities?.links) ? "preview" : tab;
 
   const sortedVersions = useMemo(
     () => [...(selectedArtifact?.versions ?? [])].sort((left, right) => right.revision - left.revision),
@@ -705,7 +706,7 @@ function App() {
               <div className="view-control" role="group" aria-label={selectedArtifact.kind === "script" ? "Script view" : "Artifact view"}>
                 {(selectedArtifact.kind === "script"
                   ? [["source", "Source"], ["requests", "Requests"], ["activity", "Activity"], ["secrets", "Secrets"]] as const
-                  : [["preview", "Preview"], ["source", "Source"], ...(gallery?.capabilities?.links ? [["activity", "Activity"] as const] : [])] as const
+                  : [["preview", "Preview"], ["source", "Source"], ...(gallery?.capabilities?.links ? [["activity", "Activity"], ["secrets", "Secrets"]] as const : [])] as const
                 ).map(([value, label]) => <button key={value} type="button" aria-pressed={activeTab === value} aria-controls="artifact-panel" onClick={() => setTab(value)}>{label}</button>)}
               </div>
               <label className="revision-control"><span>Version</span><Select className="version-select" aria-label="Version" value={resolvedVersion} onChange={event => setSelectedVersion(event.target.value)}>
@@ -717,7 +718,7 @@ function App() {
             {showMove && !creatingScript && selectedArtifact && gallery?.libraryScope && gallery.capabilities?.moves ? <div id="library-move-panel" className="detail-disclosure"><MovePanel key={selectedArtifact.key} artifact={selectedArtifact} library={gallery.libraryScope} onCancel={() => setShowMove(false)} /></div> : null}
             {remixing && !creatingScript && selectedArtifact && resolvedVersion ? <div className="detail-disclosure"><RemixPanel key={selectedArtifact.key + resolvedVersion} artifact={selectedArtifact} version={resolvedVersion} onCancel={() => setRemixing(false)} onSaved={async name => { createdRemix.current = {name, workspace:selectedArtifact.workspace, kind:selectedArtifact.kind ?? "artifact"}; await loadGallery(); setSelectedVersion("working"); setQuery(""); setKindFilter("all"); setRemixing(false); }} /></div> : null}
             {!creatingScript && selectedArtifact && gallery?.capabilities?.links ? <div id="link-settings-panel" className="detail-disclosure" hidden={!showLinks}><LinkSettings key={selectedArtifact.key} artifact={selectedArtifact} onSaved={loadGallery} /></div> : null}
-            <section id="artifact-panel" className="artifact-stage" aria-label={selectedArtifact?.kind === "script" || creatingScript ? "Script editor" : activeTab === "preview" ? "Artifact preview" : activeTab === "activity" ? "Artifact activity" : "Artifact source"}>
+            <section id="artifact-panel" className="artifact-stage" aria-label={selectedArtifact?.kind === "script" || creatingScript ? "Script editor" : activeTab === "preview" ? "Artifact preview" : activeTab === "activity" ? "Artifact activity" : activeTab === "secrets" ? "Artifact secrets" : "Artifact source"}>
               {creatingScript ? <ScriptPanel key="new-script" workspace={gallery?.workspace ?? "default"} onCancel={() => setCreatingScript(false)} onSaved={async name => { createdScriptName.current = name; await loadGallery(); setCreatingScript(false); setSelectedVersion("working"); setTab("source"); setQuery(""); setKindFilter("all"); }} />
                 : selectedArtifact?.kind === "script" ? <ScriptPanel key={`${selectedArtifact.key}:${resolvedVersion}`} artifact={selectedArtifact} workspace={selectedArtifact.workspace} version={resolvedVersion ?? undefined} view={activeTab as ScriptView} sourceUrl={resolvedVersion ? artifactUrl("/api/source", selectedArtifact, resolvedVersion) : undefined} onSaved={async () => { setSelectedVersion("working"); await loadGallery(); }} />
                 : !selectedArtifact && !loading && gallery?.capabilities?.links ? <AgentOnboarding workspace={gallery.workspace} />
@@ -734,6 +735,7 @@ function App() {
                       : source.status === "error" ? <p role="alert" className="state-message error-message">{source.error}</p>
                       : <p className="state-message" role="status">Loading source…</p>}
                   </div> : null}
+                  {gallery?.capabilities?.links ? <div hidden={activeTab !== "secrets"}><SecretControls key={selectedArtifact.key + "secrets"} workspace={selectedArtifact.workspace} name={selectedArtifact.name} kind="artifact" /></div> : null}
                   {gallery?.capabilities?.links ? <div id="execution-panel" className="artifact-execution" hidden={activeTab !== "activity"}><ExecutionControls key={selectedArtifact.key + "execution"} workspace={selectedArtifact.workspace} name={selectedArtifact.name} kind="artifact" /></div> : null}
                 </>}
             </section>

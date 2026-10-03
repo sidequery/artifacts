@@ -75,7 +75,7 @@ Qualify `bun run test:celld` and the installed native package check before chang
 the pin. Include cold start, stored SQL/KV across restart, OAuth compatibility in
 the runtime suite, and daemon lifecycle on supported service managers. The local
 packaged server uses loopback single-user mode; deploying Better Auth remains the
-separate configuration described in [Cloudflare setup](cloudflare.md).
+separate configuration described in [authentication and access](authentication.md).
 
 celld v0.5.0 publishes Apple Silicon macOS and glibc Linux arm64/x64 binaries.
 Intel macOS and other targets cannot use this managed native server version.
