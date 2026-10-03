@@ -75,6 +75,10 @@ test("gallery filters, previews revisions, and preserves mobile library navigati
     const desktopFilters = (await desktop.getByRole("group", { name: "Filter library" }).boundingBox())!;
     expect((await campaign.boundingBox())!.y).toBe(desktopFilters.y + desktopFilters.height);
     await screenshot(desktop, "gallery-desktop-preview");
+    await desktop.getByRole("button", { name: "Switch to dark theme" }).click();
+    await desktop.reload();
+    await desktop.getByRole("button", { name: "Switch to light theme" }).waitFor();
+    expect(await desktop.locator("html").getAttribute("data-theme")).toBe("dark");
 
     const search = desktop.getByRole("searchbox", { name: "Search artifacts and scripts" });
     await search.fill("revenue");
@@ -112,6 +116,11 @@ test("gallery filters, previews revisions, and preserves mobile library navigati
     const source = desktop.getByRole("textbox", { name: "Campaign overview.artifact.tsx", exact: true });
     await source.waitFor();
     expect(await source.innerText()).toBe(sourceFor(false));
+    expect(await source.evaluate(el => getComputedStyle(el).color)).toBe("rgb(244, 242, 238)");
+    await screenshot(desktop, "gallery-desktop-dark-source");
+    await desktop.getByRole("button", { name: "Switch to light theme" }).click();
+    expect(await source.evaluate(el => getComputedStyle(el).color)).toBe("rgb(27, 25, 23)");
+    expect(await source.innerText()).toBe(sourceFor(false));
     const dimensions = await desktop.locator(".source-code-surface:visible").evaluate(el => ({ editor: el.getBoundingClientRect().height, pane: el.closest(".artifact-detail")!.getBoundingClientRect().height }));
     expect(dimensions.editor).toBeGreaterThan(dimensions.pane / 2);
     expect(await source.locator("span").evaluateAll(spans => new Set(spans.map(el => getComputedStyle(el).color)).size)).toBeGreaterThan(1);
@@ -131,7 +140,7 @@ test("gallery filters, previews revisions, and preserves mobile library navigati
     expect(new URL(await desktop.getByTitle("Preview of Campaign overview").getAttribute("src") ?? "", server.url).searchParams.get("version")).toBe("campaign-revision-1");
     await desktop.getByRole("combobox", { name: "Version", exact: true }).selectOption("working");
     await desktop.frameLocator('iframe[title="Preview of Campaign overview"]').getByRole("heading", { name: "Campaign performance" }).waitFor();
-    await desktop.getByRole("button", { name: "Link settings", exact: true }).click();
+    await desktop.getByRole("button", { name: "Share", exact: true }).click();
     await desktop.getByRole("textbox", { name: "URL slug", exact: true }).fill("campaign-report");
     expect(calls).toEqual([]);
     await desktop.getByRole("button", { name: "Save link", exact: true }).click();
@@ -157,7 +166,7 @@ test("gallery filters, previews revisions, and preserves mobile library navigati
     await mobile.frameLocator('iframe[title="Preview of Campaign overview"]').getByRole("heading", { name: "Campaign performance" }).waitFor();
     await noHorizontalOverflow(mobile);
     await mobile.getByLabel("More actions", { exact: true }).click();
-    expect(await mobile.getByRole("link", { name: "Download entrypoint", exact: true }).isVisible()).toBe(true);
+    expect(await mobile.getByRole("link", { name: "Download", exact: true }).isVisible()).toBe(true);
     await mobile.getByLabel("More actions", { exact: true }).click();
     await screenshot(mobile, "gallery-mobile-preview");
     await mobile.getByRole("group", { name: "Artifact view" }).getByRole("button", { name: "Source", exact: true }).click();

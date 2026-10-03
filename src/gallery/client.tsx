@@ -1,3 +1,4 @@
+import { ArtifactFolders } from "./folders";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { authClient, signInUrl } from "../auth/client-api";
@@ -13,6 +14,9 @@ import { SourceEditor } from "./source-editor";
 import { DraftProvider, confirmLeavingDrafts, useDrafts } from "./drafts";
 import { ProjectImportPanel } from "./project-transfer";
 import { NativeAppsPanel } from "./native-apps";
+import { fontFaces } from "./brand";
+import { themeStyles } from "./theme";
+import { subscribeGallery } from "./subscription";
 
 type Scope = "current" | "all";
 type DetailTab = "preview" | "source" | "activity" | "requests" | "secrets";
@@ -28,81 +32,98 @@ const WORKING_VERSION = "working";
 type SessionUser = { id: string; name: string; email: string };
 
 const styles = `
-  :root { color-scheme: dark; --page: #111214; --panel: #161719; --raised: #202225; --selected: #292c30; --line: #303336; --text: #e8e9e9; --muted: #a0a5aa; --subtle: #757b81; }
+  ${fontFaces}
+  ${themeStyles}
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
   html, body, #root { width: 100%; height: 100%; }
-  body { margin: 0; background: var(--page); color: var(--text); font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; }
+  body { margin: 0; background: var(--page); color: var(--text); font: 13px/1.5 "Geist Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; }
   button, input, select, textarea, a { font: inherit; color: inherit; touch-action: manipulation; }
   button, select, .download-link { cursor: pointer; }
-  button, select, input { height: 32px; min-height: 32px; line-height: 20px; border: 1px solid transparent; border-radius: 0; background: transparent; padding: 5px 10px; }
+  button, select, input { height: 32px; min-height: 32px; line-height: 20px; border: 1px solid transparent; border-radius: 8px; background: transparent; padding: 5px 10px; }
   button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
   select, input { border-color: var(--line); min-width: 0; }
   input { background: var(--page); }
   button:disabled, select:disabled { opacity: .45; cursor: default; }
-  :is(button, input, select, textarea, summary, a):focus-visible { outline: 2px solid var(--text); outline-offset: -2px; }
+  :is(button, input, select, textarea, summary, a):focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
   button, a { -webkit-tap-highlight-color: transparent; }
   .select-control { position: relative; display: inline-flex; min-width: 0; vertical-align: middle; }
   .select-control select { appearance: none; width: 100%; background: var(--panel); padding-right: 30px; text-overflow: ellipsis; }
   .select-chevron { position: absolute; pointer-events: none; right: 12px; top: 50%; width: 6px; height: 6px; margin-top: -4px; border-right: 1px solid var(--muted); border-bottom: 1px solid var(--muted); transform: rotate(45deg); }
   .select-control:has(select:disabled) .select-chevron { opacity: .45; }
+  @supports (appearance: base-select) {
+    .select-control select, .select-control select::picker(select) { appearance: base-select; }
+    .select-control select::picker-icon { display: none; }
+    .select-control select::picker(select) { margin: 4px 0; padding: 4px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--text); box-shadow: 0 8px 28px #0002; font: 13px/1.5 "Geist Sans", sans-serif; }
+    .select-control option { padding: 6px 10px; border-radius: 6px; gap: 8px; min-height: 32px; }
+    .select-control option:checked { background: var(--selected); }
+    .select-control option:hover, .select-control option:focus { background: var(--raised); outline: none; }
+    .select-control option::checkmark { color: var(--muted); }
+  }
   .gallery-app { display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
-  .app-header { display: flex; align-items: center; gap: 16px; min-height: 52px; padding: 8px 16px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
-  .wordmark { font-size: 17px; font-weight: 600; letter-spacing: -.4px; }
+  .app-header { display: flex; align-items: center; gap: 16px; min-height: 48px; padding: 8px 16px; flex-shrink: 0; }
+  .wordmark { display: flex; align-items: center; gap: 10px; width: 224px; flex-shrink: 0; font-size: 14px; font-weight: 600; letter-spacing: -.3px; }
+  .theme-toggle { color: var(--muted); white-space: nowrap; }
+  .theme-icon { display: block; width: 15px; height: 15px; border-radius: 50%; }
+  .theme-icon.moon { box-shadow: inset 5px -3px 0 0 currentColor; transform: rotate(-15deg); }
+  .theme-icon.sun { width: 9px; height: 9px; margin: 3px; border: 1px solid currentColor; box-shadow: 0 -7px 0 -3px currentColor, 0 7px 0 -3px currentColor, 7px 0 0 -3px currentColor, -7px 0 0 -3px currentColor, 5px 5px 0 -3px currentColor, -5px -5px 0 -3px currentColor, 5px -5px 0 -3px currentColor, -5px 5px 0 -3px currentColor; }
   .header-context { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .header-context::before { content: "/"; color: var(--subtle); margin-right: 16px; }
   .header-actions { display: flex; gap: 8px; align-items: center; margin-left: auto; }
   .header-actions .select-control { max-width: 180px; }
   .header-actions select { border-color: transparent; background: transparent; }
   .new-script { border-color: var(--line); white-space: nowrap; }
-  .new-script span { color: var(--muted); }
+  .new-script span { color: inherit; }
   .account { display: flex; align-items: center; gap: 8px; margin-left: 8px; }
   .account-name { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
-  .gallery-layout { display: grid; grid-template-columns: 248px minmax(0, 1fr); flex: 1; min-height: 0; }
-  .library-panel { display: flex; flex-direction: column; min-height: 0; background: var(--panel); border-right: 1px solid var(--line); }
-  .library-heading { display: flex; align-items: center; gap: 8px; padding: 10px 12px 6px; }
-  .library-heading h2 { margin: 0; font-size: 12px; font-weight: 500; color: var(--muted); }
-  .library-count { font-size: 12px; color: var(--subtle); font-variant-numeric: tabular-nums; }
-  .refresh-button { margin-left: auto; color: var(--muted); height: 28px; min-height: 28px; padding: 3px 0 3px 8px; font-size: 12px; }
-  .library-search { position: relative; margin: 0 12px 8px; }
-  .search-input { width: 100%; padding-right: 32px; }
+  .gallery-layout { display: grid; grid-template-columns: 256px minmax(0, 1fr); flex: 1; min-height: 0; }
+  .library-panel { display: flex; flex-direction: column; min-height: 0; background: var(--page); padding: 0 8px 8px; }
+  .connection-status { padding: 0 12px 8px; margin: 0; color: var(--muted); font-size: 12px; }
+  .library-search { position: relative; margin: 0 4px 8px; }
+  .search-input { width: 100%; padding-right: 32px; background: var(--panel); }
   .search-input::placeholder { color: var(--subtle); }
   .search-input::-webkit-search-cancel-button { display: none; }
   .clear-search { position: absolute; right: 0; top: 0; bottom: 0; width: 32px; padding: 0; color: var(--muted); font-size: 18px; }
-  .scope-control { margin: 0 12px 8px; display: flex; }
-  .scope-control .select-control { width: 100%; }
-  .scope-control select { color: var(--muted); background: transparent; border-color: transparent; padding-left: 0; }
-  .scope-control .select-chevron { right: 8px; }
-  .library-filters { display: flex; gap: 2px; padding: 0 8px 8px; border-bottom: 1px solid var(--line); }
+  .share-link-row { display: flex; align-items: flex-end; gap: 8px; width: 100%; flex-wrap: wrap; }
+  .share-link-row label { flex: 1; min-width: 180px; }
+  .share-link-row input { width: 100%; }
+  .folder-row { width: 100%; justify-content: flex-start; gap: 10px; color: var(--muted); text-align: left; }
+  .folder-row:hover { background: var(--raised); }
+  .folder-chevron { width: 6px; height: 6px; margin: 0 5px 0 3px; flex-shrink: 0; border-right: 1px solid currentColor; border-bottom: 1px solid currentColor; transform: rotate(-45deg); }
+  .folder-row[aria-expanded="true"] .folder-chevron { transform: rotate(45deg); }
+  .file-icon { position: relative; width: 12px; height: 15px; border: 1px solid var(--subtle); border-radius: 2px; margin: 0 3px; flex-shrink: 0; }
+  .file-icon::after { content: ""; position: absolute; left: 2px; right: 2px; top: 5px; height: 1px; background: var(--subtle); box-shadow: 0 3px 0 var(--subtle); }
+  .library-filters { display: flex; gap: 2px; padding: 0 4px 10px; }
   .library-filters button { height: 28px; min-height: 28px; padding: 3px 8px; font-size: 12px; color: var(--muted); }
-  .library-filters button[aria-pressed="true"] { color: var(--text); background: var(--raised); }
+  .library-filters button[aria-pressed="true"] { color: var(--text); background: var(--selected); }
   .artifact-list { overflow: auto; flex: 1; min-height: 0; padding: 0; }
-  .artifact-row { display: flex; justify-content: flex-start; align-items: center; gap: 8px; width: 100%; height: auto; min-height: 34px; text-align: left; padding: 6px 12px; border: 0; }
+  .artifact-row { display: flex; justify-content: flex-start; align-items: center; gap: 8px; width: 100%; height: auto; min-height: 34px; text-align: left; padding: 7px 10px; border: 0; border-radius: 8px; margin-bottom: 2px; }
   .artifact-row[aria-current="true"] { background: var(--selected); }
   .artifact-row-copy { min-width: 0; flex: 1; }
   .artifact-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; }
   .row-kind { flex-shrink: 0; color: var(--subtle); font-size: 11px; }
   .workspace-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--subtle); font-size: 11px; }
+  .library-footer:empty { display: none; }
   .library-footer { padding: 8px 12px; border-top: 1px solid var(--line); color: var(--subtle); font-size: 11px; }
   .library-footer details { margin-top: 4px; }
   .library-footer summary { color: var(--muted); min-height: 24px; padding: 2px 0; }
   .library-footer p { margin: 6px 0; font-size: 12px; }
-  .artifact-detail { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-  .detail-header { display: flex; gap: 16px; align-items: center; justify-content: space-between; padding: 12px 20px; flex-shrink: 0; }
-  .detail-title { min-width: 0; }
+  .artifact-detail { display: flex; flex-direction: column; min-width: 0; min-height: 0; margin: 0 6px 6px 0; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .detail-header { display: flex; gap: 16px; align-items: center; justify-content: space-between; padding: 10px 16px; flex-shrink: 0; flex-wrap: wrap; border-bottom: 1px solid var(--line); }
+  .detail-title { min-width: 0; flex: 1; }
   .detail-eyebrow { margin: 0 0 2px; color: var(--muted); font-size: 11px; }
-  .detail-title h1 { margin: 0; font-size: 19px; line-height: 1.3; font-weight: 550; letter-spacing: -.35px; overflow-wrap: anywhere; }
+  .detail-title h1 { margin: 0; font-size: 15px; line-height: 1.3; font-weight: 600; letter-spacing: -.35px; overflow-wrap: anywhere; }
   .detail-title h1:focus { outline: none; }
   .detail-actions { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; justify-content: flex-end; }
   .detail-actions > :is(button, a) { white-space: nowrap; }
-  .download-link { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; min-height: 32px; line-height: 20px; padding: 5px 10px; border: 1px solid transparent; text-decoration: none; }
-  .detail-actions .open-link { margin-left: 6px; background: var(--text); color: var(--page); }
-  .detail-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 4px 12px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
+  .download-link { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; min-height: 32px; line-height: 20px; padding: 5px 10px; border: 1px solid transparent; border-radius: 8px; text-decoration: none; }
+  .detail-actions .open-link { margin-left: 6px; background: var(--primary); color: var(--primary-text); }
+  .detail-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
   .view-control { display: flex; align-items: center; gap: 2px; }
   .view-control button { padding: 5px 10px; color: var(--muted); }
   .view-control button[aria-pressed="true"] { color: var(--text); background: var(--raised); }
   .revision-control { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
-  .version-select { width: 240px; max-width: 240px; }
+  .version-select { width: 140px; max-width: 140px; }
   .version-select select { border-color: transparent; background: transparent; color: var(--text); }
   .detail-actions button[aria-expanded="true"] { background: var(--raised); }
   .back-library, .mobile-more { display: none; }
@@ -126,14 +147,18 @@ const styles = `
   .source-form > .script-fields { padding: 12px 16px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
   .source-actions { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--line); flex-shrink: 0; }
   .source-actions p { margin: 0; color: var(--muted); }
-  .gallery-app button.primary-action { background: #d8e3ec; color: #17202a; border-color: #d8e3ec; font-weight: 600; }
+  .gallery-app button.primary-action, .gallery-app .new-script { background: var(--primary); color: var(--primary-text); border-color: var(--primary); font-weight: 600; }
   button.primary-action:disabled { opacity: .45; }
   .deployment-status { margin: 6px 0 0; color: var(--muted); }
   .save-feedback { padding: 8px 16px; flex-shrink: 0; max-height: 30vh; overflow: auto; }
   .save-feedback p { margin: 0 0 6px; }
   .save-feedback button { height: auto; text-align: left; text-decoration: underline; }
   .save-feedback pre { white-space: pre-wrap; overflow-wrap: anywhere; }
-  .agent-onboarding { max-width: 680px; padding: 32px; }
+  .agent-onboarding { width: 100%; max-width: 600px; margin: auto; padding: 32px; }
+  .agent-onboarding h2 { font-size: 24px; letter-spacing: -.6px; margin: 0 0 8px; }
+  .agent-onboarding p { color: var(--muted); }
+  .agent-onboarding details { border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-top: 24px; }
+  .agent-onboarding textarea { border: 1px solid var(--line); border-radius: 8px; padding: 12px; resize: vertical; }
   .agent-onboarding label { display: block; margin-top: 16px; }
   .agent-onboarding input, .agent-onboarding textarea { display: block; width: 100%; background: var(--raised); }
   .agent-onboarding textarea { min-height: 100px; }
@@ -161,7 +186,7 @@ const styles = `
   .project-file-management > div { padding-bottom: 10px; }
   .project-file-management details { margin: 0; }
   .project-file-management p { margin: 6px 0; }
-  .script-panel textarea, .artifact-execution textarea { display: block; width: 100%; min-height: 80px; margin: 6px 0 12px; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 0; padding: 10px; font: 13px/1.6 "SFMono-Regular", Consolas, monospace; resize: vertical; }
+  .script-panel textarea, .artifact-execution textarea { display: block; width: 100%; min-height: 80px; margin: 6px 0 12px; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font: 13px/1.6 "SFMono-Regular", Consolas, monospace; resize: vertical; }
   summary { cursor: pointer; min-height: 32px; padding-block: 5px; color: var(--text); }
   .script-panel pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; border: 1px solid var(--line); background: var(--panel); }
   .script-activity, .artifact-execution { flex: 1; min-height: 0; overflow: auto; padding: 16px 20px; }
@@ -177,8 +202,8 @@ const styles = `
   .muted { color: var(--muted); }
   .artifact-stage { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
   .source-stage { display: flex; flex: 1; min-width: 0; min-height: 0; }
-  .preview-stage { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; }
-  .preview-frame { display: block; width: 100%; height: 100%; border: 0; }
+  .preview-stage { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; background: var(--panel); }
+  .preview-frame { display: block; width: 100%; height: 100%; border: 0; background: var(--panel); }
   .preview-loading { position: absolute; inset: 0; display: grid; place-items: center; background: var(--page); color: var(--muted); pointer-events: none; }
   .state-message { margin: 0; padding: 12px; color: var(--muted); }
   .library-empty { padding: 20px 12px; }
@@ -187,18 +212,19 @@ const styles = `
   .empty-detail { margin: auto; max-width: 400px; padding: 24px; text-align: center; }
   .empty-detail h2 { margin: 0 0 8px; font-size: 18px; font-weight: 500; }
   .empty-detail p { margin: 0; color: var(--muted); }
-  .error-message { color: #f2a5a5; }
+  .error-message { color: var(--error); }
   .source-form > .error-message, .script-panel > .error-message { margin: 0; padding: 8px 16px; flex-shrink: 0; }
   .refresh-error { padding: 10px 16px; margin: 0; border-bottom: 1px solid var(--line); background: var(--panel); }
   @media (hover: hover) and (pointer: fine) {
     button:hover:not(:disabled), .download-link:hover { background: var(--raised); }
-    .gallery-app button.primary-action:hover:not(:disabled) { background: #edf3f8; }
+    .gallery-app button.primary-action:hover:not(:disabled) { background: var(--primary-hover); }
     .artifact-row[aria-current="true"]:hover { background: var(--selected); }
-    .detail-actions .open-link:hover { background: #fff; }
+    .detail-actions .open-link:hover, .gallery-app .new-script:hover { background: var(--primary-hover); }
     .view-control button:hover:not([aria-pressed="true"]), .library-filters button:hover:not([aria-pressed="true"]) { color: var(--text); background: transparent; }
   }
   @media (max-width: 1100px) {
-    .gallery-layout { grid-template-columns: 220px minmax(0, 1fr); }
+    .gallery-layout { grid-template-columns: 232px minmax(0, 1fr); }
+    .wordmark { width: 200px; }
     .detail-header { align-items: flex-start; gap: 10px; padding-inline: 16px; }
     .detail-actions { max-width: 300px; }
     .revision-control > span:not(.select-control) { display: none; }
@@ -206,7 +232,10 @@ const styles = `
   }
   @media (max-width: 760px) {
     .app-header { min-height: 52px; padding: 6px 12px; gap: 10px; }
-    .wordmark { font-size: 17px; }
+    .wordmark { font-size: 14px; width: auto; }
+    .app-header { flex-wrap: wrap; }
+    .header-actions { flex-wrap: wrap; }
+    .artifact-detail { margin: 0 4px 4px; }
     .header-context { display: none; }
     .header-actions { gap: 4px; }
     .header-actions .select-control { max-width: 130px; }
@@ -307,10 +336,17 @@ function formatDate(value: string): string {
 
 function App() {
   const { drafts } = useDrafts();
+  const [theme, setTheme] = useState<"light" | "dark">(() => {
+    try { return localStorage.getItem("artifacts-theme") === "dark" ? "dark" : "light"; } catch { return "light"; }
+  });
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    try { localStorage.setItem("artifacts-theme", theme); } catch { /* The theme still works when storage is unavailable. */ }
+  }, [theme]);
   const [remixing, setRemixing] = useState(false);
   const [creatingScript, setCreatingScript] = useState(false);
   const [showNativeApps, setShowNativeApps] = useState(false);
-  const [scope, setScope] = useState<Scope>("current");
+  const scope: Scope = "all";
   const [query, setQuery] = useState("");
   const [kindFilter, setKindFilter] = useState<KindFilter>("all");
   const [showLinks, setShowLinks] = useState(false);
@@ -331,7 +367,7 @@ function App() {
   const [galleryError, setGalleryError] = useState("");
   const [source, setSource] = useState<SourceState>({ status: "idle", text: "", error: "" });
   const [previewLoading, setPreviewLoading] = useState(true);
-  const [refreshEpoch, setRefreshEpoch] = useState(0);
+  const [liveConnected, setLiveConnected] = useState(true);
   const [user, setUser] = useState<SessionUser | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const [accountError, setAccountError] = useState("");
@@ -388,8 +424,13 @@ function App() {
       } while (!controller.signal.aborted);
       if (request !== galleryRequest.current) return;
 
-      setGallery(payload);
-      setRefreshEpoch((epoch) => epoch + 1);
+      setGallery(previous => {
+        const existing = new Map(previous?.artifacts.map(item => [item.key, item]));
+        return { ...payload, artifacts: payload.artifacts.map(item => {
+          const before = existing.get(item.key);
+          return before && JSON.stringify(before) === JSON.stringify(item) ? before : item;
+        }) };
+      });
       const created = createdScriptName.current;
       createdScriptName.current = null;
       const remix = createdRemix.current;
@@ -413,6 +454,14 @@ function App() {
     void loadGallery();
     return () => galleryController.current?.abort();
   }, [loadGallery]);
+
+  useEffect(() => {
+    if (!gallery?.capabilities?.subscriptions) return;
+    const url = new URL(galleryUrl(scope), window.location.href);
+    url.pathname = "/api/gallery/subscribe";
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    return subscribeGallery(url.href, () => void loadGallery(), setLiveConnected);
+  }, [gallery?.capabilities?.subscriptions, scope, loadGallery]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -468,12 +517,17 @@ function App() {
   }, [activeTab, selectedArtifact?.key, resolvedVersion]);
 
   const previewUrl = selectedArtifact && selectedArtifact.kind !== "script" && resolvedVersion
-    ? `${artifactUrl("/gallery/preview", selectedArtifact, resolvedVersion)}&refresh=${refreshEpoch}`
+    ? `${artifactUrl("/gallery/preview", selectedArtifact, resolvedVersion)}&revision=${encodeURIComponent(resolvedVersion === WORKING_VERSION ? selectedArtifact.draftRevision ?? selectedArtifact.liveId ?? "" : resolvedVersion)}`
     : "";
   const downloadUrl = selectedArtifact && resolvedVersion
     ? artifactUrl("/api/source", selectedArtifact, resolvedVersion, true)
     : "";
   const exportUrl = downloadUrl ? `${downloadUrl}&format=project` : "";
+  const localShareUrl = selectedArtifact && resolvedVersion
+    ? new URL(resolvedVersion === WORKING_VERSION
+      ? selectedArtifact.url ?? `/c/${encodeURIComponent(selectedArtifact.name)}`
+      : `/gallery/preview?version=${encodeURIComponent(resolvedVersion)}`, window.location.origin).href
+    : undefined;
 
   useEffect(() => {
     const pending = new Set<string>();
@@ -613,8 +667,9 @@ function App() {
       <main className="gallery-app">
         <header className="app-header">
           <span className="wordmark">Artifacts</span>
-          {gallery?.workspace ? <span className="header-context" title={gallery.workspace}>{gallery.workspace}</span> : null}
+          {gallery?.workspace ? <span className="header-context" title={gallery.workspace}>{gallery.workspace.split(/[\\/]/).filter(Boolean).at(-1) ?? gallery.workspace}</span> : null}
           <div className="header-actions">
+            <button className="theme-toggle" type="button" title={`Switch to ${theme === "light" ? "dark" : "light"} theme`} aria-label={`Switch to ${theme === "light" ? "dark" : "light"} theme`} onClick={() => setTheme(theme === "light" ? "dark" : "light")}><span className={`theme-icon ${theme === "light" ? "moon" : "sun"}`} aria-hidden="true" /></button>
             {gallery?.capabilities?.nativeApps ? <button type="button" onClick={() => setShowNativeApps(true)}>Worker apps</button> : null}
             <button type="button" onClick={() => { setShowImport(true); setCreatingScript(false); setMobileDetail(true); }}>Import project</button>
             {gallery?.libraryScope ? <Select aria-label="Library" value={gallery.libraryScope} onChange={event => {
@@ -637,22 +692,13 @@ function App() {
 
         <div className="gallery-layout">
           <aside ref={libraryPanel} className="library-panel" hidden={narrowLayout && mobileDetail} aria-label={gallery?.capabilities?.scripts ? "Artifacts and scripts" : "Artifacts"}>
-            <div className="library-heading">
-              <h2>Library</h2>
-              <span className="library-count" aria-label={`${gallery?.artifacts.length ?? 0} items`}>{gallery?.artifacts.length ?? "—"}</span>
-              <button className="refresh-button" type="button" onClick={() => void loadGallery()} disabled={loading} aria-label={loading ? "Refreshing artifacts" : "Refresh"}>{loading ? "Refreshing…" : "Refresh"}</button>
-            </div>
+            {!liveConnected ? <p className="connection-status" role="status">Reconnecting to live updates…</p> : null}
             <div className="library-search">
               <input ref={searchInput} className="search-input" type="search"
                 aria-label={gallery?.capabilities?.scripts ? "Search artifacts and scripts" : "Search artifacts"}
-                value={query} onChange={event => setQuery(event.target.value)} placeholder="Search library…"
+                value={query} onChange={event => setQuery(event.target.value)} placeholder="Search"
                 autoComplete="off" spellCheck={false} data-lpignore="true" data-1p-ignore />
               {query ? <button type="button" className="clear-search" aria-label="Clear search" onClick={() => { setQuery(""); searchInput.current?.focus(); }}><span aria-hidden="true">×</span></button> : null}
-            </div>
-            <div className="scope-control">
-              <Select aria-label="Project scope" value={scope} onChange={event => setScope(event.target.value as Scope)}>
-                <option value="current">Current project</option><option value="all">All projects</option>
-              </Select>
             </div>
             {gallery?.capabilities?.scripts ? <div className="library-filters" role="group" aria-label="Filter library">
               {([['all', 'All'], ['artifact', 'Artifacts'], ['script', 'Scripts']] as const).map(([value, label]) =>
@@ -667,19 +713,19 @@ function App() {
                   <p>{query ? "No matches" : kindFilter !== "all" ? `No ${kindFilter === "script" ? "scripts" : "artifacts"}` : "Your library is empty"}</p>
                   {query || kindFilter !== "all" ? <button type="button" onClick={() => { setQuery(""); setKindFilter("all"); }}>Show all items</button> : <p>Saved artifacts will appear here.</p>}
                 </div>
-                : filteredArtifacts.map(artifact => <button className="artifact-row" type="button" key={artifact.key}
+                : <ArtifactFolders artifacts={filteredArtifacts} workspaces={[...new Set((gallery?.artifacts ?? []).map(item => item.workspace))]} searching={!!query} renderArtifact={(artifact, depth) => <button className="artifact-row" style={{ paddingLeft: depth * 14 + 10 }} type="button" key={artifact.key}
                   title={`${artifact.workspace}/${artifact.name}`} aria-current={!creatingScript && artifact.key === selectedKey ? "true" : undefined}
                   onClick={() => selectArtifact(artifact)} onFocus={event => event.currentTarget.scrollIntoView({ block: "nearest" })}>
+                  <span className="file-icon" aria-hidden="true" />
                   <span className="artifact-row-copy">
                     <span className="artifact-name">{artifact.name}</span>
                     {[...drafts.entries()].some(([key, draft]) => key.startsWith(`${artifact.key}:`) && draft.dirty) ? <span className="workspace-name">Unsaved changes</span> : null}
-                    {scope === "all" ? <span className="workspace-name">{artifact.workspace}</span> : null}
                     {!artifact.working ? <span className="workspace-name">Archived</span> : null}
                   </span>
                   {artifact.kind === "script" ? <span className="row-kind">Script</span> : null}
-                </button>)}
+                </button>} />}
             </div>
-            <div className="library-footer">{query || kindFilter !== "all" ? `${filteredArtifacts.length} of ${gallery?.artifacts.length ?? 0} items` : scope === "all" ? "Across all projects" : "In this project"}
+            <div className="library-footer">{query || kindFilter !== "all" ? `${filteredArtifacts.length} of ${gallery?.artifacts.length ?? 0} items` : null}
               {gallery?.capabilities?.scripts ? <details><summary>Artifacts and scripts</summary><p>Artifacts are interactive apps with a UI and optional backend. Scripts are HTTP handlers that return a response when their URL is called.</p><p>Both have source files, dependencies, history, and their own URL.</p></details> : null}
             </div>
           </aside>
@@ -688,24 +734,12 @@ function App() {
             <button className="back-library" type="button" onClick={() => setMobileDetail(false)} aria-label="Back to library"><span aria-hidden="true">←&nbsp;</span> Library</button>
             <div className="detail-header">
               <div className="detail-title">
-                <p className="detail-eyebrow">{creatingScript ? "Create" : selectedArtifact?.kind === "script" ? "HTTP script" : selectedArtifact ? "Interactive artifact" : "Library"}</p>
                 <h1 ref={detailHeading} tabIndex={-1}>{creatingScript ? "New script" : selectedArtifact?.name ?? "Your artifacts"}</h1>
                 {!creatingScript && selectedArtifact && gallery?.capabilities?.links ? <p className="deployment-status" role="status">
                   {liveRevisionLabel(selectedArtifact)}
                   {drafts.get(`${selectedArtifact.key}:working`)?.dirty ? " · Unsaved changes" : selectedArtifact.live && (drafts.get(`${selectedArtifact.key}:working`)?.content.revision_token ?? selectedArtifact.draftRevision) !== selectedArtifact.live.revision_token ? " · Saved draft; live revision unchanged" : ""}
                 </p> : null}
               </div>
-              {!creatingScript && selectedArtifact && resolvedVersion ? <div className="detail-actions">
-                {gallery?.capabilities?.links ? <button type="button" aria-expanded={showLinks} aria-controls="link-settings-panel" onClick={() => setShowLinks(value => !value)}>Link settings</button> : null}
-                {gallery?.capabilities?.moves && gallery.libraryScope ? <button type="button" aria-expanded={showMove} aria-controls="library-move-panel" onClick={() => { setShowMove(value => !value); setShowLinks(false); setRemixing(false); }}>Move</button> : null}
-                <button type="button" onClick={() => setRemixing(value => !value)} aria-expanded={remixing}>Remix</button>
-                <a className="download-link desktop-download" href={exportUrl} download onClick={downloadSource} title="Export the saved project; unsaved edits are not included">Export project</a>
-                <a className="download-link desktop-download" href={downloadUrl} download onClick={downloadSource}>Download entrypoint</a>
-                <details className="mobile-more"><summary aria-label="More actions">More</summary><a className="download-link" href={exportUrl} download onClick={downloadSource}>Export project</a><a className="download-link" href={downloadUrl} download onClick={downloadSource}>Download entrypoint</a></details>
-                {selectedArtifact.kind !== "script" && selectedArtifact.url ? <a className="download-link open-link" href={selectedArtifact.url} target="_blank" rel="noopener noreferrer">Open<span aria-hidden="true">↗</span></a> : null}
-              </div> : null}
-            </div>
-            {showImport && gallery ? <div className="detail-disclosure"><ProjectImportPanel workspace={gallery.workspace} hosted={!!gallery.capabilities?.links} onCancel={() => setShowImport(false)} onSaved={async (name, kind) => { createdRemix.current = { name, kind, workspace: gallery.workspace }; await loadGallery(); setSelectedVersion("working"); setTab("source"); setQuery(""); setKindFilter("all"); }} /></div> : null}
             {!creatingScript && selectedArtifact && resolvedVersion ? <div className="detail-toolbar">
               <div className="view-control" role="group" aria-label={selectedArtifact.kind === "script" ? "Script view" : "Artifact view"}>
                 {(selectedArtifact.kind === "script"
@@ -713,15 +747,26 @@ function App() {
                   : [["preview", "Preview"], ["source", "Source"], ...(gallery?.capabilities?.links ? [["activity", "Activity"], ["secrets", "Secrets"]] as const : [])] as const
                 ).map(([value, label]) => <button key={value} type="button" aria-pressed={activeTab === value} aria-controls="artifact-panel" onClick={() => setTab(value)}>{label}</button>)}
               </div>
-              <label className="revision-control"><span>Version</span><Select className="version-select" aria-label="Version" value={resolvedVersion} onChange={event => setSelectedVersion(event.target.value)}>
+              <label className="revision-control"><Select className="version-select" aria-label="Version" value={resolvedVersion} onChange={event => setSelectedVersion(event.target.value)}>
                 {selectedArtifact.working ? <option value={WORKING_VERSION}>Working copy</option> : null}
                 {sortedVersions.map(version => <option key={version.id} value={version.id}>Revision {version.revision} · {formatDate(version.createdAt)}</option>)}
               </Select></label>
             </div> : null}
+              {!creatingScript && selectedArtifact && resolvedVersion ? <div className="detail-actions">
+                <button className="primary-action" type="button" aria-expanded={showLinks} aria-controls="link-settings-panel" onClick={() => setShowLinks(value => !value)}>Share</button>
+                {gallery?.capabilities?.moves && gallery.libraryScope ? <button type="button" aria-expanded={showMove} aria-controls="library-move-panel" onClick={() => { setShowMove(value => !value); setShowLinks(false); setRemixing(false); }}>Move</button> : null}
+                <button type="button" onClick={() => setRemixing(value => !value)} aria-expanded={remixing}>Remix</button>
+                <a className="download-link desktop-download" href={exportUrl} download onClick={downloadSource} title="Download source, supporting files, and dependencies; unsaved edits are not included">Download</a>
+                <details className="mobile-more"><summary aria-label="More actions">More</summary><a className="download-link" href={exportUrl} download onClick={downloadSource}>Download</a></details>
+                {selectedArtifact.kind !== "script" && selectedArtifact.url ? <a className="download-link open-link" href={selectedArtifact.url} target="_blank" rel="noopener noreferrer">Open<span aria-hidden="true">↗</span></a> : null}
+              </div> : null}
+            </div>
+            {showImport && gallery ? <div className="detail-disclosure"><ProjectImportPanel workspace={gallery.workspace} hosted={!!gallery.capabilities?.links} onCancel={() => setShowImport(false)} onSaved={async (name, kind) => { createdRemix.current = { name, kind, workspace: gallery.workspace }; await loadGallery(); setSelectedVersion("working"); setTab("source"); setQuery(""); setKindFilter("all"); }} /></div> : null}
+
             {!creatingScript && selectedArtifact?.kind !== "script" && selectedArtifact && resolvedVersion !== "working" && gallery?.capabilities?.links ? <p className="live-data-note"><strong>Live data</strong> · Historical code uses the current database and files and can change them. Restore deploys this code while keeping current data.</p> : null}
             {showMove && !creatingScript && selectedArtifact && gallery?.libraryScope && gallery.capabilities?.moves ? <div id="library-move-panel" className="detail-disclosure"><MovePanel key={selectedArtifact.key} artifact={selectedArtifact} library={gallery.libraryScope} onCancel={() => setShowMove(false)} /></div> : null}
             {remixing && !creatingScript && selectedArtifact && resolvedVersion ? <div className="detail-disclosure"><RemixPanel key={selectedArtifact.key + resolvedVersion} artifact={selectedArtifact} version={resolvedVersion} onCancel={() => setRemixing(false)} onSaved={async name => { createdRemix.current = {name, workspace:selectedArtifact.workspace, kind:selectedArtifact.kind ?? "artifact"}; await loadGallery(); setSelectedVersion("working"); setQuery(""); setKindFilter("all"); setRemixing(false); }} /></div> : null}
-            {!creatingScript && selectedArtifact && gallery?.capabilities?.links ? <div id="link-settings-panel" className="detail-disclosure" hidden={!showLinks}><LinkSettings key={selectedArtifact.key} artifact={selectedArtifact} onSaved={loadGallery} /></div> : null}
+            {!creatingScript && selectedArtifact && resolvedVersion ? <div id="link-settings-panel" className="detail-disclosure" hidden={!showLinks}><LinkSettings key={selectedArtifact.key} artifact={selectedArtifact} localUrl={gallery?.capabilities?.links ? undefined : localShareUrl} onSaved={loadGallery} /></div> : null}
             <section id="artifact-panel" className="artifact-stage" aria-label={selectedArtifact?.kind === "script" || creatingScript ? "Script editor" : activeTab === "preview" ? "Artifact preview" : activeTab === "activity" ? "Artifact activity" : activeTab === "secrets" ? "Artifact secrets" : "Artifact source"}>
               {creatingScript ? <ScriptPanel key="new-script" workspace={gallery?.workspace ?? "default"} onCancel={() => setCreatingScript(false)} onSaved={async name => { createdScriptName.current = name; await loadGallery(); setCreatingScript(false); setSelectedVersion("working"); setTab("source"); setQuery(""); setKindFilter("all"); }} />
                 : selectedArtifact?.kind === "script" ? <ScriptPanel key={`${selectedArtifact.key}:${resolvedVersion}`} artifact={selectedArtifact} workspace={selectedArtifact.workspace} version={resolvedVersion ?? undefined} view={activeTab as ScriptView} sourceUrl={resolvedVersion ? artifactUrl("/api/source", selectedArtifact, resolvedVersion) : undefined} onSaved={async () => { setSelectedVersion("working"); await loadGallery(); }} />

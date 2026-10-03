@@ -9,6 +9,7 @@ import type { ArtifactFileRequest } from "../src/sdk/files";
 import type { GalleryArtifact, GalleryData } from "../src/gallery/types";
 import { CloudArtifactService } from "./service";
 import { parseProjectArchive } from "../src/project-archive";
+import { ownershipName } from "./ownership";
 
 const text = (value: unknown): CallToolResult => ({ content: [{ type: "text", text: JSON.stringify(value, null, 2) }] });
 type Selection = { name?: string; version_id?: string; event_id?: string };
@@ -32,6 +33,25 @@ export class ManagedArtifactService {
 
   private selection(kind: "artifact" | "script", selection: Selection): LibrarySelection {
     return { libraryKey: this.libraryKey, workspace: this.workspace, kind, ...selection };
+  }
+
+  subscribeGallery(all: boolean) {
+    return this.links.fetch(new Request("https://gallery.internal/subscribe", { headers: {
+      Upgrade: "websocket",
+      "x-gallery-selection": JSON.stringify({ libraryKey: this.libraryKey, ...(all ? {} : { workspace: this.workspace }) }),
+    } }));
+  }
+
+  private async callSelectedTool(target: ArtifactTarget, name: string, args: Record<string, unknown>) {
+    const changesGallery = /^(artifact|script)_(write|edit|restore|remix|import|open|link)$/.test(name);
+    try { return await this.physical(target).callTool(name, args); }
+    finally {
+      // A failed compile may still have saved a draft. Resolve current ownership
+      // after the operation, including writes admitted before a library move.
+      if (changesGallery) await this.links.changed({ ...target,
+        ...(name.endsWith("_remix") ? { name: ownershipName(target.kind, args.new_name) } : {}),
+      });
+    }
   }
 
   private async service(kind: "artifact" | "script", selection: Selection) {
@@ -59,12 +79,12 @@ export class ManagedArtifactService {
     if (name.endsWith("_import")) {
       parseProjectArchive(args.archive, kind);
       const target = await this.links.admit(this.selection(kind, { name: args.new_name as string }), true);
-      return this.physical(target).callTool(name, args);
+      return this.callSelectedTool(target, name, args);
     }
     const target = name.endsWith("_remix")
       ? await this.links.admitRemix(selection, args.new_name as string)
       : await this.links.admit(selection, name === "artifact_write" || name === "script_write");
-    return this.physical(target).callTool(name, args);
+    return this.callSelectedTool(target, name, args);
   }
 
   private nativeController() {
@@ -146,7 +166,7 @@ export class ManagedArtifactService {
           : await this.env.LIBRARIES.getByName(target.libraryKey).draftRevision({ workspace: item.workspace, name: item.name });
       }
     }
-    return { capabilities: { scripts: true, links: true, moves: true, nativeApps: !!this.env.NATIVE_APPS }, workspace: this.workspace,
+    return { capabilities: { scripts: true, links: true, moves: true, nativeApps: !!this.env.NATIVE_APPS, subscriptions: true }, workspace: this.workspace,
       artifacts: [...artifacts.values()].sort((a, b) => a.name.localeCompare(b.name) || a.workspace.localeCompare(b.workspace)), nextOffset: hasMore ? offset + 100 : null };
   }
 }

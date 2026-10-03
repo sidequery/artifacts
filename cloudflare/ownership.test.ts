@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { Miniflare } from "miniflare";
+import { openGallerySubscription } from "../src/test/gallery-subscription";
 
 let runtime: Miniflare;
 beforeAll(async () => {
@@ -21,6 +22,33 @@ async function call(binding: "LIBRARIES" | "SCRIPTS" | "LINKS", library: string,
   return result.result;
 }
 const links = (method: string, ...args: unknown[]) => call("LINKS", "deployment", method, ...args);
+
+test("gallery subscriptions isolate owners and workspaces and follow moved physical storage", async () => {
+  const origin = (await runtime.ready).origin;
+  const alice = await openGallerySubscription(`${origin}/?library=watch-alice&workspace=one`);
+  const allAlice = await openGallerySubscription(`${origin}/?library=watch-alice`);
+  const otherWorkspace = await openGallerySubscription(`${origin}/?library=watch-alice&workspace=two`);
+  const bob = await openGallerySubscription(`${origin}/?library=watch-bob&workspace=one`);
+  const team = await openGallerySubscription(`${origin}/?library=team&workspace=one`);
+  const target = { libraryKey: "watch-alice", workspace: "one", kind: "artifact", name: "moving" };
+  try {
+    await call("LIBRARIES", "watch-alice", "writeDraft", { workspace: "one", name: "moving", source: "source" });
+    await links("changed", target);
+    expect(await alice.changes()).toEqual(["changed"]);
+    expect(await allAlice.changes()).toEqual(["changed"]);
+    expect(await otherWorkspace.changes()).toEqual([]);
+    expect(await bob.changes()).toEqual([]);
+    expect(await team.changes()).toEqual([]);
+    await links("move", target, "team");
+    expect(await alice.changes()).toEqual(["changed"]);
+    expect(await team.changes()).toEqual(["changed"]);
+    // An operation admitted before the move completes on the same physical object.
+    await links("changed", target);
+    expect(await alice.changes()).toEqual([]);
+    expect(await team.changes()).toEqual(["changed"]);
+    expect(await bob.changes()).toEqual([]);
+  } finally { for (const connection of [alice, allAlice, otherWorkspace, bob, team]) connection.close(); }
+});
 
 for (const kind of ["artifact", "script"] as const) {
   const binding = kind === "artifact" ? "LIBRARIES" : "SCRIPTS";

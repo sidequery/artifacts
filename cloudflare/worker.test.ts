@@ -6,6 +6,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { chromium } from "playwright";
 import { ROUTING_ARTIFACT } from "../src/test/routing";
+import { openGallerySubscription } from "../src/test/gallery-subscription";
 
 let runtime: Miniflare;
 let runtimeOptions: ConstructorParameters<typeof Miniflare>[0];
@@ -62,6 +63,25 @@ function payload(result: Awaited<ReturnType<Client["callTool"]>>) {
   const content = result.content as { type: string; text: string }[];
   return JSON.parse(content[0]!.text);
 }
+
+test("authenticated gallery subscriptions publish MCP writes and invalid drafts without leaking to team scope", async () => {
+  const personal = await openGallerySubscription(`${origin}/api/gallery/subscribe?workspace=test`, { "x-gallery-selection": JSON.stringify({ libraryKey: "team" }) });
+  const team = await openGallerySubscription(`${origin}/api/gallery/subscribe?workspace=test&library=team`);
+  const otherWorkspace = await openGallerySubscription(`${origin}/api/gallery/subscribe?workspace=another`);
+  try {
+    const result = await client.callTool({ name: "script_write", arguments: { name: "live-subscription", contents: 'export default { fetch() { return new Response("hello"); } };' } });
+    expect(result.isError).not.toBe(true);
+    expect(await personal.changes()).toEqual(["changed"]);
+    expect(await team.changes()).toEqual([]);
+    expect(await otherWorkspace.changes()).toEqual([]);
+    const invalid = await client.callTool({ name: "script_write", arguments: { name: "live-subscription", contents: 'export default { fetch() { return missing; } };' } });
+    expect(invalid.isError).toBe(true);
+    expect(await personal.changes()).toEqual(["changed"]);
+    expect(await team.changes()).toEqual([]);
+    const denied = await fetch(`${origin}/api/gallery/subscribe?workspace=test`, { headers: { Origin: "https://untrusted.example", Upgrade: "websocket" } });
+    expect(denied.status).toBe(403);
+  } finally { personal.close(); team.close(); otherWorkspace.close(); }
+}, 30_000);
 
 test("hosted conditional saves return conflicts and invalid drafts can be corrected with their new token", async () => {
   const name = "guarded-handler";

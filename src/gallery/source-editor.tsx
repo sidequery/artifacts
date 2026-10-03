@@ -10,27 +10,27 @@ import { tags } from "@lezer/highlight";
 
 const externalChange = Annotation.define<boolean>();
 const colors = HighlightStyle.define([
-  { tag: [tags.keyword, tags.modifier], color: "#aebddd" },
-  { tag: [tags.string, tags.special(tags.string)], color: "#b6c6a0" },
-  { tag: [tags.number, tags.bool, tags.null], color: "#d1b58e" },
-  { tag: [tags.comment], color: "#858b91", fontStyle: "italic" },
-  { tag: [tags.typeName, tags.className, tags.tagName], color: "#a8c9c4" },
-  { tag: [tags.function(tags.variableName), tags.attributeName], color: "#c6bfd5" },
+  { tag: [tags.keyword, tags.modifier], color: "var(--syntax-keyword)" },
+  { tag: [tags.string, tags.special(tags.string)], color: "var(--syntax-string)" },
+  { tag: [tags.number, tags.bool, tags.null], color: "var(--syntax-number)" },
+  { tag: [tags.comment], color: "var(--subtle)", fontStyle: "italic" },
+  { tag: [tags.typeName, tags.className, tags.tagName], color: "var(--syntax-type)" },
+  { tag: [tags.function(tags.variableName), tags.attributeName], color: "var(--syntax-function)" },
 ]);
 const theme = EditorView.theme({
-  "&": { height: "100%", backgroundColor: "transparent", color: "#d8dcdf", fontSize: "13px" },
+  "&": { height: "100%", backgroundColor: "transparent", color: "var(--text)", fontSize: "13px" },
   "&.cm-focused": { outline: "none" },
   ".cm-scroller": { overflow: "auto", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace", lineHeight: "1.65" },
-  ".cm-content": { padding: "16px 0", caretColor: "#e3e6e8" },
+  ".cm-content": { padding: "16px 0", caretColor: "var(--text)" },
   ".cm-line": { padding: "0 20px 0 12px" },
-  ".cm-gutters": { backgroundColor: "transparent", color: "#697078", border: "none", padding: "0 8px 0 12px" },
-  ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": { backgroundColor: "#394553" },
-  ".cm-cursor": { borderLeftColor: "#e3e6e8" },
-  ".cm-panels": { backgroundColor: "#202326", color: "#d8dcdf" },
+  ".cm-gutters": { backgroundColor: "transparent", color: "var(--subtle)", border: "none", padding: "0 8px 0 12px" },
+  ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": { backgroundColor: "var(--selected)" },
+  ".cm-cursor": { borderLeftColor: "var(--text)" },
+  ".cm-panels": { backgroundColor: "var(--raised)", color: "var(--text)" },
   ".cm-search": { padding: "8px 12px" },
-  ".cm-textfield": { background: "#17191b", color: "inherit", border: "1px solid #45494d", borderRadius: "0" },
-  ".cm-button": { background: "#2b2e31", color: "inherit", border: "1px solid #45494d", borderRadius: "0" },
-}, { dark: true });
+  ".cm-textfield": { background: "var(--panel)", color: "inherit", border: "1px solid var(--line)", borderRadius: "6px" },
+  ".cm-button": { background: "var(--raised)", color: "inherit", border: "1px solid var(--line)", borderRadius: "6px" },
+});
 
 /** One view, with a separate document, selection, and undo history for each file. */
 export type SourceLocation = { file: string; line?: number; column?: number; request: number };
