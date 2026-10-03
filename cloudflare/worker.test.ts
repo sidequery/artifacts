@@ -569,7 +569,12 @@ test("standalone artifact APIs preserve HTTP semantics and never fall back to th
   expect(headers.authorization).toBe("Bearer application");
   for (const name of ["cookie", "cf-access-jwt-assertion", "cf-access-client-id", "cf-access-client-secret"]) expect(headers[name]).toBeUndefined();
   for (const method of ["GET", "POST"]) expect((await fetch(`${origin}/direct-api/api`, { method, headers: { Origin: "https://evil.example", Cookie: "session=ambient" } })).status).toBe(403);
-  expect((await fetch(`${origin}/direct-api/api`, { method: "POST", body: new Uint8Array(256 * 1024 + 1) })).status).toBe(413);
+  const large = new Uint8Array(512 * 1024).fill(42);
+  const largeResponse = await fetch(`${origin}/direct-api/api`, { method: "POST", body: large });
+  expect(largeResponse.status).toBe(201);
+  expect(new Uint8Array(await largeResponse.arrayBuffer())).toEqual(large);
+  const internalHeaders = await (await fetch(`${origin}/direct-api/api/headers`, { headers: { "x-artifacts-backend": "caller-value" } })).json() as Record<string, string>;
+  expect(internalHeaders["x-artifacts-backend"]).toBe("caller-value");
   const missing = await fetch(`${origin}/direct-api/api/missing`);
   expect(missing.status).toBe(404);
   expect(await missing.json()).toEqual({ error: "API route not found" });
@@ -839,4 +844,47 @@ export class ArtifactServer extends DurableObject { fetch(request: Request) {
   expect(await call("artifact_export", { version_id: versions.versions[0].version_id })).toEqual(exportedArtifact);
   expect((await client.callTool({ name: "artifact_import", arguments: { new_name: "archive-app-copy", archive: exportedArtifact } })).isError).toBe(true);
   await expect(client.callTool({ name: "artifact_import", arguments: { new_name: "archive-reject", archive: { ...exportedArtifact, secrets: {} } } })).rejects.toThrow("Invalid tool arguments");
+}, 60000);
+
+test("artifact secret management keeps values outside history, rotates the backend and starts remixes empty", async () => {
+  const name = "secret-backend";
+  const server = `import { DurableObject } from "cloudflare:workers";
+export class ArtifactServer extends DurableObject<ArtifactEnv> {
+  fetch(request: Request) {
+    this.ctx.storage.sql.exec("create table if not exists visits(n integer)");
+    this.ctx.storage.sql.exec("insert into visits values(1)");
+    return Response.json({ secret: this.env.secrets.TOKEN ?? null, count: this.ctx.storage.sql.exec("select count(*) as n from visits").one().n });
+  }
+}`;
+  const call = async (tool: string, args: Record<string, unknown>) => {
+    const result = await client.callTool({ name: tool, arguments: args });
+    expect(result.isError, JSON.stringify(result.content)).not.toBe(true);
+    return result;
+  };
+  const created = await call("artifact_write", { name, slug: name, contents: source, server, access: "public" });
+  const version_id = (created._meta as any).artifact.versionId;
+  const secret = "fixture-secret-outside-source";
+  expect((await call("artifact_secrets", { name, secrets: { TOKEN: secret } })).structuredContent).toEqual({ ok: true, names: ["TOKEN"] });
+  expect((await call("artifact_secrets", { name })).structuredContent).toEqual({ ok: true, names: ["TOKEN"] });
+  const run = async (name: string, version_id?: string) => {
+    const result = await call("artifact_request", { name, ...(version_id ? { version_id } : {}), request: { path: "/api", method: "GET" } });
+    return JSON.parse(atob((result.structuredContent as any).response.body));
+  };
+  expect(await (await fetch(`${origin}/${name}/api`)).json()).toEqual({ secret, count: 1 });
+  expect(await run(name)).toEqual({ secret, count: 2 });
+  for (const [tool, args] of [["artifact_read", { name, part: "server" }], ["artifact_version", { version_id }], ["artifact_export", { name }]] as const) {
+    expect(JSON.stringify(await call(tool, args))).not.toContain(secret);
+  }
+  await call("artifact_secrets", { name, secrets: { TOKEN: "rotated-fixture" } });
+  expect(await run(name, version_id)).toEqual({ secret: "rotated-fixture", count: 3 });
+  await call("artifact_restore", { version_id });
+  expect(await run(name)).toEqual({ secret: "rotated-fixture", count: 4 });
+  await call("artifact_remix", { name, new_name: "secret-backend-remix" });
+  expect((await call("artifact_secrets", { name: "secret-backend-remix" })).structuredContent).toEqual({ ok: true, names: [] });
+  expect(await run("secret-backend-remix")).toEqual({ secret: null, count: 1 });
+  const archive = (await call("artifact_export", { name })).structuredContent;
+  await call("artifact_import", { new_name: "secret-backend-import", archive });
+  expect(await run("secret-backend-import")).toEqual({ secret: null, count: 1 });
+  await call("artifact_secrets", { name, secrets: { TOKEN: null } });
+  expect(await run(name)).toEqual({ secret: null, count: 5 });
 }, 60000);

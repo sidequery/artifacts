@@ -11,6 +11,7 @@ const sourcePath = "artifact.artifact.tsx";
 const serverPath = "artifact.artifact.server.ts";
 const sdkPath = "src/sdk/index.ts";
 const compilerFiles: Record<string, string> = { ...files, ...browserPlugins.files };
+compilerFiles["artifact-env.d.ts"] = "interface ArtifactEnv { secrets: Record<string, string> }";
 const options: ts.CompilerOptions = {
     target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
     moduleResolution: ts.ModuleResolutionKind.Bundler, jsx: ts.JsxEmit.ReactJSX,
@@ -25,14 +26,14 @@ let currentProject = emptyProject();
 let serverMode = false;
 let scriptMode = false;
 let sourceVersion = 0;
-const serverOptions: ts.CompilerOptions = { ...options, paths: {}, lib: ["lib.es2022.d.ts"] };
+const serverOptions: ts.CompilerOptions = { ...options, paths: {}, lib: ["lib.es2022.d.ts"], types: ["node"] };
 const read = (path: string) => normalize(path) === (serverMode ? serverPath : sourcePath) ? currentSource : currentProject.files[normalize(path)] ?? currentProject.lock[normalize(path)] ?? compilerFiles[normalize(path)];
 // A single bounded language-service project retains the immutable SDK/lib ASTs.
 // Typechecking is synchronous, so overlapping requests cannot observe another
 // source while checking. No per-user project/program cache accumulates here.
 const host: ts.LanguageServiceHost = {
     getCompilationSettings: () => scriptMode ? { ...serverOptions, noImplicitAny: false, types: ["node"] } : serverMode ? serverOptions : options,
-    getScriptFileNames: () => serverMode ? [`/${serverPath}`, "/node_modules/@cloudflare/workers-types/index.d.ts"] : [`/${sourcePath}`],
+    getScriptFileNames: () => serverMode ? [`/${serverPath}`, "/node_modules/@cloudflare/workers-types/index.d.ts", ...(!scriptMode ? ["/artifact-env.d.ts"] : [])] : [`/${sourcePath}`],
     getScriptVersion: path => {
       const file = normalize(path);
       // Keep immutable SDK/lib ASTs cached while invalidating every project

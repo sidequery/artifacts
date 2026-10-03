@@ -4,6 +4,9 @@ The bundled runtime is pinned to celld 0.5.0. This guidance follows the
 [upstream deployment documentation](https://github.com/denoland/celld/blob/v0.5.0/docs/README.md)
 and [security model](https://github.com/denoland/celld/blob/v0.5.0/docs/security.md).
 
+For provider setup, MCP sign-in, database requirements, and library permissions,
+start with [authentication and access](authentication.md#configure-celld).
+
 ## Local persistent host
 
 `artifacts host` (also available as `artifacts server`) runs the packaged app
@@ -27,7 +30,8 @@ For production or multiple machines, use celld's bucket-backed node mode:
    Azure Blob Storage. Not every S3-compatible provider meets the requirements;
    consult the [storage guarantees](https://github.com/denoland/celld/blob/v0.5.0/docs/guarantees.md).
 2. Prepare the Artifacts Worker with `bun run build:package`, configure application
-   authentication and runtime variables, and deploy the prepared Wrangler project
+   [authentication](authentication.md#configure-celld) and runtime variables, and
+   deploy the prepared Wrangler project
    through `celld deploy`. Preserve JavaScript and WASM modules together. Do not
    carry the local template's `ENVIRONMENT=local` authentication bypass into a
    publicly accessible deployment.

@@ -54,6 +54,10 @@ Use `artifacts host install` to enable startup at login. See the
 
 ## Deploy
 
+Configure sign-in before using a network deployment. The
+[authentication guide](docs/authentication.md) covers provider setup, Cloudflare
+Access, MCP OAuth, and troubleshooting. The default local host needs no sign-in.
+
 Both deployment options run the Artifacts application, including the gallery,
 HTTP MCP server, app backends, scripts, storage, and schedules. You own the
 infrastructure and configure who can sign in.
@@ -75,7 +79,7 @@ its data to one.
 Deployments support Cloudflare Access or configurable provider sign-in through
 Better Auth. Personal libraries are private to their owner; admitted team members
 can read and edit the team library. Public links are configured separately from
-library ownership. See [authentication](docs/cloudflare.md#deploy-into-your-own-or-a-shared-account)
+library ownership. See [authentication and access](docs/authentication.md)
 and [link access](docs/scripts.md#access).
 
 ## Build with your agent
@@ -100,6 +104,9 @@ TypeScript scripts before authoring. For example:
 
 > Make a script that checks an endpoint every hour and records the result.
 
+For sign-in steps, supported credentials, and connection failures, see
+[Connect to an existing deployment](docs/authentication.md#connect-to-an-existing-deployment).
+
 The tools support source reads and edits, typechecking, history, restore, remix,
 and execution. MCP Apps clients can also display interactive React artifacts
 inside the conversation. Clients without MCP Apps support still receive tool
@@ -123,6 +130,7 @@ inline views, targeted edits, history, and compatibility with older Canvas sourc
 
 ## Documentation
 
+- [Authentication, MCP sign-in, and access permissions](docs/authentication.md)
 - [Host commands and local persistence](docs/daemon.md)
 - [Deploy to Cloudflare](docs/cloudflare.md)
 - [Deploy celld on your own infrastructure](docs/celld-deployment.md)

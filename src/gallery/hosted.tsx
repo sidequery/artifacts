@@ -1,4 +1,5 @@
-import {ExecutionControls} from "./execution-controls";
+import { ExecutionControls } from "./execution-controls";
+import { SecretControls } from "./secrets";
 import { useEffect, useState } from "react";
 import { ProjectEditor, emptyEditableProject } from "./project-editor";
 import { loadSourceSnapshot, useProjectDraft, type SourceSnapshot } from "./drafts";
@@ -147,8 +148,6 @@ export function ScriptPanel({ artifact, workspace, version, sourceUrl, onSaved, 
   const [method, setMethod] = useState("GET");
   const [headers, setHeaders] = useState("{}");
   const [body, setBody] = useState("");
-  const [secretName, setSecretName] = useState("");
-  const [secretValue, setSecretValue] = useState("");
   const historical = !!artifact && version !== "working";
   useEffect(() => {
     if (draft) return;
@@ -224,18 +223,7 @@ export function ScriptPanel({ artifact, workspace, version, sourceUrl, onSaved, 
         <ExecutionControls key={`${workspace}/${name}`} workspace={workspace} name={name}/>
         <details><summary>Logs</summary><button disabled={busy} onClick={() => void perform(async () => setLogs(show(await galleryTool(workspace, "script_logs", { name }))))}>Load logs</button><pre aria-label="Script logs">{logs}</pre></details>
       </section>
-      <section className="script-activity" aria-label="Script secrets" hidden={view !== "secrets"}>
-        <p>Secrets are available to this script on the server. Their values are never shown in the source editor.</p>
-        <form onSubmit={event => { event.preventDefault(); void perform(async () => { await galleryTool(workspace, "script_secrets", { name, secrets: { [secretName]: secretValue } }); setSecretValue(""); setStatus("Secret saved"); }); }}>
-          <div className="script-fields">
-            <label>Name<input aria-label="Secret name" required value={secretName} onChange={event => setSecretName(event.target.value)} /></label>
-            <label>Value<input aria-label="Secret value" type="password" autoComplete="new-password" value={secretValue} onChange={event => setSecretValue(event.target.value)} /></label>
-            <button disabled={busy}>Save secret</button>
-            <button type="button" disabled={busy || !secretName} onClick={() => void perform(async () => { await galleryTool(workspace, "script_secrets", { name, secrets: { [secretName]: null } }); setSecretValue(""); setStatus("Secret removed"); })}>Remove secret</button>
-          </div>
-        </form>
-        {status ? <p role="status">{status}</p> : null}
-      </section>
+      <div hidden={view !== "secrets"}><SecretControls key={`${workspace}/${name}secrets`} workspace={workspace} name={name} kind="script" /></div>
     </> : null}
   </div>;
 }
