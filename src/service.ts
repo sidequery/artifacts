@@ -23,7 +23,7 @@ import { compileArtifact, type CompileResult } from "./compile";
 import { formatArtifactCheck, type Diagnostic } from "./diagnostics";
 import { createHerdrClient, type HerdrClient, type PanePlacement } from "./herdr";
 import { openArtifact, type OpenResult } from "./open";
-import { typecheckArtifact } from "./typecheck";
+import { typecheckArtifact, typecheckArtifactSource } from "./typecheck";
 import { ArtifactHistory, historyPath, runtimeIdentity } from "./history";
 
 export type ArtifactInfo = {
@@ -214,10 +214,24 @@ export class ArtifactService {
     return join(this.artifactsDir, filename);
   }
 
-  importProject(newName: string, input: unknown) {
+  async createProject(newName: string, input: unknown) {
+    const archive = parseProjectArchive(input, "artifact");
+    const require = createRequire(join(PLUGIN_ROOT, "package.json"));
+    const hostPackages = Object.fromEntries(["react", "react-dom", "react-router"].map(name => [name, require(`${name}/package.json`).version as string]));
+    const project = await resolveProject(archive.project, undefined, fetch, hostPackages);
+    return this.importProject(newName, { ...archive, project }, { validate: true });
+  }
+
+  importProject(newName: string, input: unknown, options: { validate?: boolean } = {}): WriteResult & {
+    applied: boolean; imported: boolean; name: string; kind: ProjectArchive["kind"]; error?: string; runtime_notice?: string;
+  } {
     const archive = parseProjectArchive(input);
     const path = archive.kind === "artifact" ? join(this.artifactsDir, ensureArtifactFileName(newName)) : this.scriptPath(newName);
     const name = archive.kind === "artifact" ? artifactIdFromFile(path) : basename(path, ".script.ts");
+    // Creation validates before reserving a name so users can correct the draft
+    // and retry. Ordinary imports still preserve invalid source snapshots.
+    const checked = options.validate && archive.kind === "artifact" ? typecheckArtifactSource(path, archive.source, archive.project) : undefined;
+    if (checked?.length) return { ok: false, applied: false, imported: false, name, kind: archive.kind, path, check: formatArtifactCheck(checked), error: "Fix the source errors before creating the artifact.", diagnostics: checked.map(item => ({ ...item, file: item.file === path ? basename(path) : item.file })) };
     const history = new ArtifactHistory(historyPath(this.env));
     try {
       history.db.transaction(() => {
@@ -236,7 +250,7 @@ export class ArtifactService {
           if (archive.kind === "artifact") history.capture({ workspace: this.artifactsDir, name, sourcePath: path, source: archive.source, server_source: archive.server_source, project: archive.project, runtime: runtimeIdentity(), reason: "import" });
         } catch (error) { for (const file of created.reverse()) unlinkSync(file); throw error; }
       }).immediate();
-      const diagnostics = archive.kind === "artifact" ? typecheckArtifact(path) : [];
+      const diagnostics = checked ?? (archive.kind === "artifact" ? typecheckArtifact(path) : []);
       return { ok: diagnostics.length === 0, applied: true, imported: true, name, kind: archive.kind, path, check: archive.kind === "artifact" ? formatArtifactCheck(diagnostics) : "Script source imported; a hosted runtime is required to validate and execute it.", diagnostics,
         ...(archive.kind === "script" || archive.server_source !== null ? { runtime_notice: "Filesystem previews do not execute server code or scripts. Deploy this archive in a hosted runtime to validate and run them." } : {}) };
     } finally { history.close(); }

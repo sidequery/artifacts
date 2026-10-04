@@ -16,7 +16,8 @@ test("gallery imports a fresh complete project and exports its saved snapshot th
     const page = await browser.newPage({ acceptDownloads: true, viewport: { width: 1440, height: 960 } });
     await page.route("**/api/session", route => route.fulfill({ json: { authMode: "better-auth", user: { id: "test", name: "Test owner", email: "test@example.test" } } }));
     await page.goto(server.url);
-    await page.getByRole("button", { name: "Import project", exact: true }).click();
+    await page.getByRole("button", { name: "Create or import", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Import project", exact: true }).click();
     await page.getByLabel("Project archive", { exact: true }).setInputFiles({ name: "portable.artifact-project.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(archive)) });
     await page.waitForFunction(() => (document.querySelector('[aria-label="Imported project name"]') as HTMLInputElement)?.value === "portable-import");
     expect(await page.getByText("Includes backend source", { exact: false }).innerText()).toContain("1 helper files");

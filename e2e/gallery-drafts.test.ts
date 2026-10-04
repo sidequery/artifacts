@@ -47,12 +47,14 @@ test("gallery retains complete unsaved projects and new scripts and offers confl
     await page.getByRole("textbox", { name: "Project dependencies" }).fill('{"example":"latest"}');
     await page.getByTitle("default/handler", { exact: true }).click();
     await page.getByRole("textbox", { name: "script.ts", exact: true }).fill("unsaved script");
-    await page.getByRole("button", { name: "New script", exact: true }).click();
+    await page.getByRole("button", { name: "Create or import", exact: true }).click();
+    await page.getByRole("menuitem", { name: "New script", exact: true }).click();
     await page.getByRole("textbox", { name: "Script name", exact: true }).fill("unfinished-handler");
     await page.getByRole("textbox", { name: "script.ts", exact: true }).fill("unfinished new script");
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
     expect(await page.getByRole("textbox", { name: "script.ts", exact: true }).innerText()).toBe("unsaved script");
-    await page.getByRole("button", { name: "New script", exact: true }).click();
+    await page.getByRole("button", { name: "Create or import", exact: true }).click();
+    await page.getByRole("menuitem", { name: "New script", exact: true }).click();
     expect(await page.getByRole("textbox", { name: "Script name", exact: true }).inputValue()).toBe("unfinished-handler");
     expect(await page.getByRole("textbox", { name: "script.ts", exact: true }).innerText()).toBe("unfinished new script");
     await page.getByTitle("default/report", { exact: true }).click();

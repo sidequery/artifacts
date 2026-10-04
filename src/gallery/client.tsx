@@ -4,7 +4,7 @@ import { ArtifactFolders } from "./folders";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { authClient, signInUrl } from "../auth/client-api";
-import type { GalleryArtifact, GalleryData } from "./types";
+import type { GalleryArtifact, GalleryData, GalleryWorker } from "./types";
 import { ExecutionControls } from "./execution-controls";
 import { SecretControls } from "./secrets";
 import { AgentOnboarding, ArtifactSourcePanel, LinkSettings, ScriptPanel, type ScriptView } from "./hosted";
@@ -15,14 +15,19 @@ import { MovePanel } from "./move";
 import { SourceEditor } from "./source-editor";
 import { DraftProvider, confirmLeavingDrafts, useDrafts } from "./drafts";
 import { ProjectImportPanel } from "./project-transfer";
-import { NativeAppsPanel } from "./native-apps";
+import { NativeAppEditor, type NativeAppEditorHandle } from "./native-apps";
 import { fontFaces } from "./brand";
 import { themeStyles } from "./theme";
 import { subscribeGallery } from "./subscription";
 
 type Scope = "current" | "all";
 type DetailTab = "preview" | "source" | "schedule" | "requests" | "settings";
-type KindFilter = "all" | "artifact" | "script";
+type KindFilter = "all" | "artifact" | "script" | "worker";
+type WorkerSelection = { workspace: string; name: string | null };
+function workerSelection(): WorkerSelection | null {
+  const params = new URLSearchParams(window.location.search);
+  return params.get("view") === "workers" ? { workspace: params.get("workspace") ?? "default", name: params.get("app") } : null;
+}
 type SourceState =
   | { status: "idle"; text: ""; error: "" }
   | { status: "loading"; text: ""; error: "" }
@@ -64,7 +69,10 @@ const styles = `
   }
   .gallery-app { display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
   .app-header { display: flex; align-items: center; gap: 16px; min-height: 48px; padding: 8px 16px; flex-shrink: 0; }
-  .wordmark { display: flex; align-items: center; gap: 10px; width: 224px; flex-shrink: 0; font-size: 14px; font-weight: 600; letter-spacing: -.3px; }
+  .library-heading { display: flex; align-items: center; justify-content: space-between; width: 224px; flex-shrink: 0; }
+  .wordmark { font-size: 14px; font-weight: 600; letter-spacing: -.3px; }
+  .create-item { width: 32px; padding: 0; color: var(--muted); font-size: 22px; font-weight: 400; }
+  .create-item[data-popup-open] { background: var(--selected); color: var(--text); }
   .theme-toggle { color: var(--muted); white-space: nowrap; }
   .theme-icon { display: block; width: 15px; height: 15px; border-radius: 50%; }
   .theme-icon.moon { box-shadow: inset 5px -3px 0 0 currentColor; transform: rotate(-15deg); }
@@ -74,8 +82,6 @@ const styles = `
   .header-actions { display: flex; gap: 8px; align-items: center; margin-left: auto; }
   .header-actions .select-control { max-width: 180px; }
   .header-actions select { border-color: transparent; background: transparent; }
-  .new-script { border-color: var(--line); white-space: nowrap; }
-  .new-script span { color: inherit; }
   .account { display: flex; align-items: center; gap: 8px; margin-left: 8px; }
   .account-name { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
   .gallery-layout { display: grid; grid-template-columns: 256px minmax(0, 1fr); flex: 1; min-height: 0; }
@@ -105,11 +111,7 @@ const styles = `
   .artifact-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; }
   .row-kind { flex-shrink: 0; color: var(--subtle); font-size: 11px; }
   .workspace-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--subtle); font-size: 11px; }
-  .library-footer:empty { display: none; }
-  .library-footer { padding: 8px 12px; border-top: 1px solid var(--line); color: var(--subtle); font-size: 11px; }
-  .library-footer details { margin-top: 4px; }
-  .library-footer summary { color: var(--muted); min-height: 24px; padding: 2px 0; }
-  .library-footer p { margin: 6px 0; font-size: 12px; }
+  .library-count { padding: 8px 12px; color: var(--subtle); font-size: 11px; }
   .artifact-detail { display: flex; flex-direction: column; min-width: 0; min-height: 0; margin: 0 6px 6px 0; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
   .detail-header { display: flex; gap: 16px; align-items: center; justify-content: space-between; padding: 10px 16px; flex-shrink: 0; flex-wrap: nowrap; border-bottom: 1px solid var(--line); }
   .detail-title { min-width: 0; flex: 1; }
@@ -144,7 +146,7 @@ const styles = `
   .source-form > .script-fields { padding: 12px 16px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
   .source-actions { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--line); flex-shrink: 0; }
   .source-actions p { margin: 0; color: var(--muted); }
-  .gallery-app button.primary-action, .gallery-app .new-script { background: var(--primary); color: var(--primary-text); border-color: var(--primary); font-weight: 600; }
+  .gallery-app button.primary-action { background: var(--primary); color: var(--primary-text); border-color: var(--primary); font-weight: 600; }
   button.primary-action:disabled { opacity: .45; }
   .deployment-status { margin: 6px 0 0; color: var(--muted); }
   .save-feedback { padding: 8px 16px; flex-shrink: 0; max-height: 30vh; overflow: auto; }
@@ -216,12 +218,12 @@ const styles = `
     button:hover:not(:disabled), .download-link:hover { background: var(--raised); }
     .gallery-app button.primary-action:hover:not(:disabled) { background: var(--primary-hover); }
     .artifact-row[aria-current="true"]:hover { background: var(--selected); }
-    .gallery-app .new-script:hover { background: var(--primary-hover); }
+    .create-item:hover { background: var(--raised); color: var(--text); }
     .view-control button:hover:not([data-active]), .library-filters button:hover:not([aria-pressed="true"]) { color: var(--text); background: transparent; }
   }
   @media (max-width: 1100px) {
     .gallery-layout { grid-template-columns: 232px minmax(0, 1fr); }
-    .wordmark { width: 200px; }
+    .library-heading { width: 200px; }
     .detail-header { gap: 8px; padding-inline: 12px; }
     .detail-actions { max-width: 300px; }
     .revision-control > span:not(.select-control) { display: none; }
@@ -229,7 +231,8 @@ const styles = `
   }
   @media (max-width: 760px) {
     .app-header { min-height: 52px; padding: 6px 12px; gap: 10px; }
-    .wordmark { font-size: 14px; width: auto; }
+    .library-heading { width: auto; flex: 1; gap: 16px; }
+    .create-item { width: 44px; height: 44px; }
     .app-header { flex-wrap: wrap; }
     .header-actions { flex-wrap: wrap; }
     .artifact-detail { margin: 0 4px 4px; }
@@ -237,7 +240,6 @@ const styles = `
     .header-actions { gap: 4px; }
     .header-actions .select-control { max-width: 130px; }
     .account { margin-left: 0; }
-    .new-script { font-size: 12px; }
     .gallery-layout { display: flex; flex: 1; }
     .library-panel, .artifact-detail { width: 100%; flex: 1; }
     .library-panel { border-right: 0; }
@@ -357,8 +359,13 @@ function App() {
     try { localStorage.setItem("artifacts-theme", theme); } catch { /* The theme still works when storage is unavailable. */ }
   }, [theme]);
   const [remixing, setRemixing] = useState(false);
-  const [creatingScript, setCreatingScript] = useState(false);
-  const [showNativeApps, setShowNativeApps] = useState(() => new URLSearchParams(window.location.search).get("view") === "workers");
+  const [creatingKind, setCreatingKind] = useState<"artifact" | "script" | null>(null);
+  const [selectedWorker, setSelectedWorker] = useState(workerSelection);
+  const showNativeApps = selectedWorker !== null;
+  const workerEditor = useRef<NativeAppEditorHandle>(null);
+  // Selecting another item resets its editor; saving a new app keeps its feedback and draft state.
+  const workerEditorKey = useRef(0);
+  const navigationUrl = useRef(window.location.href);
   const scope: Scope = "all";
   const [query, setQuery] = useState("");
   const [kindFilter, setKindFilter] = useState<KindFilter>("all");
@@ -366,7 +373,7 @@ function App() {
   const [showMove, setShowMove] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [sourceVisited, setSourceVisited] = useState<string | null>(null);
-  const [mobileDetail, setMobileDetail] = useState(false);
+  const [mobileDetail, setMobileDetail] = useState(() => workerSelection() !== null);
   const [narrowLayout, setNarrowLayout] = useState(() => window.matchMedia("(max-width: 760px)").matches);
   const detailHeading = useRef<HTMLHeadingElement>(null);
   const libraryPanel = useRef<HTMLElement>(null);
@@ -390,7 +397,6 @@ function App() {
   const [signingOut, setSigningOut] = useState(false);
   const [accountError, setAccountError] = useState("");
   const createdRemix = useRef<{name:string;workspace:string;kind:string} | null>(null);
-  const createdScriptName = useRef<string | null>(null);
   const galleryController = useRef<AbortController | null>(null);
   const galleryRequest = useRef(0);
   const sourceRequest = useRef(0);
@@ -421,6 +427,7 @@ function App() {
       let offset = 0;
       let payload: GalleryData;
       const artifacts = new Map<string, GalleryArtifact>();
+      const workerApps = new Map<string, GalleryWorker>();
       do {
         const response = await fetch(galleryUrl(scope, offset), {
           signal: controller.signal,
@@ -435,7 +442,8 @@ function App() {
           const versions = new Map([...(previous?.versions ?? []), ...artifact.versions].map(version => [version.id, version]));
           artifacts.set(artifact.key, { ...artifact, working: artifact.working || !!previous?.working, versions: [...versions.values()] });
         }
-        payload = { ...page, artifacts: [...artifacts.values()].sort((a, b) => a.name.localeCompare(b.name) || a.workspace.localeCompare(b.workspace)) };
+        for (const worker of page.workerApps ?? []) workerApps.set(worker.key, worker);
+        payload = { ...page, workerApps: [...workerApps.values()], artifacts: [...artifacts.values()].sort((a, b) => a.name.localeCompare(b.name) || a.workspace.localeCompare(b.workspace)) };
         if (page.nextOffset === undefined || page.nextOffset === null) break;
         if (!Number.isSafeInteger(page.nextOffset) || page.nextOffset <= offset) throw new Error("Invalid gallery pagination.");
         offset = page.nextOffset;
@@ -449,13 +457,10 @@ function App() {
           return before && JSON.stringify(before) === JSON.stringify(item) ? before : item;
         }) };
       });
-      const created = createdScriptName.current;
-      createdScriptName.current = null;
       const remix = createdRemix.current;
       createdRemix.current = null;
       setSelectedKey((current) => {
         if (remix) return payload.artifacts.find(artifact => (artifact.kind ?? "artifact") === remix.kind && artifact.name === remix.name && artifact.workspace === remix.workspace)?.key ?? current;
-        if (created) return payload.artifacts.find(artifact => artifact.kind === "script" && artifact.name === created)?.key ?? current;
         if (current && payload.artifacts.some((artifact) => artifact.key === current)) return current;
         const selection = new URLSearchParams(window.location.search);
         return payload.artifacts.find(item => item.name === selection.get("name") && item.workspace === (selection.get("workspace") ?? payload.workspace) && (item.kind ?? "artifact") === (selection.get("kind") ?? "artifact"))?.key ?? payload.artifacts[0]?.key ?? null;
@@ -496,13 +501,15 @@ function App() {
     return () => controller.abort();
   }, []);
 
+  const libraryItems = useMemo(() => [...(gallery?.artifacts ?? []), ...(gallery?.workerApps ?? [])]
+    .sort((a, b) => a.name.localeCompare(b.name) || a.workspace.localeCompare(b.workspace)), [gallery]);
   const filteredArtifacts = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
-    return (gallery?.artifacts ?? []).filter((artifact) =>
+    return libraryItems.filter((artifact) =>
       (kindFilter === "all" || (artifact.kind ?? "artifact") === kindFilter) &&
       (!normalized || `${artifact.name}\n${artifact.workspace}`.toLocaleLowerCase().includes(normalized)),
     );
-  }, [gallery, query, kindFilter]);
+  }, [libraryItems, query, kindFilter]);
 
   const selectedArtifact = useMemo(
     () => gallery?.artifacts.find((artifact) => artifact.key === selectedKey) ?? null,
@@ -636,18 +643,27 @@ function App() {
   }, [previewUrl, activeTab]);
 
   const selectArtifact = (artifact: GalleryArtifact) => {
+    const leavingWorker = showNativeApps;
+    if (!leaveWorker()) return;
     if (narrowLayout && !mobileDetail) setPreviewLoading(true);
     setMobileDetail(true);
     setShowLinks(false);
     setShowMove(false);
-    setCreatingScript(false);
+    setCreatingKind(null);
     setRemixing(false);
     setSelectedKey(artifact.key);
     setSelectedVersion(artifact.working ? WORKING_VERSION : [...artifact.versions].sort((a, b) => b.revision - a.revision)[0]?.id ?? null);
+    const url = new URL(window.location.href);
+    url.searchParams.set("name", artifact.name);
+    url.searchParams.set("workspace", artifact.workspace);
+    url.searchParams.set("kind", artifact.kind ?? "artifact");
+    if (leavingWorker) window.history.replaceState(null, "", url);
+    else window.history.pushState(null, "", url);
+    navigationUrl.current = url.href;
   };
 
   const signOut = async () => {
-    if (!confirmLeavingDrafts(drafts)) return;
+    if (!workerCanLeave() || !confirmLeavingDrafts(drafts)) return;
     setSigningOut(true);
     setAccountError("");
     try {
@@ -660,25 +676,83 @@ function App() {
     }
   };
 
-  function workerDestination(open: boolean) {
-    if (open === showNativeApps) return;
+  function workerCanLeave() { return workerEditor.current?.canLeave() ?? true; }
+  function startCreating(kind: "artifact" | "script") {
+    if (!leaveWorker()) return;
+    setCreatingKind(kind);
+    setTab("source");
+    setShowImport(false);
+    setRemixing(false);
+    setShowLinks(false);
+    setShowMove(false);
+    setMobileDetail(true);
+  }
+  async function createdItem(name: string, kind: "artifact" | "script") {
+    createdRemix.current = { name, kind, workspace: gallery?.workspace ?? "default" };
+    await loadGallery();
+    setCreatingKind(null);
+    setSelectedVersion("working");
+    setTab(kind === "artifact" ? "preview" : "source");
+    setQuery("");
+    setKindFilter("all");
+  }
+  function leaveWorker() {
+    if (!showNativeApps) return true;
+    if (!workerCanLeave()) return false;
     const url = new URL(window.location.href);
-    if (open) url.searchParams.set("view", "workers");
-    else { url.searchParams.delete("view"); url.searchParams.delete("app"); url.searchParams.delete("appTab"); }
+    url.searchParams.delete("view"); url.searchParams.delete("app"); url.searchParams.delete("appTab");
     window.history.pushState(null, "", url);
-    setShowNativeApps(open);
+    navigationUrl.current = url.href;
+    setSelectedWorker(null);
+    return true;
+  }
+  function selectWorker(selection: WorkerSelection) {
+    if (selection.name === selectedWorker?.name && selection.workspace === selectedWorker?.workspace) {
+      setMobileDetail(true);
+      return;
+    }
+    if (!workerCanLeave()) return;
+    workerEditorKey.current++;
+    const url = new URL(window.location.href);
+    url.searchParams.set("view", "workers");
+    url.searchParams.set("workspace", selection.workspace);
+    url.searchParams.delete("name"); url.searchParams.delete("kind");
+    if (selection.name) url.searchParams.set("app", selection.name); else url.searchParams.delete("app");
+    url.searchParams.set("appTab", "source");
+    window.history.pushState(null, "", url);
+    navigationUrl.current = url.href;
+    setSelectedWorker(selection);
+    setCreatingKind(null);
+    setShowImport(false);
+    setMobileDetail(true);
   }
   useEffect(() => {
-    // Worker apps can restore the URL when browser navigation would discard a draft.
-    const navigate = () => window.setTimeout(() => setShowNativeApps(new URLSearchParams(window.location.search).get("view") === "workers"), 0);
+    const navigate = () => {
+      const next = workerSelection();
+      const changingItem = next?.name !== selectedWorker?.name || next?.workspace !== selectedWorker?.workspace;
+      if (changingItem && !workerCanLeave()) {
+        window.history.pushState(null, "", navigationUrl.current);
+        return;
+      }
+      if (changingItem) workerEditorKey.current++;
+      navigationUrl.current = window.location.href;
+      setSelectedWorker(next);
+      if (next) setMobileDetail(true);
+      else {
+        const params = new URLSearchParams(window.location.search);
+        const item = gallery?.artifacts.find(item => item.name === params.get("name") && item.workspace === params.get("workspace") && (item.kind ?? "artifact") === (params.get("kind") ?? "artifact"));
+        if (item) setSelectedKey(item.key);
+      }
+    };
     window.addEventListener("popstate", navigate);
     return () => window.removeEventListener("popstate", navigate);
-  }, []);
+  }, [selectedWorker, gallery]);
   useEffect(() => {
     if (showNativeApps) return;
     const url = new URL(window.location.href);
     url.searchParams.set("tab", activeTab);
     window.history.replaceState(null, "", url);
+    navigationUrl.current = url.href;
   }, [activeTab, showNativeApps]);
 
   const downloadSource = async (event: React.MouseEvent<HTMLAnchorElement>) => {
@@ -705,42 +779,49 @@ function App() {
       <style>{styles}</style>
       <main className="gallery-app">
         <header className="app-header">
-          <span className="wordmark">Artifacts</span>
+          <div className="library-heading">
+            <span className="wordmark">Artifacts</span>
+            <Menu.Root>
+              <Menu.Trigger className="create-item" aria-label="Create or import" title="Create or import" disabled={!gallery}><span aria-hidden="true">+</span></Menu.Trigger>
+              <Menu.Portal><Menu.Positioner sideOffset={6} align="end"><Menu.Popup className="action-menu">
+                <Menu.Item onClick={() => startCreating("artifact")}>New artifact</Menu.Item>
+                {gallery?.capabilities?.scripts ? <Menu.Item onClick={() => startCreating("script")}>New script</Menu.Item> : null}
+                {gallery?.capabilities?.nativeApps ? <Menu.Item onClick={() => selectWorker({ workspace: gallery.workspace, name: null })}>New Worker app</Menu.Item> : null}
+                <Menu.Item onClick={() => { if (!leaveWorker()) return; setShowImport(true); setCreatingKind(null); setMobileDetail(true); }}>Import project</Menu.Item>
+              </Menu.Popup></Menu.Positioner></Menu.Portal>
+            </Menu.Root>
+          </div>
           {gallery?.workspace ? <span className="header-context" title={gallery.workspace}>{gallery.workspace.split(/[\\/]/).filter(Boolean).at(-1) ?? gallery.workspace}</span> : null}
           <div className="header-actions">
             <button className="theme-toggle" type="button" title={`Switch to ${theme === "light" ? "dark" : "light"} theme`} aria-label={`Switch to ${theme === "light" ? "dark" : "light"} theme`} onClick={() => setTheme(theme === "light" ? "dark" : "light")}><span className={`theme-icon ${theme === "light" ? "moon" : "sun"}`} aria-hidden="true" /></button>
-            {gallery?.capabilities?.nativeApps ? <button type="button" aria-current={showNativeApps ? "page" : undefined} onClick={() => workerDestination(true)}>Worker apps</button> : null}
-            <button hidden={showNativeApps} type="button" onClick={() => { setShowImport(true); setCreatingScript(false); setMobileDetail(true); }}>Import project</button>
             {gallery?.libraryScope ? <Select aria-label="Library" value={gallery.libraryScope} onChange={event => {
-              if (!confirmLeavingDrafts(drafts)) return;
+              if (!workerCanLeave() || !confirmLeavingDrafts(drafts)) return;
               const url = new URL(window.location.href);
               url.searchParams.set("library", event.target.value);
               window.location.assign(url.href);
             }}><option value="private">Personal library</option><option value="team">Team library</option></Select> : null}
-            {gallery?.capabilities?.scripts ? <button hidden={showNativeApps} className="new-script" onClick={() => { setCreatingScript(true); setRemixing(false); setShowLinks(false); setShowMove(false); setMobileDetail(true); }}><span aria-hidden="true">+</span>New script</button> : null}
             {user ? <div className="account">
               <span className="account-name" title={user.email}>{user.name}</span>
               <button type="button" disabled={signingOut} onClick={() => void signOut()}>{signingOut ? "Signing out…" : "Sign out"}</button>
             </div> : null}
           </div>
         </header>
-        {showNativeApps && gallery ? <NativeAppsPanel workspace={gallery?.workspace ?? "default"} onClose={() => workerDestination(false)} /> : null}
 
         {galleryError && gallery ? <p role="alert" className="refresh-error error-message">Refresh failed: {galleryError}. Showing the last loaded files.</p> : null}
         {accountError ? <p role="alert" className="refresh-error error-message">{accountError}</p> : null}
 
-        <div className="gallery-layout" hidden={showNativeApps}>
-          <aside ref={libraryPanel} className="library-panel" hidden={narrowLayout && mobileDetail} aria-label={gallery?.capabilities?.scripts ? "Artifacts and scripts" : "Artifacts"}>
+        <div className="gallery-layout">
+          <aside ref={libraryPanel} className="library-panel" hidden={narrowLayout && mobileDetail} aria-label={gallery?.capabilities?.nativeApps ? "Artifacts library" : gallery?.capabilities?.scripts ? "Artifacts and scripts" : "Artifacts"}>
             {!liveConnected ? <p className="connection-status" role="status">Reconnecting to live updates…</p> : null}
             <div className="library-search">
               <input ref={searchInput} className="search-input" type="search"
-                aria-label={gallery?.capabilities?.scripts ? "Search artifacts and scripts" : "Search artifacts"}
+                aria-label={gallery?.capabilities?.nativeApps ? "Search library" : gallery?.capabilities?.scripts ? "Search artifacts and scripts" : "Search artifacts"}
                 value={query} onChange={event => setQuery(event.target.value)} placeholder="Search"
                 autoComplete="off" spellCheck={false} data-lpignore="true" data-1p-ignore />
               {query ? <button type="button" className="clear-search" aria-label="Clear search" onClick={() => { setQuery(""); searchInput.current?.focus(); }}><span aria-hidden="true">×</span></button> : null}
             </div>
-            {gallery?.capabilities?.scripts ? <div className="library-filters" role="group" aria-label="Filter library">
-              {([['all', 'All'], ['artifact', 'Artifacts'], ['script', 'Scripts']] as const).map(([value, label]) =>
+            {gallery?.capabilities?.scripts || gallery?.capabilities?.nativeApps ? <div className="library-filters" role="group" aria-label="Filter library">
+              {([['all', 'All'], ['artifact', 'Artifacts'], ...(gallery?.capabilities?.scripts ? [['script', 'Scripts']] : []), ...(gallery?.capabilities?.nativeApps ? [['worker', 'Workers']] : [])] as [KindFilter, string][]).map(([value, label]) =>
                 <button type="button" key={value} aria-pressed={kindFilter === value} onClick={() => setKindFilter(value)}>{label}</button>)}
             </div> : null}
             <div className="artifact-list">
@@ -749,33 +830,35 @@ function App() {
                   <p className="error-message">{galleryError}</p><button type="button" onClick={() => void loadGallery()}>Try again</button>
                 </div>
                 : filteredArtifacts.length === 0 ? <div className="library-empty">
-                  <p>{query ? "No matches" : kindFilter !== "all" ? `No ${kindFilter === "script" ? "scripts" : "artifacts"}` : "Your library is empty"}</p>
+                  <p>{query ? "No matches" : kindFilter !== "all" ? `No ${kindFilter === "script" ? "scripts" : kindFilter === "worker" ? "Worker apps" : "artifacts"}` : "Your library is empty"}</p>
                   {query || kindFilter !== "all" ? <button type="button" onClick={() => { setQuery(""); setKindFilter("all"); }}>Show all items</button> : <p>Saved artifacts will appear here.</p>}
                 </div>
-                : <ArtifactFolders artifacts={filteredArtifacts} workspaces={[...new Set((gallery?.artifacts ?? []).map(item => item.workspace))]} searching={!!query} renderArtifact={(artifact, depth) => <button className="artifact-row" style={{ paddingLeft: depth * 14 + 10 }} type="button" key={artifact.key}
-                  title={`${artifact.workspace}/${artifact.name}`} aria-current={!creatingScript && artifact.key === selectedKey ? "true" : undefined}
-                  onClick={() => selectArtifact(artifact)} onFocus={event => event.currentTarget.scrollIntoView({ block: "nearest" })}>
+                : <ArtifactFolders artifacts={filteredArtifacts} workspaces={[...new Set(libraryItems.map(item => item.workspace))]} searching={!!query} renderArtifact={(artifact, depth) => <button className="artifact-row" style={{ paddingLeft: depth * 14 + 10 }} type="button" key={artifact.key}
+                  title={`${artifact.workspace}/${artifact.name}`} aria-current={(artifact.kind === "worker" ? selectedWorker?.name === artifact.name && selectedWorker.workspace === artifact.workspace : !showNativeApps && !creatingKind && artifact.key === selectedKey) ? "true" : undefined}
+                  onClick={() => artifact.kind === "worker" ? selectWorker(artifact) : selectArtifact(artifact)} onFocus={event => event.currentTarget.scrollIntoView({ block: "nearest" })}>
                   <span className="file-icon" aria-hidden="true" />
                   <span className="artifact-row-copy">
                     <span className="artifact-name">{artifact.name}</span>
                     {[...drafts.entries()].some(([key, draft]) => key.startsWith(`${artifact.key}:`) && draft.dirty) ? <span className="workspace-name">Unsaved changes</span> : null}
-                    {!artifact.working ? <span className="workspace-name">Archived</span> : null}
+                    {artifact.kind === "worker" ? <span className="workspace-name">{artifact.status.replaceAll("-", " ")}</span> : !artifact.working ? <span className="workspace-name">Archived</span> : null}
                   </span>
-                  {artifact.kind === "script" ? <span className="row-kind">Script</span> : null}
+                  {artifact.kind === "script" ? <span className="row-kind">Script</span> : artifact.kind === "worker" ? <span className="row-kind">Worker</span> : null}
                 </button>} />}
             </div>
-            <div className="library-footer">{query || kindFilter !== "all" ? `${filteredArtifacts.length} of ${gallery?.artifacts.length ?? 0} items` : null}
-              {gallery?.capabilities?.scripts ? <details><summary>Artifacts and scripts</summary><p>Artifacts are interactive apps with a UI and optional backend. Scripts are HTTP handlers that return a response when their URL is called.</p><p>Both have source files, dependencies, history, and their own URL.</p></details> : null}
-            </div>
+            {query || kindFilter !== "all" ? <div className="library-count">{filteredArtifacts.length} of {libraryItems.length} items</div> : null}
           </aside>
 
-          <Tabs.Root value={activeTab} onValueChange={value => setTab(value as DetailTab)} className="artifact-detail" hidden={narrowLayout && !mobileDetail}>
+          {selectedWorker && gallery ? <NativeAppEditor ref={workerEditor} key={workerEditorKey.current} workspace={selectedWorker.workspace} appName={selectedWorker.name}
+            providers={gallery.nativeAppProviders ?? []} hidden={narrowLayout && !mobileDetail} onSaved={loadGallery}
+            onNavigate={name => { navigationUrl.current = window.location.href; setSelectedWorker(name ? { ...selectedWorker, name } : null); if (!name) setMobileDetail(false); }}
+            onBack={() => { if (narrowLayout) setMobileDetail(false); else leaveWorker(); }} /> : null}
+          {!showNativeApps ? <Tabs.Root value={activeTab} onValueChange={value => setTab(value as DetailTab)} className="artifact-detail" hidden={narrowLayout && !mobileDetail}>
             <div className="detail-header">
               <button className="back-library" type="button" onClick={() => setMobileDetail(false)} aria-label="Back to library"><span aria-hidden="true">←</span></button>
               <div className="detail-title">
-                <h1 ref={detailHeading} tabIndex={-1}>{creatingScript ? "New script" : selectedArtifact?.name ?? "Your artifacts"}</h1>
+                <h1 ref={detailHeading} tabIndex={-1}>{creatingKind ? `New ${creatingKind}` : selectedArtifact?.name ?? "Your artifacts"}</h1>
               </div>
-            {!creatingScript && selectedArtifact && resolvedVersion ? <>
+            {!creatingKind && selectedArtifact && resolvedVersion ? <>
               <Tabs.List className="view-control" activateOnFocus aria-label={selectedArtifact.kind === "script" ? "Script view" : "Artifact view"}>
                 {(selectedArtifact.kind === "script"
                   ? [["source", "Source"], ["requests", "Requests"]] as const
@@ -783,7 +866,7 @@ function App() {
                 ).map(([value, label]) => <Tabs.Tab key={value} value={value}>{label}</Tabs.Tab>)}
               </Tabs.List>
             </> : null}
-              {!creatingScript && selectedArtifact && resolvedVersion ? <div className="detail-actions">
+              {!creatingKind && selectedArtifact && resolvedVersion ? <div className="detail-actions">
                 <button className="primary-action" type="button" aria-expanded={showLinks} aria-controls="link-settings-panel" onClick={() => setShowLinks(value => !value)}>Share</button>
                 {selectedArtifact.kind !== "script" && selectedArtifact.url ? <a className="download-link open-link" href={selectedArtifact.url} target="_blank" rel="noopener noreferrer">Open<span aria-hidden="true">↗</span></a> : null}
                 <Menu.Root>
@@ -810,12 +893,13 @@ function App() {
             </div>
             {showImport && gallery ? <div className="detail-disclosure"><ProjectImportPanel workspace={gallery.workspace} hosted={!!gallery.capabilities?.links} onCancel={() => setShowImport(false)} onSaved={async (name, kind) => { createdRemix.current = { name, kind, workspace: gallery.workspace }; await loadGallery(); setSelectedVersion("working"); setTab("source"); setQuery(""); setKindFilter("all"); }} /></div> : null}
 
-            {!creatingScript && selectedArtifact?.kind !== "script" && selectedArtifact && resolvedVersion !== "working" && gallery?.capabilities?.links ? <p className="live-data-note"><strong>Live data</strong> · Historical code uses the current database and files and can change them. Restore deploys this code while keeping current data.</p> : null}
-            {showMove && !creatingScript && selectedArtifact && gallery?.libraryScope && gallery.capabilities?.moves ? <div id="library-move-panel" className="detail-disclosure"><MovePanel key={selectedArtifact.key} artifact={selectedArtifact} library={gallery.libraryScope} onCancel={() => setShowMove(false)} /></div> : null}
-            {remixing && !creatingScript && selectedArtifact && resolvedVersion ? <div className="detail-disclosure"><RemixPanel key={selectedArtifact.key + resolvedVersion} artifact={selectedArtifact} version={resolvedVersion} onCancel={() => setRemixing(false)} onSaved={async name => { createdRemix.current = {name, workspace:selectedArtifact.workspace, kind:selectedArtifact.kind ?? "artifact"}; await loadGallery(); setSelectedVersion("working"); setQuery(""); setKindFilter("all"); setRemixing(false); }} /></div> : null}
-            {!creatingScript && selectedArtifact && resolvedVersion ? <div id="link-settings-panel" className="detail-disclosure" hidden={!showLinks}><LinkSettings key={selectedArtifact.key} artifact={selectedArtifact} localUrl={gallery?.capabilities?.links ? undefined : localShareUrl} onSaved={loadGallery} /></div> : null}
-            <Tabs.Panel value={activeTab} id="artifact-panel" className="artifact-stage" aria-label={selectedArtifact?.kind === "script" || creatingScript ? "Script editor" : activeTab === "preview" ? "Artifact preview" : activeTab === "schedule" ? "Artifact schedule" : activeTab === "settings" ? "Artifact settings" : "Artifact source"}>
-              {creatingScript ? <ScriptPanel key="new-script" workspace={gallery?.workspace ?? "default"} onCancel={() => setCreatingScript(false)} onSaved={async name => { createdScriptName.current = name; await loadGallery(); setCreatingScript(false); setSelectedVersion("working"); setTab("source"); setQuery(""); setKindFilter("all"); }} />
+            {!creatingKind && selectedArtifact?.kind !== "script" && selectedArtifact && resolvedVersion !== "working" && gallery?.capabilities?.links ? <p className="live-data-note"><strong>Live data</strong> · Historical code uses the current database and files and can change them. Restore deploys this code while keeping current data.</p> : null}
+            {showMove && !creatingKind && selectedArtifact && gallery?.libraryScope && gallery.capabilities?.moves ? <div id="library-move-panel" className="detail-disclosure"><MovePanel key={selectedArtifact.key} artifact={selectedArtifact} library={gallery.libraryScope} onCancel={() => setShowMove(false)} /></div> : null}
+            {remixing && !creatingKind && selectedArtifact && resolvedVersion ? <div className="detail-disclosure"><RemixPanel key={selectedArtifact.key + resolvedVersion} artifact={selectedArtifact} version={resolvedVersion} onCancel={() => setRemixing(false)} onSaved={async name => { createdRemix.current = {name, workspace:selectedArtifact.workspace, kind:selectedArtifact.kind ?? "artifact"}; await loadGallery(); setSelectedVersion("working"); setQuery(""); setKindFilter("all"); setRemixing(false); }} /></div> : null}
+            {!creatingKind && selectedArtifact && resolvedVersion ? <div id="link-settings-panel" className="detail-disclosure" hidden={!showLinks}><LinkSettings key={selectedArtifact.key} artifact={selectedArtifact} localUrl={gallery?.capabilities?.links ? undefined : localShareUrl} onSaved={loadGallery} /></div> : null}
+            <Tabs.Panel value={activeTab} id="artifact-panel" className="artifact-stage" aria-label={creatingKind === "artifact" ? "Artifact source" : selectedArtifact?.kind === "script" || creatingKind === "script" ? "Script editor" : activeTab === "preview" ? "Artifact preview" : activeTab === "schedule" ? "Artifact schedule" : activeTab === "settings" ? "Artifact settings" : "Artifact source"}>
+              {creatingKind === "artifact" ? <ArtifactSourcePanel key="new-artifact" workspace={gallery?.workspace ?? "default"} hosted={!!gallery?.capabilities?.links} onCancel={() => setCreatingKind(null)} onSaved={name => createdItem(name, "artifact")} />
+                : creatingKind === "script" ? <ScriptPanel key="new-script" workspace={gallery?.workspace ?? "default"} onCancel={() => setCreatingKind(null)} onSaved={name => createdItem(name, "script")} />
                 : selectedArtifact?.kind === "script" ? <ScriptPanel key={`${selectedArtifact.key}:${resolvedVersion}`} artifact={selectedArtifact} workspace={selectedArtifact.workspace} version={resolvedVersion ?? undefined} view={activeTab as ScriptView} sourceUrl={resolvedVersion ? artifactUrl("/api/source", selectedArtifact, resolvedVersion) : undefined} onSaved={async () => { setSelectedVersion("working"); await loadGallery(); }} />
                 : !selectedArtifact && !loading && gallery?.capabilities?.links ? <AgentOnboarding workspace={gallery.workspace} />
                 : !selectedArtifact ? <div className="empty-detail"><h2>{loading ? "Loading your library…" : "Your library"}</h2><p>{loading ? "Your saved artifacts will appear shortly." : "Select an artifact or script to open it."}</p></div>
@@ -835,7 +919,7 @@ function App() {
                   {gallery?.capabilities?.links ? <div id="execution-panel" className="artifact-execution" hidden={activeTab !== "schedule"}><ExecutionControls key={selectedArtifact.key + "execution"} workspace={selectedArtifact.workspace} name={selectedArtifact.name} kind="artifact" active={activeTab === "schedule"} /></div> : null}
                 </>}
             </Tabs.Panel>
-          </Tabs.Root>
+          </Tabs.Root> : null}
         </div>
       </main>
     </>

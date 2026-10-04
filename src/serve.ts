@@ -114,7 +114,9 @@ export async function createArtifactServer(opts: CreateArtifactServerOptions): P
               const service = new ArtifactService({ artifactsDir, env: { ...env, ARTIFACTS_HISTORY_DB: history.path } });
               if (body.name === "artifact_import") {
                 const archive = parseProjectArchive(body.arguments.archive, "artifact");
-                const result = service.importProject(body.arguments.new_name as string, archive);
+                const result = body.arguments.validate === true
+                  ? await service.createProject(body.arguments.new_name as string, archive)
+                  : service.importProject(body.arguments.new_name as string, archive);
                 return json({ structuredContent: result, isError: !result.ok });
               }
               return json(service.remix(body.arguments as Parameters<ArtifactService["remix"]>[0]));
