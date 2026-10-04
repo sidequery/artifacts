@@ -1,3 +1,6 @@
+import { ARTIFACTS_FILE_TOOL } from "../src/mcp/file-contract";
+import { applyToolVisibility } from "../src/mcp/host-contract";
+import { ARTIFACTS_WORKSPACE_TOOLS } from "../src/mcp/workspace-contract";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { MCP_TOOLS } from "../src/mcp/tools";
 import { PROJECT_ARCHIVE_SCHEMA } from "../src/project-archive-contract";
@@ -157,3 +160,12 @@ addScriptTool("app_reconcile", "Resume the current desired native Worker deploym
 addScriptTool("app_secrets", "Atomically set/delete app secrets (null deletes); omit secrets to list names. Values are only passed into declared native env bindings and never returned/history-exported. Existing desired code is redeployed to apply changes.", { ...appName, secrets: { type: "object", maxProperties: 32, additionalProperties: { type: ["string", "null"], maxLength: 4096 } } }, ["name"]);
 addScriptTool("app_move", "Move an app between authenticated private/team libraries without changing its physical app identity, resources, secrets or revisions. The former owner immediately loses future management and HTTP access.", { ...appName, library: { type: "string", enum: ["private", "team"] } }, ["name", "library"]);
 for (const tool of CLOUD_MCP_TOOLS.filter(tool => ["app_guide", "app_list", "app_read", "app_history"].includes(tool.name))) tool.annotations = { readOnlyHint: true };
+
+for (const tool of [...ARTIFACTS_WORKSPACE_TOOLS, ARTIFACTS_FILE_TOOL]) if (!CLOUD_MCP_TOOLS.some(existing => existing.name === tool.name)) CLOUD_MCP_TOOLS.push(tool as Tool);
+for (const tool of CLOUD_MCP_TOOLS) {
+  if (["artifact_write", "artifact_edit", "artifact_import", "artifact_remix", "artifact_restore"].includes(tool.name)) tool.inputSchema.properties!.preview = { type: "boolean", default: true, description: "Deliver the preview after saving and activating a valid revision. False suppresses delivery only; it does not roll back the mutation." };
+  if (["artifact_request", "artifact_files", "artifact_read", "artifact_export"].includes(tool.name)) tool.inputSchema.properties!.workspace = { type: "string", minLength: 1, description: "Workspace in the authenticated library. Does not grant access." };
+  if (tool.name === "artifacts_search") tool.description += " Offset is a catalog-page offset: continue next_offset even when no names match the current page.";
+  if (tool.name === "artifacts_mentions") tool.inputSchema.properties!.offset = { type: "integer", minimum: 0, description: "Continue the next_offset returned by a previous mention search." };
+}
+applyToolVisibility(CLOUD_MCP_TOOLS);

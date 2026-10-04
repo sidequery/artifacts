@@ -211,7 +211,7 @@ test("published tarball runs the CLI, gallery, and stdio MCP outside a checkout"
     await Bun.write(mcpSmoke, `
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-const client = new Client({ name: "package-smoke", version: "1" });
+const client = new Client({ name: "package-smoke", version: "1" }, { capabilities: { extensions: { "io.modelcontextprotocol/ui": { mimeTypes: ["text/html;profile=mcp-app"] } } } });
 const transport = new StdioClientTransport({
   command: ${JSON.stringify(artifact)},
   args: ["mcp", "--dir", ${JSON.stringify(artifacts)}, "--history-db", ${JSON.stringify(history)}],

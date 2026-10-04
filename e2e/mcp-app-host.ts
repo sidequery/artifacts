@@ -11,9 +11,13 @@ type RequestBehavior = "accept" | "decline" | "throw";
 declare global {
   interface Window {
     artifactAppHtml: string;
+    initialServerToolResult?: CallToolResult;
     mcpHost?: {
       initialized: boolean;
       messages: unknown[];
+      modelContexts: unknown[];
+      removeModelContext(): void;
+      sandboxReady: boolean;
       links: string[];
       sizeChanges: Array<{ width?: number; height?: number }>;
       requestedModes: McpUiDisplayMode[];
@@ -32,11 +36,16 @@ declare global {
 
 const iframe = document.querySelector<HTMLIFrameElement>("#app")!;
 const messages: unknown[] = [];
+const modelContexts: unknown[] = [];
+const options = new URLSearchParams(location.search);
+const minimal = options.get("host") === "minimal";
+const openai = options.get("host") === "openai";
+const proxy = options.has("proxy");
 const links: string[] = [];
 const sizeChanges: Array<{ width?: number; height?: number }> = [];
 const requestedModes: McpUiDisplayMode[] = [];
 const serverToolCalls: Array<{ name: string; arguments?: Record<string, unknown> }> = [];
-let serverToolResult: CallToolResult = { content: [], structuredContent: {
+let serverToolResult: CallToolResult = window.initialServerToolResult ?? { content: [], structuredContent: {
   response: { status: 200, statusText: "OK", headers: [] },
 } };
 let requestBehavior: RequestBehavior = "accept";
@@ -47,12 +56,13 @@ let hostContext: McpUiHostContext = {
   displayMode: "inline",
   availableDisplayModes: ["inline", "fullscreen"],
   containerDimensions: { width: 640, maxHeight: 600 },
+  ...(options.has("deepLink") ? { "openai/deepLink": { url: options.get("deepLink")! } } : {}),
 };
 
 const bridge = new AppBridge(
   null,
   { name: "Artifact browser test host", version: "1.0.0" },
-  { message: { text: {} }, openLinks: {}, serverTools: {} },
+  minimal ? {} : { message: { text: {} }, openLinks: {}, serverTools: {}, updateModelContext: { text: {} }, ...(openai ? { experimental: { "openai/modelContext": {} } } : {}) },
   { hostContext },
 );
 
@@ -76,6 +86,12 @@ function applyFrameSize() {
 
 window.mcpHost = {
   initialized: false,
+  sandboxReady: false,
+  modelContexts,
+  removeModelContext() {
+    hostContext = { ...hostContext, "openai/modelContext": null };
+    bridge.setHostContext(hostContext);
+  },
   messages,
   links,
   sizeChanges,
@@ -130,6 +146,14 @@ bridge.oncalltool = async params => {
   serverToolCalls.push(params);
   return serverToolResult;
 };
+bridge.onupdatemodelcontext = async params => {
+  modelContexts.push(params);
+  if (!openai) return {};
+  const updateId = `context-${modelContexts.length}`;
+  hostContext = { ...hostContext, "openai/modelContext": { ...params, updateId } };
+  bridge.setHostContext(hostContext);
+  return { _meta: { "openai/modelContext": { updateId } } };
+};
 bridge.onmessage = async params => {
   messages.push(params);
   return {};
@@ -144,4 +168,10 @@ bridge.oninitialized = () => {
 
 applyFrameSize();
 await bridge.connect(new PostMessageTransport(iframe.contentWindow!, iframe.contentWindow!));
-iframe.srcdoc = window.artifactAppHtml;
+if (proxy) {
+  bridge.onsandboxready = async () => {
+    window.mcpHost!.sandboxReady = true;
+    await bridge.sendSandboxResourceReady({ html: window.artifactAppHtml, sandbox: "allow-scripts" });
+  };
+  iframe.src = "/sandbox-proxy";
+} else iframe.srcdoc = window.artifactAppHtml;

@@ -1,5 +1,6 @@
 import { ARTIFACTS_APP_META } from "./app-contract";
 import { PROJECT_ARCHIVE_SCHEMA } from "../project-archive-contract";
+import { applyToolVisibility } from "./host-contract";
 
 export const MCP_TOOLS = [
   {
@@ -124,3 +125,12 @@ export const MCP_TOOLS = [
     },
   },
 ] as const;
+
+for (const tool of MCP_TOOLS) {
+  if (["artifact_write", "artifact_edit", "artifact_restore", "artifact_remix", "artifact_import"].includes(tool.name)) {
+    (tool.inputSchema as { properties: Record<string, unknown> }).properties.preview = {
+      type: "boolean", default: true, description: "Set false for an intermediate edit: validate and save without replacing the chat preview.",
+    };
+  }
+}
+applyToolVisibility(MCP_TOOLS);

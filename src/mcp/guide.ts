@@ -6,7 +6,7 @@ export const ARTIFACTS_GUIDE_EXPORTS = [
   "Pill", "Row", "Select", "Spacer", "Stack", "Stat", "Table", "Text", "TextArea",
   "TextInput", "Toggle", "artifactFetch", "pluginCall", "Routes", "Route", "Outlet", "Navigate", "NavLink", "useNavigate", "useParams", "useLocation", "useSearchParams", "useMatch", "useResolvedPath", "artifactPaletteDark", "artifactPaletteLight", "artifactTypography",
   "mergeStyle", "themeFromKind", "tokensFromPalette", "useArtifactAction", "useArtifactState", "useState", "useReducer", "useRef", "useMemo", "useCallback", "useEffect", "useHostTheme",
-  "artifactFiles", "MAX_ARTIFACTS_FILE_BYTES", "getArtifactCapabilities",
+  "artifactFiles", "MAX_ARTIFACTS_FILE_BYTES", "getArtifactCapabilities", "updateArtifactContext", "useArtifactContext", "useHostEnvironment",
 ];
 export const LEGACY_GUIDE_EXPORTS = [
   "useCanvasAction", "useCanvasState", "canvasFetch", "canvasFiles", "MAX_CANVAS_FILE_BYTES",
@@ -32,7 +32,10 @@ Historical sources can still use these compatibility aliases: ${LEGACY_GUIDE_EXP
 - useState, useReducer, useRef, useMemo, useCallback, useEffect: standard React hooks for component-local state and behavior.
 - useArtifactState<T>(key: string, defaultValue: T): [T, setter] for host-backed state. Keys must be stable and distinct. The setter accepts a value or updater. Live local views persist through the host; MCP and gallery views keep isolated in-memory state.
 - useHostTheme(): returns the host theme with color and typography tokens.
-- useArtifactAction(): returns a dispatcher accepting {type: "openFile", path, selection?}, {type: "promptAgent", prompt}, or {type: "openUrl", url}. In MCP Apps, promptAgent and HTTP(S) openUrl depend on host approval; openFile is unavailable.
+- useHostEnvironment(): returns host locale/timeZone when supplied.
+- updateArtifactContext({route?, selection?, filters?} | null): explicitly replace the compact model context (maximum 16 KiB). The MCP bridge adds artifact identity and revision. This does not prompt the agent. null clears the app context.
+- useArtifactContext(): returns {context, attached, update}; attachment removal and host changes update the hook. Treat it as a user-selected snapshot, not durable app data.
+- useArtifactAction(): returns a dispatcher accepting {type: "openFile", path, selection?}, {type: "promptAgent", prompt}, or {type: "openUrl", url}. In MCP Apps, promptAgent and HTTP(S) openUrl depend on host approval; openFile requires the optional host file extension.
 
 ## Deployment plugins
 
@@ -40,7 +43,7 @@ pluginCall<T>(plugin, operation, input, { signal }?) calls an authenticated depl
 
 ## Routing
 
-The runtime supplies React Router. Use Routes, Route, Outlet, Navigate, NavLink and routing hooks from sidequery/artifacts. Link to="/accounts/123" navigates within an artifact; existing Link href="https://..." keeps ordinary link behavior. Nested layouts, params, search params and navigation state work normally. Standalone /slug/* URLs support deep links, reload and browser back/forward. Gallery and chat views keep navigation in memory. /api and /api/* are reserved for the artifact backend; /_artifact/* is reserved for runtime bridges.
+The runtime supplies React Router. Use Routes, Route, Outlet, Navigate, NavLink and routing hooks from sidequery/artifacts. Link to="/accounts/123" navigates within an artifact; existing Link href="https://..." keeps ordinary link behavior. Nested layouts, params, search params and navigation state work normally. Standalone /slug/* URLs support deep links, reload and browser back/forward. Gallery and chat views keep navigation in memory. MCP host deep links may initialize an internal route; explicit working-view refresh preserves compatible routes and session state. /api and /api/* are reserved for the artifact backend; /_artifact/* is reserved for runtime bridges.
 
 ## Hosted servers and SQLite
 
@@ -48,7 +51,7 @@ artifactFetch(path: string, init?: RequestInit): Promise<Response> sends a reque
 
 Server requests require a hosted runtime with a native artifacts server. Local Bun CLI, local stdio MCP and local gallery views do not execute servers and report requests as unavailable. Hosted MCP Apps and the hosted gallery support them. Hosted artifact_write accepts server TypeScript exporting class ArtifactServer extends DurableObject from "cloudflare:workers", alongside browser contents.
 
-getArtifactCapabilities() returns {server, files, plugins, hostActions, statePersistence} for the current view without making requests. The booleans describe installed bridges; individual operations still follow the current access policy. statePersistence is "persistent" when UI state is saved through the host, otherwise "session". Gallery and MCP UI state is temporary; use server SQLite for durable app data. Query capabilities before showing controls that require server, file, plugin or host-action support.
+getArtifactCapabilities() returns {server, files, plugins, hostActions, actions: {openUrl, promptAgent, openFile}, modelContext, statePersistence} for the current view without making requests. The booleans describe installed bridges; individual operations still follow the current access policy. statePersistence is "persistent" when UI state is saved through the host, otherwise "session". Gallery and MCP UI state is temporary; use server SQLite for durable app data. Query capabilities before showing controls that require server, file, plugin or host-action support.
 
 Each artifact with a server gets one native SQLite database. Different artifact names get separate databases; multiple tabs and server restarts use the same database. Use this.ctx.storage.sql.exec(sql, ...bindings) with ? placeholders for values; cursors support .toArray() and .one(). Use this.ctx.storage.kv.get/put/delete for key/value data and this.ctx.storage.transactionSync(() => { ... }) for synchronous SQL/KV transactions. Initialize tables with create table if not exists.
 
@@ -81,7 +84,7 @@ Files use the same library + workspace + artifact identity as the database and s
 
 For browser TSX, embed data in the source or use artifactFetch when a hosted native server is available. Direct network calls (fetch, XMLHttpRequest, WebSocket), eval, new Function, process/Bun APIs, localStorage and sessionStorage are disallowed. The browser import restrictions above do not apply to native server source, which imports DurableObject from "cloudflare:workers".
 
-artifact_write creates or replaces the full source and then validates it. artifact_edit applies exact replacements and then validates; use artifact_read's source_hash as expected_hash to guard edits. A failed typecheck can leave source applied: inspect applied/ok and diagnostics, fix the source, and validate again. Do not treat an error as a rollback. Successful writes/edits show an inline preview in MCP Apps hosts. artifact_typecheck and artifact_compile check existing artifacts; artifact_open shows one. artifact_history lists revisions; artifact_version reads archived source; artifact_restore restores source as a new revision while retaining current state. Hosted revisions include both client and server source. artifact_export returns a complete version 1 project archive including helpers and exact package source/type snapshots, with no runtime data or secrets. artifact_import accepts that archive and a fresh new_name; hosted imports start private with new storage. Filesystem imports preserve backend source for deployment but do not execute it.
+artifact_write creates or replaces the full source and then validates it. artifact_edit applies exact replacements and then validates; use artifact_read's source_hash as expected_hash to guard edits. A failed typecheck can leave source applied: inspect applied/ok and diagnostics, fix the source, and validate again. Do not treat an error as a rollback. Successful writes/edits show an inline preview in MCP Apps hosts. Use preview:false on write/edit/restore/import/remix for intermediate changes; validation and revision capture still run without delivering another view. artifact_typecheck and artifact_compile check existing artifacts; artifact_open shows one. artifact_history lists revisions; artifact_version reads archived source; artifact_restore restores source as a new revision while retaining current state. Hosted revisions include both client and server source. artifact_export returns a complete version 1 project archive including helpers and exact package source/type snapshots, with no runtime data or secrets. artifact_import accepts that archive and a fresh new_name; hosted imports start private with new storage. Filesystem imports preserve backend source for deployment but do not execute it.
 `;
 }
 

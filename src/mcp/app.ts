@@ -29,6 +29,8 @@ html,body{margin:0;font-family:system-ui,sans-serif;overflow:hidden}
 html,body{background:transparent}
 body{color:var(--artifact-foreground,#f0f0f0)}
 #artifact-shell{position:relative;isolation:isolate;display:flex;flex-direction:column;max-height:min(var(--artifact-inline-limit,600px),100vh);max-height:min(var(--artifact-inline-limit,600px),100dvh);height:var(--artifact-fixed-height,auto);min-width:0}
+ .artifact-controls{display:flex;gap:8px;flex-wrap:wrap;padding:12px}
+.artifact-controls[hidden]{display:none}
 #artifact-toolbar{position:absolute;top:8px;right:8px;z-index:1}
 #artifact-toolbar[hidden]{display:none}
 #display-mode{display:grid;place-items:center;width:44px;height:44px;padding:0;border:0;border-radius:12px;background:color-mix(in srgb,var(--artifact-background,#181818) 72%,transparent);color:inherit;box-shadow:0 1px 4px #0002,inset 0 0 0 1px color-mix(in srgb,currentColor 12%,transparent);backdrop-filter:blur(12px);cursor:pointer}
@@ -56,7 +58,7 @@ html[data-display-mode="fullscreen"] #root,html[data-display-mode="pip"] #root{m
 }
 
 /** Compile a source snapshot without a loopback server or a Herdr process. */
-export async function artifactAppResult(service: ArtifactService, selection: { name?: string; version_id?: string; event_id?: string }) {
+export async function artifactAppResult(service: ArtifactService, selection: { name?: string; version_id?: string; event_id?: string }, deliver = true) {
   if (Boolean(selection.name) === Boolean(selection.version_id)) throw new Error("provide name or version_id, but not both");
   if (selection.event_id && !selection.version_id) throw new Error("event_id requires version_id");
   const saved = selection.version_id ? service.version(selection.version_id) : undefined;
@@ -83,11 +85,11 @@ export async function artifactAppResult(service: ArtifactService, selection: { n
   try {
     const version = saved ?? history.capture({ workspace: service.artifactsDir, name: artifactIdFromFile(path), sourcePath: path, source, project, runtime });
     // Delivery records a preview event, not evidence that a human saw the app.
-    const eventId = history.served(version.id, state, "preview", service.env, runtime);
+    const eventId = deliver ? history.served(version.id, state, "preview", service.env, runtime) : undefined;
     return {
       ok: true, path, check: formatArtifactCheck([]), diagnostics: [],
       artifact: { name: version.name, versionId: version.id, eventId, sourceHash: version.source_hash },
-      _meta: { artifact: { name: version.name, versionId: version.id, eventId, sourceHash: version.source_hash, js: compiled.js, state } satisfies ArtifactAppPayload },
+      _meta: eventId ? { artifact: { name: version.name, versionId: version.id, eventId, sourceHash: version.source_hash, js: compiled.js, state, workspace: service.artifactsDir } satisfies ArtifactAppPayload } : undefined,
     };
   } finally { history.close(); }
 }

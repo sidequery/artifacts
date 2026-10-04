@@ -12,22 +12,32 @@ export type ArtifactAction =
 
 export type SetArtifactState<T> = Dispatch<SetStateAction<T>>;
 
+/** Small user-selected context, independent from durable app data or prompts. */
+export type ArtifactModelContext = { route?: string; selection?: Record<string, unknown>; filters?: Record<string, unknown> };
+export type ArtifactEnvironment = { locale?: string; timeZone?: string };
+export type ArtifactHostActions = { openUrl: boolean; promptAgent: boolean; openFile: boolean };
+
 export type ArtifactCapabilities = {
   server: boolean;
   files: boolean;
   plugins: boolean;
   hostActions: boolean;
+  actions: ArtifactHostActions;
+  modelContext: boolean;
   statePersistence: "persistent" | "session";
 };
 
 /** Query the bridges installed by this view without making a request. */
 export function getArtifactCapabilities(): ArtifactCapabilities {
   const bridge = (globalThis as typeof globalThis & { __artifacts?: HostBridge }).__artifacts ?? {};
+  const legacyActions = typeof bridge.onAction === "function" || !!bridge.actionUrl;
+  const actions = bridge.actions ?? { openUrl: legacyActions, promptAgent: legacyActions, openFile: legacyActions };
   return {
     server: typeof bridge.onRequest === "function",
     files: typeof bridge.onFileRequest === "function",
     plugins: typeof bridge.onPluginCall === "function",
-    hostActions: typeof bridge.onAction === "function" || !!bridge.actionUrl,
+    hostActions: Object.values(actions).some(Boolean), actions,
+    modelContext: typeof bridge.onModelContext === "function",
     statePersistence: bridge.persistUrl ? "persistent" : "session",
   };
 }
@@ -44,7 +54,41 @@ export type HostBridge = {
   onPluginCall?: (request: PluginRequest) => Promise<unknown>;
   onFileRequest?: (request: ArtifactFileRequest) => Promise<unknown>;
   onFileDownload?: (url: string) => Promise<void>;
+  actions?: ArtifactHostActions;
+  environment?: ArtifactEnvironment;
+  modelContext?: ArtifactModelContext | null;
+  contextAttached?: boolean;
+  onModelContext?: (context: ArtifactModelContext | null) => Promise<void>;
 };
+
+export async function updateArtifactContext(context: ArtifactModelContext | null): Promise<void> {
+  const bridge = hostBridge();
+  if (!bridge.onModelContext) throw new Error("Model context is unavailable in this view");
+  const json = JSON.stringify(context);
+  if (new TextEncoder().encode(json).byteLength > 16 * 1024) throw new Error("Artifact context exceeds 16 KiB");
+  await bridge.onModelContext(JSON.parse(json) as ArtifactModelContext | null);
+}
+
+/** Host attachment removals and locale updates are observable without polling. */
+export function useArtifactContext() {
+  const [, changed] = useState(0);
+  useEffect(() => {
+    const update = () => changed(value => value + 1);
+    window.addEventListener("artifact-host-context-change", update);
+    return () => window.removeEventListener("artifact-host-context-change", update);
+  }, []);
+  return { context: hostBridge().modelContext ?? null, attached: hostBridge().contextAttached ?? false, update: updateArtifactContext };
+}
+
+export function useHostEnvironment(): ArtifactEnvironment {
+  const [, changed] = useState(0);
+  useEffect(() => {
+    const update = () => changed(value => value + 1);
+    window.addEventListener("artifact-host-context-change", update);
+    return () => window.removeEventListener("artifact-host-context-change", update);
+  }, []);
+  return hostBridge().environment ?? {};
+}
 
 function hostBridge(): HostBridge {
   if (typeof window === "undefined") {

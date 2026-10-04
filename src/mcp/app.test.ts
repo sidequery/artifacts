@@ -91,7 +91,7 @@ test("working preview initializes from sidecar without modifying it and rejects 
 
 test("official MCP client can initialize, discover UI, create and show over standard stdio", async () => {
   const dir = tempDir();
-  const client = new Client({ name: "artifact-test", version: "1" });
+  const client = new Client({ name: "artifact-test", version: "1" }, { capabilities: { extensions: { "io.modelcontextprotocol/ui": { mimeTypes: [ARTIFACTS_APP_MIME] } } } });
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: ["run", join(import.meta.dir, "../cli.ts"), "mcp", "--dir", dir, "--history-db", join(dir, "history.sqlite")],
@@ -104,7 +104,7 @@ test("official MCP client can initialize, discover UI, create and show over stan
     for (const name of ["artifact_write", "artifact_open", "artifact_edit", "artifact_restore"]) {
       expect(tools.tools.find(tool => tool.name === name)?._meta).toMatchObject({ ui: { resourceUri: ARTIFACTS_APP_URI } });
     }
-    expect(tools.tools.find(tool => tool.name === "artifact_list")?._meta).toBeUndefined();
+    expect(tools.tools.find(tool => tool.name === "artifact_list")?._meta).toMatchObject({ ui: { visibility: ["model", "app"] } });
     const resources = await client.listResources();
     expect(resources.resources[0]?.mimeType).toBe(ARTIFACTS_APP_MIME);
     const resource = await client.readResource({ uri: ARTIFACTS_APP_URI });
