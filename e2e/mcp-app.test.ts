@@ -156,7 +156,7 @@ beforeAll(async () => {
   const hostJs = await hostBuild.outputs[0]!.text();
   const appHtml = (await artifactAppHtml()).replace(
     "<head>",
-    `<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'none'; font-src data:; frame-src blob:; connect-src __artifact_transfer_origin__">`,
+    `<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'none'; font-src data:; frame-src 'none'; connect-src __artifact_transfer_origin__">`,
   );
   hostHtml = `<!doctype html><html><head><style>html,body{margin:0}iframe{display:block;border:0}</style></head><body><iframe id="app" sandbox="allow-scripts allow-forms"></iframe><script>window.artifactAppHtml=${JSON.stringify(appHtml).replaceAll("<", "\\u003c")}</script><script type="module">${hostJs.replaceAll("</script", "<\\/script")}</script></body></html>`;
   server = Bun.serve({

@@ -62,7 +62,6 @@ export function mountMcpPreview(container: HTMLElement, javascript: string, brid
   const context = (): PreviewContext => ({ artifactId: bridge.artifactId, state: bridge.state, route: bridge.route, theme: bridge.theme, actions: bridge.actions, environment: bridge.environment, modelContext: bridge.modelContext, contextAttached: bridge.contextAttached });
   const json = (value: unknown) => JSON.stringify(value).replaceAll("<", "\\u003c");
   const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;min-height:100%;font-family:system-ui,sans-serif}body{padding:24px;box-sizing:border-box}#root{min-width:0}@media(max-width:480px){body{padding:12px}}</style></head><body><div id="root"></div><script>(${previewBootstrap.toString()})(${json(context())},${json(methods)})</script><script type="module">${javascript.replace(/<\/script/gi, "<\\/script")}</script></body></html>`;
-  const url = URL.createObjectURL(new Blob([html], { type: "text/html" }));
   let disposed = false;
   const receive = async (event: MessageEvent) => {
     if (disposed || event.source !== frame.contentWindow) return;
@@ -83,7 +82,7 @@ export function mountMcpPreview(container: HTMLElement, javascript: string, brid
     }
   };
   window.addEventListener("message", receive);
-  frame.src = url;
+  frame.srcdoc = html;
   container.append(frame);
   return {
     bridge,
@@ -91,6 +90,6 @@ export function mountMcpPreview(container: HTMLElement, javascript: string, brid
       const { state: _state, route: _route, ...value } = context();
       frame.contentWindow?.postMessage({ type: "artifacts/preview-context", context: value }, "*");
     },
-    dispose() { disposed = true; window.removeEventListener("message", receive); frame.remove(); URL.revokeObjectURL(url); },
+    dispose() { disposed = true; window.removeEventListener("message", receive); frame.remove(); },
   };
 }

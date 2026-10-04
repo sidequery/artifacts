@@ -48,7 +48,7 @@ The author skill reads `artifact_guide`, guards source edits using `source_hash`
 
 Setup verifies connection using tool discovery, `artifact_guide`, and `artifact_list`. It does not create example artifacts or alter the user's library. Host file editing requires its own advertised resource and write capabilities; it is separate from hosted artifact file storage described in [files](files.md).
 
-Hosted project edits use complete snapshots, revision tokens and the existing service authorization. Stale saves preserve the draft for comparison/reload. Legacy local filesystem connections show source read-only; host-managed file editing remains a separate ETag-protected surface. Authored previews run in isolated, sandboxed blob frames so their CSS and React root cannot replace the gallery.
+Hosted project edits use complete snapshots, revision tokens and the existing service authorization. Stale saves preserve the draft for comparison/reload. Legacy local filesystem connections show source read-only; host-managed file editing remains a separate ETag-protected surface. Authored previews run in isolated, sandboxed inline frames so their CSS and React root cannot replace the gallery.
 
 Native rich forms require a transport change: the hosted MCP endpoint uses stateless JSON replies, and local stdio has no server-request response router. Neither currently retains the callback correlation needed for OpenAI elicitation. Remix therefore uses the real product form. Migration to bidirectional elicitation or MRTR is not claimed by this package.
 
