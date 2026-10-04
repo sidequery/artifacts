@@ -2,6 +2,7 @@ import { useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import type { OpenAIExtensions, OpenAIFileEntrypointInput, OpenAIResources } from "@openai/mcp-extensions/app";
 import { SourceEditor } from "../gallery/source-editor";
+import { galleryStyles } from "../gallery/styles";
 
 export type ArtifactFileState = {
   draft: string; baseline: string; loaded: boolean; writable: boolean; etag?: string;
@@ -119,21 +120,21 @@ export function mountArtifactFileEditor(root: HTMLElement, extensions: OpenAIExt
   function Editor() {
     const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
     const canSave = state.loaded && state.writable && !state.busy && !state.conflict && session.hasUnsavedChanges();
-    return <div className="mcp-file-editor"
+    return <div className="gallery-app mcp-file-editor"
       onKeyDown={event => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void session.save(); } }}
-      style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 300, color: "var(--text, inherit)" }}>
-      <style>{fileEditorStyles}</style>
-      <header style={{ display: "flex", alignItems: "center", gap: 12, padding: 12, flexWrap: "wrap" }}>
-        <strong style={{ overflowWrap: "anywhere", flex: 1 }}>{input.file.name}</strong>
-        <span>{session.hasUnsavedChanges() ? "Unsaved changes" : state.loaded ? "No unsaved changes" : ""}</span>
-        <button type="button" onClick={() => { void session.save(); }} disabled={!canSave} aria-keyshortcuts="Control+s Meta+s">Save</button>
+      >
+      <style>{galleryStyles}{fileEditorStyles}</style>
+      <header className="detail-header">
+        <div className="detail-title"><p className="detail-eyebrow">Artifact file</p><h1>{input.file.name}</h1></div>
+        <span className="muted">{session.hasUnsavedChanges() ? "Unsaved changes" : state.loaded ? state.writable ? "Saved" : "Read only" : ""}</span>
+        <button className="primary-action" type="button" onClick={() => { void session.save(); }} disabled={!canSave} aria-keyshortcuts="Control+s Meta+s">Save</button>
         <button type="button" disabled={state.busy || !session.canReload} onClick={() => { void session.reload(); }}>
           {session.hasUnsavedChanges() ? "Discard draft and reload" : "Reload"}
         </button>
       </header>
-      <p role="status" aria-live="polite" style={{ margin: "0 12px 12px" }}>{state.message}</p>
-      {state.subscriptionWarning && <p role="status" style={{ margin: "0 12px 12px" }}>{state.subscriptionWarning}</p>}
-      {state.loaded && <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}><SourceEditor filename={input.file.name} value={state.draft} onChange={session.edit} readOnly={!state.writable} /></div>}
+      <p className="file-status" role="status" aria-live="polite">{state.message}</p>
+      {state.subscriptionWarning && <p className="file-status" role="status">{state.subscriptionWarning}</p>}
+      {state.loaded && <div className="file-source"><SourceEditor filename={input.file.name} value={state.draft} onChange={session.edit} readOnly={!state.writable} /></div>}
     </div>;
   }
   reactRoot.render(<Editor />);
@@ -142,10 +143,10 @@ export function mountArtifactFileEditor(root: HTMLElement, extensions: OpenAIExt
 }
 
 const fileEditorStyles = `
-.mcp-file-editor { --text: var(--color-text-primary, #202124); --subtle: var(--color-text-secondary, #656b73); --line: var(--color-border-primary, #ddd); --panel: var(--color-background-primary, #fff); --raised: var(--color-background-secondary, #f5f5f5); --selected: var(--color-background-tertiary, #dce6ef); --syntax-keyword: var(--text); --syntax-string: var(--text); --syntax-number: var(--text); --syntax-type: var(--text); --syntax-function: var(--text); background: var(--panel); font: 14px/1.5 var(--font-sans, system-ui, sans-serif); }
-.mcp-file-editor button { background: var(--raised); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; font: inherit; cursor: pointer; }
-.mcp-file-editor button:disabled { opacity: .5; cursor: default; }
-.mcp-file-editor button:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+.mcp-file-editor { height: 100%; min-height: 300px; background: var(--panel); color: var(--text); }
+.mcp-file-editor .detail-header { flex-wrap: wrap; }
+.mcp-file-editor .file-status { margin: 8px 16px; color: var(--muted); }
+.mcp-file-editor .file-source { flex: 1; min-height: 0; overflow: auto; }
 .mcp-file-editor .source-code-editor { display: flex; flex-direction: column; height: 100%; min-height: 180px; min-width: 0; }
 .mcp-file-editor .source-code-surface { flex: 1; min-height: 0; min-width: 0; }
 .mcp-file-editor .source-code-status { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 12px; border-top: 1px solid var(--line); color: var(--subtle); font-size: 11px; flex-shrink: 0; }

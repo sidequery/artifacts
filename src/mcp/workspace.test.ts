@@ -17,7 +17,7 @@ test("library entrypoints accept empty args and mention resources stay in the co
   const { dir, service, request } = fixture();
   service.write("revenue", VALID_ARTIFACT);
   const response = await request("tools/call", { name: "artifacts_library", arguments: {} });
-  expect(response?.result).toMatchObject({ _meta: { workspace: { view: "library", items: [{ name: "revenue", workspace: dir, working: true }] } } });
+  expect(response?.result).toMatchObject({ _meta: { workspace: { view: "library", items: [{ name: "revenue", workspace: dir, working: true }], gallery: { capabilities: { editing: false } } } } });
   const mentions = (await request("tools/call", { name: "artifacts_mentions", arguments: { query: "reven" } }))?.result as { structuredContent: { items: { uri: string }[] } };
   const uri = mentions.structuredContent.items[0]!.uri;
   expect(localResource(service, uri)).toMatchObject({ name: "revenue", source: VALID_ARTIFACT });

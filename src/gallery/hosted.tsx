@@ -2,7 +2,7 @@ import { ExecutionControls } from "./execution-controls";
 import { SecretControls } from "./secrets";
 import { useEffect, useState } from "react";
 import { ProjectEditor, emptyEditableProject } from "./project-editor";
-import { loadSourceSnapshot, useProjectDraft, type SourceSnapshot } from "./drafts";
+import { useProjectDraft, type SourceSnapshot } from "./drafts";
 import type { GalleryArtifact } from "./types";
 import { Select } from "./select";
 import type { Diagnostic } from "../diagnostics";
@@ -10,25 +10,9 @@ import type { SourceLocation } from "./source-editor";
 import { PROJECT_ARCHIVE_FORMAT } from "../project-archive-contract";
 export type ScriptView = "source" | "requests" | "schedule" | "settings";
 
-type ToolResult = { error?: string; isError?: boolean; content?: { type: string; text?: string }[]; structuredContent?: unknown };
-export type MutationResult = { applied?: boolean; ok?: boolean; revision_token?: string; error?: string; check?: string; diagnostics?: Diagnostic[] };
-export class GalleryToolError extends Error {
-  constructor(message: string, readonly status: number, readonly result?: MutationResult) { super(message); }
-}
-export async function galleryTool(workspace: string, name: string, args: Record<string, unknown>): Promise<unknown> {
-  const params = new URLSearchParams({ workspace });
-  const library = new URLSearchParams(window.location.search).get("library");
-  if (library) params.set("library", library);
-  const response = await fetch(`/api/tools?${params}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, arguments: args }) });
-  const result = await response.json() as ToolResult;
-  const text = result.content?.filter(item => item.type === "text").map(item => item.text ?? "").join("\n");
-  if (!response.ok || result.isError) {
-    let detail = result.structuredContent as MutationResult | undefined;
-    if (!detail && text) { try { detail = JSON.parse(text); } catch {} }
-    throw new GalleryToolError(result.error || text || `Request failed (${response.status})`, response.status, detail);
-  }
-  return result.structuredContent ?? text ?? result;
-}
+export { GalleryToolError, galleryTool, type MutationResult } from "./transport";
+import { GalleryToolError, useGalleryTransport, type MutationResult } from "./transport";
+
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 const show = (value: unknown) => typeof value === "string" ? value : JSON.stringify(value, null, 2);
 export function liveRevisionLabel(artifact: GalleryArtifact): string {
@@ -65,7 +49,8 @@ export function parseRequestHeaders(text: string): [string, string][] {
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || Object.values(parsed).some(value => typeof value !== "string")) throw new Error("Headers must be a JSON object of string values.");
   return Object.entries(parsed);
 }
-export function LinkSettings({ artifact, onSaved, localUrl }: { artifact: GalleryArtifact; onSaved: () => Promise<void>; localUrl?: string }) {
+export function LinkSettings({ artifact, onSaved, localUrl, openLink }: { artifact: GalleryArtifact; onSaved: () => Promise<void>; localUrl?: string; openLink?: (url: string) => Promise<void> }) {
+  const { tool: galleryTool } = useGalleryTransport();
   const [slug, setSlug] = useState(artifact.slug ?? "");
   const [access, setAccess] = useState(artifact.access ?? "private");
   const [busy, setBusy] = useState(false);
@@ -77,7 +62,10 @@ export function LinkSettings({ artifact, onSaved, localUrl }: { artifact: Galler
     try { await galleryTool(artifact.workspace, "artifact_link", { kind: artifact.kind ?? "artifact", name: artifact.name, slug, access }); await onSaved(); setStatus("Link saved"); }
     catch (error) { setStatus(message(error)); } finally { setBusy(false); }
   }}>
-    {url ? <div className="share-link-row"><label>Link<input aria-label="Share link" readOnly value={url} onFocus={event => event.target.select()} /></label><button type="button" onClick={async () => { try { await navigator.clipboard.writeText(url); setStatus("Link copied"); } catch { setStatus("Could not copy. Select the link above to copy it manually."); } }}>Copy link</button><a className="download-link" href={url} target="_blank" rel="noopener noreferrer">Open</a></div> : <p>No link yet. Choose an address and save it below.</p>}
+    {url ? <div className="share-link-row"><label>Link<input aria-label="Share link" readOnly value={url} onFocus={event => event.target.select()} /></label><button type="button" onClick={async () => { try { await navigator.clipboard.writeText(url); setStatus("Link copied"); } catch { setStatus("Could not copy. Select the link above to copy it manually."); } }}>Copy link</button><a className="download-link" href={url} target="_blank" rel="noopener noreferrer" onClick={openLink ? event => {
+      event.preventDefault();
+      void openLink(url).catch(error => setStatus(message(error)));
+    } : undefined}>Open</a></div> : <p>No link yet. Choose an address and save it below.</p>}
     {localUrl ? <p className="link-note">This link works only on this Mac while the local server is running. Publish the artifact to a hosted library to share it with other people.</p> : <>
     <label>URL slug<input aria-label="URL slug" required value={slug} onChange={event => setSlug(event.target.value)} /></label>
     <label>Link access<Select aria-label="URL access" value={access} onChange={event => setAccess(event.target.value as typeof access)}><option value="private">Private</option><option value="public">Public</option></Select></label>
@@ -88,11 +76,14 @@ export function LinkSettings({ artifact, onSaved, localUrl }: { artifact: Galler
   </form>;
 }
 function ConflictActions({ sourceUrl, dirty, onReload }: { sourceUrl: string; dirty: boolean; onReload: (snapshot: SourceSnapshot) => void }) {
+  const { loadSource: loadSourceSnapshot } = useGalleryTransport();
   const [comparison, setComparison] = useState<SourceSnapshot | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  async function load(reload: boolean) {
-    if (reload && dirty && !window.confirm("Discard these unsaved edits and reload the saved project?")) return;
+  const [confirmReload, setConfirmReload] = useState(false);
+  async function load(reload: boolean, confirmed = false) {
+    if (reload && dirty && !confirmed) { setConfirmReload(true); return; }
+    setConfirmReload(false);
     setBusy(true); setError("");
     try {
       const snapshot = await loadSourceSnapshot(sourceUrl);
@@ -103,6 +94,11 @@ function ConflictActions({ sourceUrl, dirty, onReload }: { sourceUrl: string; di
   return <div className="save-conflict">
     <button type="button" disabled={busy} onClick={() => void load(false)}>Compare saved project</button>
     <button type="button" disabled={busy} onClick={() => void load(true)}>Reload saved project</button>
+    {confirmReload ? <div role="group" aria-label="Discard local edits">
+      <p>Reloading replaces your unsaved edits with the saved project.</p>
+      <button type="button" disabled={busy} onClick={() => void load(true, true)}>Discard edits and reload</button>
+      <button type="button" onClick={() => setConfirmReload(false)}>Keep editing</button>
+    </div> : null}
     {error ? <p role="alert">{error}</p> : null}
     {comparison ? <details open><summary>Saved project (your edits remain in the editor)</summary><pre>{show(comparison)}</pre></details> : null}
   </div>;
@@ -145,6 +141,7 @@ export function AgentOnboarding({ workspace }: { workspace: string }) {
   </div>;
 }
 export function ScriptPanel({ artifact, workspace, version, sourceUrl, onSaved, onCancel, view = "source" }: { artifact?: GalleryArtifact; workspace: string; version?: string; sourceUrl?: string; onSaved: (name: string) => Promise<void>; onCancel?: () => void; view?: ScriptView }) {
+  const { tool: galleryTool, loadSource: loadSourceSnapshot } = useGalleryTransport();
   const buffer = useProjectDraft(artifact ? `${artifact.key}:${version}` : `new-script:${workspace}`);
   const { draft } = buffer;
   const name = artifact?.name ?? draft?.content.name ?? "";
@@ -249,6 +246,7 @@ export function ArtifactSourcePanel({ artifact, workspace = artifact?.workspace 
   artifact?: GalleryArtifact; workspace?: string; hosted?: boolean; version?: string; sourceUrl?: string;
   onSaved: (name: string) => Promise<void>; onCancel?: () => void;
 }) {
+  const { tool: galleryTool, loadSource: loadSourceSnapshot } = useGalleryTransport();
   const buffer = useProjectDraft(artifact ? `${artifact.key}:${version}` : `new-artifact:${workspace}`);
   const snapshot = buffer.draft?.content;
   const name = artifact?.name ?? snapshot?.name ?? "";

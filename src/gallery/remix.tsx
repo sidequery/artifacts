@@ -1,10 +1,11 @@
 import { useState } from "react";
 import type { GalleryArtifact } from "./types";
-import { galleryTool } from "./hosted";
+import { useGalleryTransport } from "./transport";
 
 export function RemixPanel({ artifact, version, onSaved, onCancel }: {
   artifact: GalleryArtifact; version: string; onSaved: (name: string) => Promise<void>; onCancel: () => void;
 }) {
+  const { tool: galleryTool } = useGalleryTransport();
   const [name, setName] = useState(`${artifact.name}-remix`);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");

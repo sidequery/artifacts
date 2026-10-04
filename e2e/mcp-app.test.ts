@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser, type FrameLocator, type Page } from "playwright";
 
@@ -19,6 +19,7 @@ export default function Interactive() {
       <Text>Count: {count}</Text>
       <Text>Theme: {theme.kind}</Text>
       <Button onClick={() => setCount(value => value + 1)}>Increment</Button>
+      <form onSubmit={event => { event.preventDefault(); setCount(value => value + 1); }}><button type="submit">Submit count</button></form>
       <Button onClick={() => act({ type: "promptAgent", prompt: "Explain this artifact" })}>Prompt agent</Button>
       <Button onClick={() => act({ type: "openUrl", url: "https://example.com/artifact" })}>Open docs</Button>
     </Stack>
@@ -76,13 +77,15 @@ const fixtureDirs = new Set<string>();
 const transferRequests: Array<{ method: string; body: string }> = [];
 const TRANSFER_FILE = { id: "one", name: "report.txt", size: 5, type: "text/plain", uploaded: "2026-10-03T00:00:00Z" };
 // A web host's outer sandbox relays JSON-RPC and loads content only after the
-// SDK resource-ready handshake. The app stays in its own opaque inner frame.
-const SANDBOX_PROXY_HTML = `<!doctype html><html><head><style>html,body,iframe{margin:0;width:100%;height:100%;border:0}</style></head><body><iframe id="sandbox" sandbox="allow-scripts"></iframe><script>
+// SDK resource-ready handshake. Codex's iframe fallback permits forms; every
+// ancestor must permit them or the browser suppresses React submit handlers.
+// The test still keeps the app in its own opaque inner frame.
+const SANDBOX_PROXY_HTML = `<!doctype html><html><head><style>html,body,iframe{margin:0;width:100%;height:100%;border:0}</style></head><body><iframe id="sandbox" sandbox="allow-scripts allow-forms"></iframe><script>
 const frame = document.getElementById("sandbox");
 window.addEventListener("message", event => {
   if (event.source === parent) {
     if (event.data?.method === "ui/notifications/sandbox-resource-ready") {
-      frame.setAttribute("sandbox", event.data.params.sandbox || "allow-scripts");
+      frame.setAttribute("sandbox", event.data.params.sandbox || "allow-scripts allow-forms");
       frame.srcdoc = event.data.params.html;
     } else frame.contentWindow.postMessage(event.data, "*");
   } else if (event.source === frame.contentWindow) parent.postMessage(event.data, "*");
@@ -153,9 +156,9 @@ beforeAll(async () => {
   const hostJs = await hostBuild.outputs[0]!.text();
   const appHtml = (await artifactAppHtml()).replace(
     "<head>",
-    `<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'none'; connect-src __artifact_transfer_origin__">`,
+    `<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'none'; font-src data:; frame-src 'none'; connect-src __artifact_transfer_origin__">`,
   );
-  hostHtml = `<!doctype html><html><head><style>html,body{margin:0}iframe{display:block;border:0}</style></head><body><iframe id="app" sandbox="allow-scripts"></iframe><script>window.artifactAppHtml=${JSON.stringify(appHtml).replaceAll("<", "\\u003c")}</script><script type="module">${hostJs.replaceAll("</script", "<\\/script")}</script></body></html>`;
+  hostHtml = `<!doctype html><html><head><style>html,body{margin:0}iframe{display:block;border:0}</style></head><body><iframe id="app" sandbox="allow-scripts allow-forms"></iframe><script>window.artifactAppHtml=${JSON.stringify(appHtml).replaceAll("<", "\\u003c")}</script><script type="module">${hostJs.replaceAll("</script", "<\\/script")}</script></body></html>`;
   server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -353,6 +356,48 @@ test("applies natural, capped, shrinking, narrow, and fixed inline sizes without
   expect(sizeChanges.every(change => change.width === undefined && typeof change.height === "number")).toBe(true);
   expect(errors).toEqual([]);
   await page.close();
+}, 30_000);
+
+test("returning from a native panel reasserts a bounded inline height after reparenting", async () => {
+  const source = `import { Button, useArtifactState } from "sidequery/artifacts";
+export default function ViewportArtifact() {
+  const [count, setCount] = useArtifactState("count", 0);
+  return (
+    <div style={{ minHeight: "100vh" }}>
+      <h1>Viewport artifact</h1>
+      <Button onClick={() => setCount(value => value + 1)}>Count: {count}</Button>
+      <div style={{ height: 2400 }} />
+      <p>Last content</p>
+    </div>
+  );
+}`;
+  const meta = await resultFor(source, "viewport-artifact");
+  const { page, app, errors } = await openHost();
+  await page.evaluate(meta => window.mcpHost!.sendResult({ content: [], _meta: meta }), meta);
+  await app.getByRole("button", { name: "Count: 0", exact: true }).click();
+  await app.getByRole("button", { name: "Expand artifact" }).click();
+  await app.locator('html[data-display-mode="fullscreen"]').waitFor();
+  // Codex has no maxHeight constraint for a normal inline card. Closing its tab
+  // changes the mode independently of the native view's subsequent resize.
+  await page.evaluate(() => window.mcpHost!.configure({ displayMode: "inline", containerDimensions: { maxWidth: 640 } }));
+  await app.locator('html[data-display-mode="inline"]').waitFor();
+  await page.waitForFunction(() => document.querySelector("iframe")!.getBoundingClientRect().height === 600);
+  await page.waitForTimeout(150);
+  await page.evaluate(() => window.mcpHost!.setFrameHeight(6000));
+  await page.waitForFunction(() => document.querySelector("iframe")!.getBoundingClientRect().height === 600);
+  await app.getByRole("button", { name: "Count: 1", exact: true }).waitFor();
+  expect((await layout(app)).shellHeight).toBe(600);
+  const last = app.getByText("Last content", { exact: true });
+  await last.scrollIntoViewIfNeeded();
+  const lastBox = (await last.boundingBox())!;
+  const viewportBox = (await app.locator("#artifact-viewport").boundingBox())!;
+  expect(lastBox.y + lastBox.height).toBeLessThanOrEqual(viewportBox.y + viewportBox.height + 1);
+  await page.waitForTimeout(150);
+  const count = await page.evaluate(() => window.mcpHost!.sizeChanges.length);
+  await page.waitForTimeout(150);
+  expect(await page.evaluate(() => window.mcpHost!.sizeChanges.length)).toBe(count);
+  expect(await page.evaluate(() => window.mcpHost!.sizeChanges.every(change => change.height! <= 600))).toBe(true);
+  expect(errors).toEqual([]);
 }, 30_000);
 
 test("negotiates fullscreen while preserving state and survives external, declined, and failed changes", async () => {
@@ -628,10 +673,15 @@ export default function ContextArtifact() {
   return <><H1>Context artifact</H1><p>Attached: {String(context.attached)}</p><p>Selected: {String(context.context?.selection?.row ?? "none")}</p><p>Locale: {environment.locale ?? "unset"}</p><p>Timezone: {environment.timeZone ?? "unset"}</p><p>Capabilities: {JSON.stringify(capabilities.actions)}</p><p>Model context: {String(capabilities.modelContext)}</p><p>Backend capabilities: {String(capabilities.server)}/{String(capabilities.files)}/{String(capabilities.plugins)}</p><Button disabled={!capabilities.modelContext} onClick={() => { void context.update({route:"/items",selection:{row:42},filters:{status:"open"}}); }}>Attach selection</Button></>;
 }`;
 
+function workspaceFor(artifact: ArtifactAppPayload, view: "library" | "working" = "library") {
+  return { view, workspace: artifact.workspace ?? "default", nextOffset: null,
+    items: [{ name: artifact.name, workspace: artifact.workspace ?? "default", working: true, versions: [{ id: artifact.versionId, revision: 1, createdAt: "2026-10-03T00:00:00Z" }] }] };
+}
+
 test("OpenAI model context reconciles user removal and remount without sending a prompt", async () => {
   const meta = await resultFor(CONTEXT_ARTIFACT, "context");
   meta.artifact.workspace = "analysis";
-  const { page, app, errors } = await openHost({ openai: true });
+  const { page, app, errors, logs } = await openHost({ openai: true });
   await page.evaluate(meta => window.mcpHost!.sendResult({ content: [], _meta: meta }), meta);
   await app.getByText("Attached: false", { exact: true }).waitFor();
   await app.getByRole("button", { name: "Attach selection" }).click();
@@ -643,18 +693,23 @@ test("OpenAI model context reconciles user removal and remount without sending a
   expect(JSON.stringify(updates[0])).toContain('"row":42');
   expect(JSON.stringify(updates[0])).toContain('"workspace":"analysis"');
   expect(await page.evaluate(() => window.mcpHost!.messages)).toEqual([]);
-  await page.evaluate(meta => window.mcpHost!.setServerToolResult({ content: [], _meta: meta }), meta);
-  await page.evaluate(() => window.mcpHost!.sendResult({ content: [], _meta: { workspace: { view: "working", workspace: "analysis", items: [], nextOffset: null } } }));
-  await app.getByText("Attached: true", { exact: true }).waitFor();
+  const workspace = workspaceFor(meta.artifact, "working");
+  await page.evaluate(({ meta, workspace }) => window.mcpHost!.setServerToolResults({ artifacts_preview: [{ content: [], _meta: meta }], artifacts_search: [{ content: [], _meta: { workspace } }] }), { meta, workspace });
+  await page.evaluate(workspace => window.mcpHost!.sendResult({ content: [], _meta: { workspace } }), workspace);
+  const preview = app.frameLocator(".preview-frame");
+  await preview.getByText("Attached: true", { exact: true }).waitFor().catch(async error => {
+    const frames = await Promise.all(page.frames().map(async frame => ({ url: frame.url(), text: await frame.locator("body").innerText().catch(() => "") })));
+    throw new Error(`${error}: ${JSON.stringify({ errors, frames })}`);
+  });
   expect(await page.evaluate(() => window.mcpHost!.modelContexts.length)).toBe(1);
   await page.evaluate(() => window.mcpHost!.removeModelContext());
-  await app.getByText("Attached: false", { exact: true }).waitFor();
+  await preview.getByText("Attached: false", { exact: true }).waitFor();
   await page.evaluate(meta => window.mcpHost!.sendResult({ content: [], _meta: meta }), meta);
-  await app.getByText("Attached: false", { exact: true }).waitFor();
+  await preview.getByText("Attached: false", { exact: true }).waitFor();
   expect(await page.evaluate(() => window.mcpHost!.modelContexts.length)).toBe(1);
   await page.evaluate(() => window.mcpHost!.configure({ locale: "fr-FR", timeZone: "Europe/Paris", styles: { variables: { "--color-text-primary": "rgb(10, 20, 30)" } } }));
-  await app.getByText("Locale: fr-FR", { exact: true }).waitFor();
-  await app.getByText("Timezone: Europe/Paris", { exact: true }).waitFor();
+  await preview.getByText("Locale: fr-FR", { exact: true }).waitFor();
+  await preview.getByText("Timezone: Europe/Paris", { exact: true }).waitFor();
   expect(await app.locator("html").getAttribute("lang")).toBe("fr-FR");
   expect(await app.locator("html").evaluate(element => element.style.getPropertyValue("--color-text-primary"))).toBe("rgb(10, 20, 30)");
   expect(errors).toEqual([]);
@@ -674,30 +729,41 @@ test("missing host capabilities leave ordinary rendering usable and disable cont
   expect(errors).toEqual([]);
 }, 30_000);
 
-test("workspace entrypoints search, paginate an empty match page, and open an authenticated revision", async () => {
+test("workspace keeps search and pinned revisions while its sandboxed preview remains interactive", async () => {
   const meta = await resultFor(INTERACTIVE_ARTIFACT, "chosen");
   meta.artifact.workspace = "research";
-  const { page, app, errors, logs } = await openHost();
-  const workspace = { view: "library" as const, workspace: "conversation", items: [], nextOffset: 100 };
-  await page.evaluate(workspace => window.mcpHost!.sendResult({ content: [], _meta: { workspace: { ...workspace, view: "working" } } }), workspace);
-  await app.getByRole("heading", { name: "Working artifacts", exact: true }).waitFor();
-  await page.evaluate(workspace => window.mcpHost!.sendResult({ content: [], _meta: { workspace } }), workspace);
-  await app.getByRole("heading", { name: "Artifacts", exact: true }).waitFor();
-  await app.getByLabel("Search artifacts").fill("chosen");
-  await page.evaluate(workspace => window.mcpHost!.setServerToolResult({ content: [], _meta: { workspace } }), workspace);
-  await app.getByRole("button", { name: "Search", exact: true }).click();
-  await page.waitForFunction(() => window.mcpHost!.serverToolCalls.length === 1).catch(error => { throw new Error(`${error}: ${JSON.stringify(logs)}`); });
-  expect(await page.evaluate(() => window.mcpHost!.serverToolCalls[0])).toMatchObject({ name: "artifacts_search", arguments: { query: "chosen", view: "library", offset: 0 } });
-  const next = { ...workspace, nextOffset: null, items: [{ name: "chosen", workspace: "research", working: true, versions: [{ id: meta.artifact.versionId, revision: 1, createdAt: "2026-10-03T00:00:00Z" }] }] };
-  await page.evaluate(workspace => window.mcpHost!.setServerToolResult({ content: [], _meta: { workspace } }), next);
-  await app.getByRole("button", { name: "Load more" }).click();
-  await app.getByRole("button", { name: "Open chosen" }).waitFor();
-  expect(await page.evaluate(() => window.mcpHost!.serverToolCalls[1])).toMatchObject({ name: "artifacts_search", arguments: { offset: 100 } });
+  const { page, app, errors } = await openHost({ proxy: true });
+  const workspace = workspaceFor(meta.artifact);
+  const empty = { ...workspace, items: [], nextOffset: 100 };
+  await page.evaluate(({ meta, workspace, empty }) => {
+    window.mcpHost!.configure({ displayMode: "fullscreen" });
+    window.mcpHost!.setServerToolResults({
+      artifacts_preview: [{ content: [], _meta: meta }],
+      artifacts_search: [{ content: [], _meta: { workspace: empty } }, { content: [], _meta: { workspace } }],
+    });
+  }, { meta, workspace, empty });
+  await page.evaluate(empty => window.mcpHost!.sendResult({ content: [], _meta: { workspace: { ...empty, view: "working", nextOffset: null } } }), empty);
+  await app.getByRole("heading", { name: "Choose an artifact for this conversation" }).waitFor();
+  expect(await app.getByRole("button", { name: "chosen", exact: true }).count()).toBe(0);
+  await app.getByRole("button", { name: "Show library" }).click();
+  await app.getByRole("searchbox").fill("chosen");
+  await app.getByRole("button", { name: "chosen", exact: true }).click();
+  const preview = app.frameLocator(".preview-frame");
+  await preview.getByRole("heading", { name: "Interactive artifact" }).waitFor();
+  await preview.getByRole("button", { name: "Increment" }).click();
+  await preview.getByText("Count: 1", { exact: true }).waitFor();
+  await preview.getByRole("button", { name: "Submit count" }).click();
+  await preview.getByText("Count: 2", { exact: true }).waitFor();
   await app.getByLabel("Revision of chosen").selectOption(meta.artifact.versionId);
-  await page.evaluate(meta => window.mcpHost!.setServerToolResult({ content: [], _meta: meta }), meta);
-  await app.getByRole("button", { name: "Open chosen" }).click();
-  await app.getByRole("heading", { name: "Interactive artifact" }).waitFor();
-  expect(await page.evaluate(() => window.mcpHost!.serverToolCalls[2])).toMatchObject({ name: "artifacts_preview", arguments: { workspace: "research", version_id: meta.artifact.versionId } });
+  await preview.getByRole("heading", { name: "Interactive artifact" }).waitFor();
+  await app.getByRole("button", { name: "More actions" }).click();
+  await app.getByRole("menuitem", { name: "Refresh", exact: true }).click();
+  await page.waitForFunction(version => window.mcpHost!.serverToolCalls.filter(call => call.name === "artifacts_preview" && call.arguments?.version_id === version).length >= 2, meta.artifact.versionId);
+  const calls = await page.evaluate(() => window.mcpHost!.serverToolCalls);
+  expect(calls.some(call => call.name === "artifacts_search" && call.arguments?.offset === 100)).toBe(true);
+  await page.evaluate(() => window.mcpHost!.configure({ displayMode: "inline", containerDimensions: { width: 420, height: 600 } }));
+  await app.getByRole("button", { name: "Back to library" }).click();
+  expect(await app.getByRole("searchbox").inputValue()).toBe("chosen");
   expect(errors).toEqual([]);
 }, 30_000);
 
@@ -712,6 +778,83 @@ test("OpenAI deep links select a revision through the server before entering its
   const calls = await page.evaluate(() => window.mcpHost!.serverToolCalls);
   expect(calls).toHaveLength(1);
   expect(calls[0]).toMatchObject({ name: "artifacts_preview", arguments: { workspace: "research", version_id: meta.artifact.versionId } });
+  expect(errors).toEqual([]);
+}, 30_000);
+
+test("MCP gallery edits complete projects and retains drafts across navigation and conflicts", async () => {
+  const meta = await resultFor(INTERACTIVE_ARTIFACT, "report");
+  meta.artifact.workspace = "research";
+  const workspace = workspaceFor(meta.artifact);
+  const project = { files: { "lib/value.ts": "export const value = 1;" }, dependencies: {}, lock: {} };
+  const source = { source: INTERACTIVE_ARTIFACT, server_source: "export default {};", project, revision_token: "a".repeat(64) };
+  const gallery = {
+    workspace: "research", nextOffset: null, capabilities: { editing: true, scripts: true, links: true },
+    artifacts: [
+      { ...workspace.items[0]!, key: "report", draftRevision: source.revision_token, versions: workspace.items[0]!.versions.map(version => ({ ...version, reason: "edit", serveCount: 0 })) },
+      { key: "handler", kind: "script", name: "handler", workspace: "research", working: true, versions: [] },
+    ],
+  };
+  const payload = { ...workspace, gallery };
+  const { page, app, errors, logs } = await openHost({ openai: true, proxy: true });
+  await page.evaluate(({ meta, payload, source }) => {
+    window.mcpHost!.configure({ displayMode: "fullscreen" });
+    window.mcpHost!.setServerToolResults({
+      artifacts_search: [{ content: [], _meta: { workspace: payload } }],
+      artifacts_preview: [{ content: [], _meta: meta }],
+      artifacts_source: [{ content: [], structuredContent: source }],
+      artifacts_tool: [{ content: [], isError: true, structuredContent: { error: "Project changed since it was loaded.", status: 409, applied: false } }],
+    });
+  }, { meta, payload, source });
+  await page.evaluate(workspace => window.mcpHost!.sendResult({ content: [], _meta: { workspace } }), payload);
+  await app.getByRole("tab", { name: "Source", exact: true }).click();
+  const client = app.getByRole("textbox", { name: "report.artifact.tsx", exact: true });
+  await client.fill("unsaved client");
+  await app.getByRole("button", { name: "report.artifact.server.ts", exact: true }).click();
+  await app.getByRole("textbox", { name: "report.artifact.server.ts", exact: true }).fill("unsaved server");
+  await app.getByRole("combobox", { name: "Helper file" }).selectOption("file:lib/value.ts");
+  await app.getByRole("textbox", { name: "lib/value.ts", exact: true }).fill("unsaved helper");
+  await app.getByTitle("research/handler", { exact: true }).click();
+  await app.getByRole("textbox", { name: "script.ts", exact: true }).fill("unsaved script");
+  await app.getByTitle("research/report", { exact: true }).click();
+  await app.getByRole("tab", { name: "Source", exact: true }).click();
+  expect(await client.innerText()).toBe("unsaved client");
+  await app.getByRole("button", { name: "Save and deploy", exact: true }).click();
+  await app.getByRole("button", { name: "Compare saved project" }).waitFor().catch(async error => {
+    throw new Error(`${error}: ${JSON.stringify({ text: await app.locator("body").innerText(), calls: await page.evaluate(() => window.mcpHost!.serverToolCalls), errors, logs })}`);
+  });
+  const calls = await page.evaluate(() => window.mcpHost!.serverToolCalls);
+  const save = calls.find(call => call.name === "artifacts_tool");
+  expect(save?.arguments).toEqual({ workspace: "research", tool: "artifact_write", arguments: {
+    name: "report", contents: "unsaved client", server: "unsaved server",
+    project: { files: { "lib/value.ts": "unsaved helper" }, dependencies: {} }, expected_revision: source.revision_token,
+  } });
+  await app.getByRole("button", { name: "Compare saved project" }).click();
+  await app.getByText("Saved project (your edits remain in the editor)").waitFor();
+  expect(await client.innerText()).toBe("unsaved client");
+  await app.getByRole("button", { name: "Reload saved project" }).click();
+  await app.getByRole("button", { name: "Keep editing", exact: true }).click();
+  expect(await client.innerText()).toBe("unsaved client");
+  await app.getByRole("button", { name: "Reload saved project" }).click();
+  await app.getByRole("button", { name: "Discard edits and reload" }).click();
+  await client.filter({ hasText: "Interactive artifact" }).waitFor();
+  await app.getByLabel("Revision of report").selectOption(meta.artifact.versionId);
+  await app.getByRole("button", { name: "Restore and deploy", exact: true }).waitFor();
+  await client.and(app.locator('[aria-readonly="true"]')).waitFor();
+  const historicalSource = await client.innerText();
+  await client.focus();
+  await page.keyboard.insertText("This must not change historical source");
+  expect(await client.innerText()).toBe(historicalSource);
+  expect(await app.locator(".live-data-note").innerText()).toContain("Historical code uses the current database");
+  const screenshots = process.env.ARTIFACTS_SCREENSHOT_DIR;
+  if (screenshots) {
+    mkdirSync(screenshots, { recursive: true });
+    await page.screenshot({ path: join(screenshots, "artifacts-source-dark.png") });
+    await page.evaluate(() => {
+      window.mcpHost!.setTheme("light");
+      window.mcpHost!.configure({ displayMode: "inline", containerDimensions: { width: 420, height: 700 } });
+    });
+    await page.screenshot({ path: join(screenshots, "artifacts-source-narrow.png") });
+  }
   expect(errors).toEqual([]);
 }, 30_000);
 
@@ -748,30 +891,52 @@ export default function RefreshArtifact() {
   const meta = await resultFor(source, "refresh");
   meta.artifact.workspace = "research";
   const { page, app, errors } = await openHost({ openai: true });
-  const workspace = { view: "library", workspace: "conversation", nextOffset: null, items: [{ name: "refresh", workspace: "research", working: true, versions: [] }] };
+  const workspace = workspaceFor(meta.artifact);
+  await page.evaluate(({meta, workspace}) => {
+    window.mcpHost!.configure({displayMode:"fullscreen"});
+    window.mcpHost!.setServerToolResults({artifacts_preview:[{content:[],_meta:meta}],artifacts_search:[{content:[],_meta:{workspace}}]});
+  }, {meta,workspace});
+  const preview = app.frameLocator(".preview-frame");
   await page.evaluate(workspace => window.mcpHost!.sendResult({ content: [], _meta: { workspace } }), workspace);
-  await page.evaluate(meta => window.mcpHost!.setServerToolResult({ content: [], _meta: meta }), meta);
-  await app.getByRole("button", { name: "Open refresh", exact: true }).click();
-  await app.getByRole("button", { name: "Increment", exact: true }).click();
-  await app.getByRole("link", { name: "Details", exact: true }).click();
-  await app.getByRole("button", { name: "Attach row", exact: true }).click();
-  await app.getByText("Selected: 42", { exact: true }).waitFor();
-  await app.getByText("Route: /details", { exact: true }).waitFor();
-  await app.getByText("Count: 1", { exact: true }).waitFor();
-  const previousHeading = await app.getByRole("heading", { name: "Refresh artifact", exact: true }).elementHandle();
-  await app.getByRole("button", { name: "Refresh artifact", exact: true }).click();
-  await previousHeading!.waitForElementState("hidden");
-  await page.waitForFunction(() => window.mcpHost!.serverToolCalls.length === 2);
-  await app.getByText("Selected: 42", { exact: true }).waitFor();
-  await app.getByText("Route: /details", { exact: true }).waitFor();
-  await app.getByText("Count: 1", { exact: true }).waitFor();
+  await preview.getByRole("heading", { name: "Refresh artifact", exact: true }).waitFor();
+  await preview.getByRole("button", { name: "Increment", exact: true }).click();
+  await preview.getByRole("link", { name: "Details", exact: true }).click();
+  await preview.getByRole("button", { name: "Attach row", exact: true }).click();
+  await preview.getByText("Selected: 42", { exact: true }).waitFor();
+  await preview.getByText("Route: /details", { exact: true }).waitFor();
+  await preview.getByText("Count: 1", { exact: true }).waitFor();
+  const previewsBeforeToggle = await page.evaluate(() => window.mcpHost!.serverToolCalls.filter(call => call.name === "artifacts_preview").length);
+  await app.getByRole("button", { name: "Hide library" }).click();
+  await app.getByRole("searchbox").waitFor({ state: "hidden" });
+  await preview.getByText("Count: 1", { exact: true }).waitFor();
+  await app.getByRole("button", { name: "Show library" }).click();
+  await app.getByRole("searchbox").waitFor();
+  await preview.getByText("Count: 1", { exact: true }).waitFor();
+  expect(await page.evaluate(() => window.mcpHost!.serverToolCalls.filter(call => call.name === "artifacts_preview").length)).toBe(previewsBeforeToggle);
+  await page.evaluate(() => window.mcpHost!.configure({ styles: { variables: { "--color-text-primary": "rgb(220, 225, 230)", "--color-background-primary": "rgb(35, 36, 37)" } } }));
+  const chrome = await app.locator(".detail-header").evaluate(element => ({
+    height: element.getBoundingClientRect().height,
+    color: getComputedStyle(element).color,
+    bodyBackground: getComputedStyle(document.body).backgroundColor,
+    panelBorder: getComputedStyle(document.querySelector(".artifact-detail")!).borderTopWidth,
+  }));
+  expect(chrome.height).toBeLessThanOrEqual(48);
+  expect(chrome.color).toBe("rgb(220, 225, 230)");
+  expect(chrome.bodyBackground).toBe("rgba(0, 0, 0, 0)");
+  expect(chrome.panelBorder).toBe("0px");
+  await app.getByRole("button", { name: "More actions" }).click();
+  await app.getByRole("menuitem", { name: "Refresh", exact: true }).click();
+  await page.waitForFunction(() => window.mcpHost!.serverToolCalls.filter(call => call.name === "artifacts_preview").length >= 2);
+  await preview.getByText("Selected: 42", { exact: true }).waitFor();
+  await preview.getByText("Route: /details", { exact: true }).waitFor();
+  await preview.getByText("Count: 1", { exact: true }).waitFor();
   await page.evaluate(() => window.mcpHost!.sendResult({ content: [{ type: "text", text: "Saved without preview" }], structuredContent: { applied: true, ok: true, revision: 2 } }));
-  await app.getByText("Count: 1", { exact: true }).waitFor();
+  await preview.getByText("Count: 1", { exact: true }).waitFor();
   await page.evaluate(() => window.mcpHost!.sendResult({ content: [{ type: "text", text: "Type error in new draft" }], isError: true }));
   await app.getByRole("status").filter({ hasText: "Type error in new draft" }).waitFor();
-  await app.getByText("Selected: 42", { exact: true }).waitFor();
-  await app.getByText("Route: /details", { exact: true }).waitFor();
-  await app.getByText("Count: 1", { exact: true }).waitFor();
+  await preview.getByText("Selected: 42", { exact: true }).waitFor();
+  await preview.getByText("Route: /details", { exact: true }).waitFor();
+  await preview.getByText("Count: 1", { exact: true }).waitFor();
   expect(await page.evaluate(() => window.mcpHost!.modelContexts.length)).toBe(1);
   expect(errors).toEqual([]);
 }, 30_000);

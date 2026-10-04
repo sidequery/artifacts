@@ -1,6 +1,6 @@
 import { App, type McpUiHostContext } from "@modelcontextprotocol/ext-apps";
 import type { ArtifactAppPayload } from "../mcp/app";
-import type { ArtifactAction, HostBridge } from "../sdk/hooks";
+import type { HostBridge } from "../sdk/hooks";
 import type { ArtifactHttpRequest, ArtifactHttpResponse } from "../sdk/server";
 import { artifactFileTransferUrl } from "../sdk/files";
 import { createMcpHost } from "./mcp-host";
@@ -9,6 +9,8 @@ import { fetchArtifactPreview, mountWorkspace, parseArtifactDeepLink, type Artif
 import type { ArtifactWorkspacePayload } from "../mcp/workspace-contract";
 import type { ArtifactModelContext } from "../sdk/hooks";
 import { ARTIFACTS_DISPLAY_MODES } from "../mcp/host-contract";
+import { mountMcpPreview } from "./mcp-preview";
+import type { GalleryArtifact } from "../gallery/types";
 
 // Measure intrinsic content rather than the iframe's document height, so views
 // can grow and shrink even when the host clamps or ignores a resize request.
@@ -23,7 +25,6 @@ const toolbar = document.getElementById("artifact-toolbar")!;
 const displayButton = document.getElementById("display-mode") as HTMLButtonElement;
 let script: HTMLScriptElement | undefined;
 let activeArtifact: ArtifactAppPayload | undefined;
-let disposeView: (() => void) | undefined;
 let viewDisposal: Promise<void> = Promise.resolve();
 let fileEditor: ReturnType<typeof mountArtifactFileEditor> | undefined;
 let activeDeepLink: string | undefined;
@@ -31,6 +32,11 @@ let pendingContextId: string | undefined;
 let opening = 0;
 let contextEpoch = 0;
 let lastWorkspace: ArtifactWorkspacePayload | undefined;
+let workspaceView: ReturnType<typeof mountWorkspace> | undefined;
+let selectedArtifact: ArtifactSelection | undefined;
+const activeBridges = new Set<HostBridge>();
+const previews = new Set<ReturnType<typeof mountMcpPreview>>();
+const previewState = new Map<string, Pick<HostBridge, "state" | "route">>();
 const controls = document.createElement("nav");
 controls.setAttribute("aria-label", "Working artifact controls");
 controls.hidden = true;
@@ -56,7 +62,7 @@ function reportSize() {
   if (sizeFrame) return;
   sizeFrame = requestAnimationFrame(() => {
     sizeFrame = 0;
-    // Fullscreen/PiP dimensions belong to the host, not the artifact content.
+    // Fullscreen dimensions belong to the host, not the artifact content.
     if (!connected || (context.displayMode && context.displayMode !== "inline")) return;
     const contentHeight = Math.max(root.getBoundingClientRect().height, root.scrollHeight)
       + status.getBoundingClientRect().height + (controls.hidden ? 0 : controls.getBoundingClientRect().height)
@@ -72,11 +78,20 @@ function reportSize() {
 const resizeObserver = new ResizeObserver(reportSize);
 for (const element of [shell, viewport, root, status, toolbar, controls]) resizeObserver.observe(element);
 
+function reportViewportSize() {
+  // Moving a native view from its tab back into the chat can resize the frame
+  // after the mode notification. Reassert our inline size even if the content
+  // did not change; the host may have restored an older intrinsic height.
+  lastHeight = undefined;
+  reportSize();
+}
+window.addEventListener("resize", reportViewportSize);
+
 function updateDisplay() {
   const mode = context.displayMode ?? "inline";
   document.documentElement.dataset.displayMode = mode;
   const target = mode === "fullscreen" ? "inline" : "fullscreen";
-  toolbar.hidden = !(hasArtifact || mode === "fullscreen") || !context.availableDisplayModes?.includes(target);
+  toolbar.hidden = document.documentElement.dataset.view === "workspace" || document.documentElement.dataset.view === "file" || !(hasArtifact || mode === "fullscreen") || !context.availableDisplayModes?.includes(target);
   displayButton.title = mode === "fullscreen" ? "Exit fullscreen" : "Expand artifact";
   displayButton.setAttribute("aria-label", mode === "fullscreen" ? "Exit fullscreen" : "Expand artifact");
   displayButton.disabled = changingMode;
@@ -97,25 +112,25 @@ function applyContext(update: McpUiHostContext) {
   context = { ...context, ...update };
   host.applyContext(context);
   const attachment = host.extensions.modelContext?.getCurrent();
-  if (hostWindow.__artifacts && attachment !== undefined) {
-    const bridge = hostWindow.__artifacts;
+  for (const bridge of activeBridges) {
+    if (attachment === undefined) continue;
     const identity = attachment?.structuredContent?.artifact as { version_id?: string } | undefined;
-    bridge.contextAttached = attachment !== null && identity?.version_id === activeArtifact?.versionId;
+    bridge.contextAttached = attachment !== null && identity?.version_id === bridgeVersions.get(bridge);
     if (!attachment) { contextEpoch++; bridge.modelContext = null; pendingContextId = undefined; }
     else if (!pendingContextId || attachment.updateId === pendingContextId) {
       bridge.modelContext = (bridge.contextAttached ? attachment.structuredContent?.view ?? null : null) as ArtifactModelContext | null;
     }
   }
+  const attachedIdentity = attachment?.structuredContent?.artifact as { version_id?: string } | undefined;
+  workspaceView?.update({ attachedVersionId: attachedIdentity?.version_id });
   const deepLink = host.extensions.deepLink.getCurrent()?.url;
   if (deepLink && deepLink !== activeDeepLink) {
     activeDeepLink = deepLink;
     const selection = parseArtifactDeepLink(deepLink);
     if (selection) void openSelection(selection).catch(error => { status.textContent = String(error); });
   }
-  if (hostWindow.__artifacts) {
-    hostWindow.__artifacts.environment = { locale: context.locale, timeZone: context.timeZone };
-    window.dispatchEvent(new Event("artifact-host-context-change"));
-  }
+  for (const bridge of activeBridges) bridge.environment = { locale: context.locale, timeZone: context.timeZone };
+  window.dispatchEvent(new Event("artifact-host-context-change"));
   if (previousMode !== context.displayMode) lastHeight = undefined;
   theme(context.theme);
   updateDisplay();
@@ -141,19 +156,13 @@ displayButton.addEventListener("click", async () => {
 
 function theme(kind?: string) {
   const value = kind === "light" ? "light" : "dark";
+  document.documentElement.dataset.theme = value;
   document.documentElement.style.setProperty("--artifact-background", value === "light" ? "#ffffff" : "#181818");
   document.documentElement.style.setProperty("--artifact-foreground", value === "light" ? "#181818" : "#f0f0f0");
-  if (hostWindow.__artifacts) hostWindow.__artifacts.theme = { kind: value };
+  for (const bridge of activeBridges) bridge.theme = { kind: value };
+  for (const preview of previews) preview.update();
   window.dispatchEvent(new Event("artifact-theme-change"));
   window.dispatchEvent(new Event("canvas-theme-change"));
-}
-
-async function action(value: ArtifactAction) {
-  try {
-    const result: { isError?: boolean } = await host.action(value);
-    if (result.isError) throw new Error("The chat host declined this artifact action.");
-    status.textContent = "";
-  } catch (error) { status.textContent = error instanceof Error ? error.message : String(error); }
 }
 
 async function serverRequest(artifact: ArtifactAppPayload, request: ArtifactHttpRequest): Promise<ArtifactHttpResponse> {
@@ -171,8 +180,11 @@ async function serverRequest(artifact: ArtifactAppPayload, request: ArtifactHttp
 }
 
 function clear() {
-  disposeView?.();
-  disposeView = undefined;
+  workspaceView?.dispose();
+  workspaceView = undefined;
+  for (const preview of previews) preview.dispose();
+  previews.clear();
+  activeBridges.clear();
   if (fileEditor) {
     const disposal = fileEditor.dispose();
     viewDisposal = Promise.all([viewDisposal, disposal]).then(() => {});
@@ -189,47 +201,60 @@ function clear() {
   root.replaceChildren();
   viewport.scrollTo(0, 0);
   hasArtifact = false;
+  document.documentElement.dataset.view = "artifact";
+  root.style.removeProperty("padding");
+  root.style.removeProperty("height");
+  viewport.style.removeProperty("overflow");
   updateDisplay();
 }
 
 async function openSelection(selection: ArtifactSelection) {
   if (fileEditor?.hasUnsavedChanges()) throw new Error("Save or discard the file draft before opening another view.");
   if (!host.capabilities().serverTools) throw new Error("Browsing artifacts is unavailable in this host.");
+  selectedArtifact = selection;
+  if (workspaceView) { workspaceView.update({ selection }); return; }
   const request = ++opening;
   const artifact = await fetchArtifactPreview(app, selection);
   if (request !== opening) return;
   renderArtifact(artifact, selection.route, true);
 }
 
-function renderArtifact(artifact: ArtifactAppPayload, route?: string, preserve = false) {
-  const previous = hostWindow.__artifacts;
-  const compatible = preserve && activeArtifact?.name === artifact.name && activeArtifact?.workspace === artifact.workspace;
-  const state = compatible ? { ...artifact.state, ...previous?.state } : artifact.state;
+const bridgeVersions = new WeakMap<HostBridge, string>();
+
+function createArtifactBridge(artifact: ArtifactAppPayload, route?: string, previous?: Pick<HostBridge, "state" | "route">) {
   const restored = host.extensions.modelContext?.getCurrent();
-  const restoredIdentity = restored?.structuredContent?.artifact as { version_id?: string } | undefined;
-  const restore = restoredIdentity?.version_id === artifact.versionId;
-  const modelContext = compatible ? previous?.modelContext : restore ? (restored?.structuredContent?.view ?? null) as ArtifactModelContext | null : null;
-  const contextAttached = compatible ? previous?.contextAttached && activeArtifact?.versionId === artifact.versionId : restore;
-  const previousRoute = compatible ? previous?.route?.path : undefined;
-  clear();
-  activeArtifact = artifact;
+  const identity = restored?.structuredContent?.artifact as { version_id?: string } | undefined;
+  const attached = identity?.version_id === artifact.versionId;
   const capabilities = host.capabilities();
-  const bridge: HostBridge & { canvasId: string } = {
-    canvasId: artifact.name, artifactId: artifact.name, state,
-    route: { path: route ?? previousRoute ?? "/", basePath: "", external: true, transport: "mcp" },
-    modelContext, contextAttached,
-    actions: capabilities.actions, environment: { locale: context.locale, timeZone: context.timeZone },
-    onAction: value => { void action(value); },
+  const bridge: HostBridge = {
+    artifactId: artifact.name,
+    state: { ...artifact.state, ...previous?.state },
+    route: { path: route ?? previous?.route?.path ?? "/", basePath: "", external: true, transport: "mcp" },
+    modelContext: attached ? (restored?.structuredContent?.view ?? null) as ArtifactModelContext | null : null,
+    contextAttached: attached,
+    theme: { kind: context.theme === "light" ? "light" : "dark" },
+    actions: capabilities.actions,
+    environment: { locale: context.locale, timeZone: context.timeZone },
+    onAction: value => host.action(value).then(result => {
+      if (result.isError) throw new Error("The chat host declined this artifact action.");
+    }),
   };
+  activeBridges.add(bridge);
+  bridgeVersions.set(bridge, artifact.versionId);
   if (capabilities.modelContext) bridge.onModelContext = async view => {
     const epoch = contextEpoch;
     const snapshot = view === null ? undefined : { artifact: { name: artifact.name, workspace: artifact.workspace, version_id: artifact.versionId, revision: artifact.revision }, view };
-    const result = await host.updateContext(snapshot ? { structuredContent: snapshot, content: [{ type: "text", text: JSON.stringify(snapshot) }] } : { content: [], structuredContent: {} });
-    // A late acknowledgement cannot attach context to a replacement view.
-    if (hostWindow.__artifacts !== bridge || epoch !== contextEpoch) return;
+    const result = await host.updateContext(snapshot ? {
+      structuredContent: snapshot,
+      content: [{ type: "text", text: JSON.stringify(snapshot), _meta: { "openai/title": artifact.name } }],
+    } : { content: [], structuredContent: {} });
+    if (!activeBridges.has(bridge) || epoch !== contextEpoch) return;
     pendingContextId = result?.updateId;
     bridge.modelContext = view;
     bridge.contextAttached = view !== null;
+    workspaceView?.update({ attachedVersionId: view !== null ? artifact.versionId : undefined });
+    attachButton.textContent = view !== null ? "Update conversation context" : "Use in conversation";
+    for (const preview of previews) preview.update();
     window.dispatchEvent(new Event("artifact-host-context-change"));
   };
   if (artifact.server === true && capabilities.serverTools) bridge.onRequest = request => serverRequest(artifact, request);
@@ -252,20 +277,91 @@ function renderArtifact(artifact: ArtifactAppPayload, route?: string, preserve =
     if (!structured || !Object.hasOwn(structured, "result")) throw new Error("Plugin result was missing");
     return structured.result;
   };
+  return bridge;
+}
+
+function renderArtifact(artifact: ArtifactAppPayload, route?: string, preserve = false) {
+  const previous = preserve && activeArtifact?.name === artifact.name && activeArtifact?.workspace === artifact.workspace ? hostWindow.__artifacts : undefined;
+  clear();
+  activeArtifact = artifact;
+  const bridge = createArtifactBridge(artifact, route, previous);
   hostWindow.__artifacts = hostWindow.__herdrCanvas = bridge;
   hasArtifact = true;
   controls.hidden = !preserve;
   libraryButton.hidden = !lastWorkspace;
-  attachButton.hidden = !capabilities.modelContext;
+  attachButton.hidden = !host.capabilities().modelContext;
   theme(context.theme);
   updateDisplay();
   status.textContent = "";
-  // The host's MCP Apps sandbox/CSP contains this locally authored artifact.
-  // Inline modules avoid eval, external assets, loopback fetches and blob URLs.
+  // Inline tool results render the authored artifact immediately.
   script = document.createElement("script");
   script.type = "module";
   script.textContent = artifact.js;
   document.body.append(script);
+}
+
+async function renderWorkspacePreview(container: HTMLElement, item: GalleryArtifact, version: string, route?: string) {
+  const selection = { workspace: item.workspace, ...(version === "working" ? { name: item.name } : { version_id: version }) };
+  const artifact = await fetchArtifactPreview(app, selection);
+  if (!container.isConnected) return () => {};
+  const key = JSON.stringify([item.key, version]);
+  const previous = previewState.get(key);
+  const bridge = createArtifactBridge(artifact, previous?.route?.path ?? route, previous);
+  const preview = mountMcpPreview(container, artifact.js, bridge, message => { status.textContent = message; });
+  previews.add(preview);
+  return () => {
+    previewState.set(key, { state: bridge.state, route: bridge.route });
+    activeBridges.delete(bridge); previews.delete(preview); preview.dispose();
+  };
+}
+
+async function attachWorkspaceArtifact(item: GalleryArtifact, version: string) {
+  const bridge = [...activeBridges].find(value => value.artifactId === item.name && (version === "working" || bridgeVersions.get(value) === version));
+  if (bridge?.onModelContext) {
+    await bridge.onModelContext({ ...bridge.modelContext, route: bridge.route?.path ?? "/" });
+    return;
+  }
+  const artifact = await fetchArtifactPreview(app, { workspace: item.workspace, ...(version === "working" ? { name: item.name } : { version_id: version }) });
+  const temporary = createArtifactBridge(artifact);
+  try {
+    if (!temporary.onModelContext) throw new Error("Adding context is unavailable in this chat");
+    await temporary.onModelContext({ route: "/" });
+  } finally { activeBridges.delete(temporary); }
+}
+
+function showWorkspace(workspace: ArtifactWorkspacePayload) {
+  clear();
+  status.textContent = "";
+  hasArtifact = true;
+  lastWorkspace = workspace;
+  document.documentElement.dataset.view = "workspace";
+  root.style.padding = "0";
+  root.style.height = "100%";
+  viewport.style.overflow = "hidden";
+  const attached = host.extensions.modelContext?.getCurrent();
+  const identity = attached?.structuredContent?.artifact as ArtifactSelection | undefined;
+  const view = attached?.structuredContent?.view as ArtifactModelContext | undefined;
+  const restored = workspace.view === "working" && identity?.version_id ? { ...identity, route: view?.route ?? "/" } : undefined;
+  workspaceView = mountWorkspace(root, app, workspace, {
+    selection: selectedArtifact ?? restored,
+    attachedVersionId: identity?.version_id,
+    renderPreview: renderWorkspacePreview,
+    attach: attachWorkspaceArtifact,
+    onSelectionChange: selection => { selectedArtifact = selection; },
+    openLink: async url => {
+      const result = await app.openLink({ url });
+      if (result.isError) throw new Error("The host could not open the link");
+    },
+    ...(workspace.productUrl ? { openProduct: async () => {
+      const result = await app.openLink({ url: workspace.productUrl! });
+      if (result.isError) throw new Error("The host could not open the library");
+    } } : {}),
+    ...(host.capabilities().actions.promptAgent ? { askCreate: async () => {
+      const result = await host.action({ type: "promptAgent", prompt: "Help me create a new artifact in my connected Artifacts library. Ask what I want to build before creating it." });
+      if (result.isError) throw new Error("The host could not send the request");
+    } } : {}),
+  });
+  updateDisplay();
 }
 app.ontoolresult = result => {
   if (fileEditor?.hasUnsavedChanges()) { status.textContent = "Save or discard the file draft before replacing this view."; return; }
@@ -273,27 +369,18 @@ app.ontoolresult = result => {
   ++opening;
   if (result.isError) { status.textContent = result.content?.filter(item => item.type === "text").map(item => item.text).join("\n") || "Artifact could not be rendered."; return; }
   const artifact = result._meta?.artifact as ArtifactAppPayload | undefined;
-  if (artifact?.js) { renderArtifact(artifact); return; }
+  if (artifact?.js) {
+    if (workspaceView) { workspaceView.refresh(); return; }
+    renderArtifact(artifact); return;
+  }
   const workspace = result._meta?.workspace as ArtifactWorkspacePayload | undefined;
   if (workspace) {
-    clear();
-    status.textContent = "";
-    hasArtifact = true;
-    lastWorkspace = workspace;
-    disposeView = mountWorkspace(root, app, workspace, openSelection);
-    updateDisplay();
-    // Each thread gets its own host instance. Reopen its explicit attachment,
-    // with fresh authorization, without inventing a server-side chat identity.
-    const attached = host.extensions.modelContext?.getCurrent();
-    const selected = attached?.structuredContent?.artifact as { name?: unknown; workspace?: unknown; version_id?: unknown } | undefined;
-    if (workspace.view === "working" && typeof selected?.version_id === "string" && typeof selected.workspace === "string") {
-      const view = attached?.structuredContent?.view as ArtifactModelContext | undefined;
-      const route = typeof view?.route === "string" && view.route.startsWith("/") && !view.route.startsWith("//") ? view.route : "/";
-      void openSelection({ workspace: selected.workspace, version_id: selected.version_id, route }).catch(error => { status.textContent = String(error); });
-    }
+    if (workspaceView && lastWorkspace?.view === workspace.view) workspaceView.refresh();
+    else showWorkspace(workspace);
     return;
   }
   // Diagnostics-only mutations deliberately leave the working view mounted.
+  workspaceView?.refresh();
 };
 app.ontoolinput = async ({ arguments: args }) => {
   const file = args?.file as { resourceUri?: string; name?: string } | undefined;
@@ -304,6 +391,10 @@ app.ontoolinput = async ({ arguments: args }) => {
   await viewDisposal;
   if (request !== opening) return;
   fileEditor = mountArtifactFileEditor(root, host.extensions, { file: { resourceUri: file.resourceUri, name: file.name } });
+  document.documentElement.dataset.view = "file";
+  root.style.padding = "0";
+  root.style.height = "100%";
+  viewport.style.overflow = "hidden";
   hasArtifact = true;
   status.textContent = "";
   updateDisplay();
@@ -314,13 +405,10 @@ window.addEventListener("artifact/navigate", event => {
 });
 libraryButton.addEventListener("click", () => {
   if (!lastWorkspace) return;
-  clear();
-  hasArtifact = true;
-  disposeView = mountWorkspace(root, app, lastWorkspace, openSelection);
-  updateDisplay();
+  showWorkspace(lastWorkspace);
 });
 refreshButton.addEventListener("click", () => {
-  if (activeArtifact) void openSelection({ workspace: activeArtifact.workspace, name: activeArtifact.name }).catch(error => { status.textContent = String(error); });
+  if (activeArtifact) void openSelection(selectedArtifact ?? { workspace: activeArtifact.workspace, version_id: activeArtifact.versionId }).catch(error => { status.textContent = String(error); });
 });
 attachButton.addEventListener("click", () => {
   const bridge = hostWindow.__artifacts;
@@ -329,13 +417,22 @@ attachButton.addEventListener("click", () => {
 app.ontoolcancelled = () => { ++opening; if (fileEditor?.hasUnsavedChanges()) { status.textContent = "Request cancelled. Your unsaved file draft is preserved."; return; } clear(); status.textContent = "Artifact request cancelled."; };
 app.onteardown = async () => {
   ++opening;
+  connected = false;
   resizeObserver.disconnect();
+  window.removeEventListener("resize", reportViewportSize);
   if (sizeFrame) cancelAnimationFrame(sizeFrame);
   clear();
   await viewDisposal;
   return {};
 };
 app.onhostcontextchanged = applyContext;
+// Moving focus from the preview frame to its toolbar must not reload the artifact.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    reportViewportSize();
+    workspaceView?.refresh();
+  }
+});
 window.addEventListener("error", event => { status.textContent = `Artifact error: ${event.message}`; });
 window.addEventListener("unhandledrejection", event => { status.textContent = `Artifact error: ${String(event.reason)}`; });
 app.connect().then(() => {

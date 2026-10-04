@@ -124,6 +124,10 @@ test("official MCP client can initialize, discover UI, create and show over stan
     const resource = await client.readResource({ uri: ARTIFACTS_APP_URI });
     expect(resource.contents[0]?.mimeType).toBe(ARTIFACTS_APP_MIME);
     expect(resource.contents[0]).toHaveProperty("text");
+    for (const uri of ["ui://artifacts/viewer.html", ...[1, 2, 3, 4, 5].map(version => `ui://artifacts/v${version}/viewer.html`)]) {
+      const legacy = await client.readResource({ uri });
+      expect(legacy.contents[0]).toEqual({ ...resource.contents[0], uri });
+    }
     const created = await client.callTool({ name: "artifact_write", arguments: { name: "overview", contents: VALID_ARTIFACT } });
     expect(created.isError).toBe(false);
     expect(created._meta).toHaveProperty("artifact");
@@ -131,5 +135,6 @@ test("official MCP client can initialize, discover UI, create and show over stan
     expect(shown.isError).toBe(false);
     expect(shown._meta).toHaveProperty("artifact");
     await expect(client.readResource({ uri: "ui://artifacts/missing" })).rejects.toThrow("unknown resource");
+    await expect(client.readResource({ uri: "ui://artifacts/v999/viewer.html" })).rejects.toThrow("unknown resource");
   } finally { await client.close(); }
 });

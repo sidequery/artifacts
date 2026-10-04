@@ -25,6 +25,8 @@ import { parseProjectArchive, projectArchive } from "../src/project-archive";
 
 import { ARTIFACTS_WORKSPACE_TOOLS } from "../src/mcp/workspace-contract";
 import { workspaceTool } from "./workspace-tools";
+import { galleryAction, gallerySource } from "./gallery-tools";
+import { ARTIFACTS_SETTINGS_TOOLS, settingsTool } from "../src/mcp/settings-contract";
 
 import { dispatchPlugin, pluginCatalog, PLUGIN_GUIDE, type PluginInvocationContext } from "./plugins";
 import type { PluginRequest } from "../src/plugins/types";
@@ -40,6 +42,7 @@ type Mutation = Snapshot & { ok: boolean; applied?: boolean; changed?: boolean; 
 type Compiled = { ok: boolean; js?: string; diagnostics: Diagnostic[]; artifact?: CompiledArtifact };
 
 export class CloudArtifactService {
+  get productUrl() { return this.hosted?.origin; }
   private readonly artifacts: ArtifactService;
   private readonly scripts: CloudScriptService;
 
@@ -51,7 +54,10 @@ export class CloudArtifactService {
   }
 
   async callTool(name: string, args: Record<string, unknown>): Promise<CallToolResult> {
-    if (typeof args.workspace === "string" && args.workspace !== this.workspace && ["artifacts_preview", "artifact_request", "artifact_files", "artifact_read", "artifact_export"].includes(name)) {
+    if (ARTIFACTS_SETTINGS_TOOLS.some(tool => tool.name === name)) return settingsTool(this, name, args);
+    if (name === "artifacts_tool") return galleryAction(this, args);
+    if (name === "artifacts_source") return gallerySource(this, args);
+    if (typeof args.workspace === "string" && args.workspace !== this.workspace) {
       const { workspace, ...selectedArgs } = args;
       return new CloudArtifactService(this.library, workspace, this.backends, this.libraryKey, this.hosted, this.plugins, this.fileStorage).callTool(name, selectedArgs);
     }
@@ -191,8 +197,9 @@ export class CloudArtifactService {
 
   pluginCall(request: PluginRequest) { return dispatchPlugin(request, this.plugins); }
 
-  snapshot(selection: { name?: string; version_id?: string; event_id?: string }): Promise<Snapshot> {
-    return this.library.preview({ workspace: this.workspace, ...selection });
+  snapshot(selection: { workspace?: string; name?: string; version_id?: string; event_id?: string }): Promise<Snapshot> {
+    const { workspace = this.workspace, ...input } = selection;
+    return this.library.preview({ workspace, ...input });
   }
 
   async preview(snapshot: Snapshot, compiled?: Compiled) {
@@ -348,7 +355,10 @@ export class CloudArtifactService {
     return { ...text({ ...preview, ...await this.artifacts.linkDetails(target) }), ...(_meta ? { _meta } : {}) };
   }
 
-  scriptReadSource(selection: { name?: string; version_id?: string }) {
+  scriptReadSource(selection: { workspace?: string; name?: string; version_id?: string }): ReturnType<CloudScriptService["readSource"]> {
+    if (selection.workspace && selection.workspace !== this.workspace) {
+      return new CloudArtifactService(this.library, selection.workspace, this.backends, this.libraryKey, this.hosted, this.plugins, this.fileStorage).scriptReadSource({ name: selection.name, version_id: selection.version_id });
+    }
     return this.scripts.readSource(selection);
   }
 
@@ -391,7 +401,7 @@ export class CloudArtifactService {
         Object.assign(artifact, await this.artifacts.linkDetails({ libraryKey: this.libraryKey, workspace: artifact.workspace, name: artifact.name, kind: artifact.kind }));
       }
     }
-    return { ...(this.hosted ? { capabilities: { scripts: true, links: true } } : {}), workspace: this.workspace, artifacts: [...artifacts.values()].sort((a, b) => a.name.localeCompare(b.name) || a.workspace.localeCompare(b.workspace)), nextOffset: scriptsHaveMore || versions.length === 100 || drafts.length === 100 ? offset + 100 : null };
+    return { capabilities: { editing: true, ...(this.hosted ? { scripts: true, links: true } : {}) }, workspace: this.workspace, artifacts: [...artifacts.values()].sort((a, b) => a.name.localeCompare(b.name) || a.workspace.localeCompare(b.workspace)), nextOffset: scriptsHaveMore || versions.length === 100 || drafts.length === 100 ? offset + 100 : null };
   }
 }
 

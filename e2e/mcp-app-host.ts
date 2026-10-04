@@ -27,8 +27,10 @@ declare global {
       setTheme(theme: "dark" | "light"): void;
       configure(update: Partial<McpUiHostContext>): void;
       setInlineFrameLimit(limit?: number): void;
+      setFrameHeight(height: number): void;
       setRequestBehavior(behavior: RequestBehavior): void;
       setServerToolResult(result: CallToolResult): void;
+      setServerToolResults(results: Record<string, CallToolResult[]>): void;
       context(): McpUiHostContext;
     };
   }
@@ -49,6 +51,7 @@ let serverToolResult: CallToolResult = window.initialServerToolResult ?? { conte
   response: { status: 200, statusText: "OK", headers: [] },
 } };
 let requestBehavior: RequestBehavior = "accept";
+let serverToolResults: Record<string, CallToolResult[]> = {};
 let lastRequestedHeight = 1;
 let inlineFrameLimit: number | undefined;
 let hostContext: McpUiHostContext = {
@@ -116,12 +119,18 @@ window.mcpHost = {
     inlineFrameLimit = limit;
     applyFrameSize();
   },
+  setFrameHeight(height) {
+    // A native host can reparent the same view after its mode notification and
+    // restore a previously measured frame size without changing the context.
+    iframe.style.height = `${height}px`;
+  },
   setRequestBehavior(behavior) {
     requestBehavior = behavior;
   },
   setServerToolResult(result) {
     serverToolResult = result;
   },
+  setServerToolResults(results) { serverToolResults = results; },
   context() {
     return structuredClone(hostContext);
   },
@@ -144,6 +153,8 @@ bridge.onrequestdisplaymode = async ({ mode }) => {
 };
 bridge.oncalltool = async params => {
   serverToolCalls.push(params);
+  const queued = serverToolResults[params.name];
+  if (queued?.length) return queued.length > 1 ? queued.shift()! : queued[0]!;
   return serverToolResult;
 };
 bridge.onupdatemodelcontext = async params => {
@@ -171,7 +182,7 @@ await bridge.connect(new PostMessageTransport(iframe.contentWindow!, iframe.cont
 if (proxy) {
   bridge.onsandboxready = async () => {
     window.mcpHost!.sandboxReady = true;
-    await bridge.sendSandboxResourceReady({ html: window.artifactAppHtml, sandbox: "allow-scripts" });
+    await bridge.sendSandboxResourceReady({ html: window.artifactAppHtml, sandbox: "allow-scripts allow-forms" });
   };
   iframe.src = "/sandbox-proxy";
 } else iframe.srcdoc = window.artifactAppHtml;

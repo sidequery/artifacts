@@ -1,7 +1,9 @@
+import { useGalleryTransport } from "./transport";
 import { useState } from "react";
-import { GalleryToolError, galleryTool } from "./hosted";
+import { GalleryToolError } from "./hosted";
 
 export function SecretControls({ workspace, name, kind, onSaved }: { workspace: string; name: string; kind: "script" | "artifact" | "app"; onSaved?: () => Promise<void> }) {
+  const { tool: galleryTool } = useGalleryTransport();
   const [secretName, setSecretName] = useState("");
   const [secretValue, setSecretValue] = useState("");
   const [names, setNames] = useState<string[]>([]);

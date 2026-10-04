@@ -1,6 +1,7 @@
+import { useGalleryTransport } from "./transport";
 import { useEffect, useState } from "react";
 import { Select } from "./select";
-import { encodeRequestBody, galleryTool, parseRequestHeaders } from "./hosted";
+import { encodeRequestBody, parseRequestHeaders } from "./hosted";
 import { nextOccurrence, normalizeTiming } from "../../cloudflare/schedule";
 
 type Schedule = { interval_seconds?: number; cron?: string; timezone?: string; paused: boolean; next_run_at: number | null; request: { path: string; method: string; headers: [string, string][]; body?: string } };
@@ -10,6 +11,7 @@ const units = { seconds: 1, minutes: 60, hours: 3600, days: 86400 };
 type Unit = keyof typeof units;
 
 export function ExecutionControls({ workspace, name, kind = "script", active = true }: { workspace: string; name: string; kind?: "script" | "artifact"; active?: boolean }) {
+  const { tool: galleryTool } = useGalleryTransport();
   const [hasServer, setHasServer] = useState(true);
   const [runsLoaded, setRunsLoaded] = useState(false);
   const [schedule, setSchedule] = useState<Schedule | null>(null);
