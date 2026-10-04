@@ -12,27 +12,30 @@ import { artifactFileResult } from "../src/mcp/file-contract";
 import { clientSupportsApps, toolsForClient } from "../src/mcp/host-contract";
 import { CLOUD_MCP_TOOLS } from "./tool-contract";
 import type { CloudArtifactService } from "./service";
+import { parseArtifactResourceUri } from "../src/mcp/workspace-contract";
+import { toolErrorResult } from "../src/mcp/tool-result";
+import { ARTIFACTS_SETTINGS_CAPABILITY } from "../src/mcp/settings-contract";
 
-export async function handleCloudMcp(request: Request, service: Pick<CloudArtifactService, "callTool" | "fileStorage" | "snapshot">, parsedBody?: unknown): Promise<Response> {
+export async function handleCloudMcp(request: Request, service: Pick<CloudArtifactService, "callTool" | "fileStorage" | "snapshot" | "scriptReadSource">, parsedBody?: unknown): Promise<Response> {
   // Low-level SDK registration lets local and hosted transports share the same
   // JSON schemas, with argument validators generated from them at build time.
-  const server = new Server({ name: "artifacts", version: "0.1.0" }, { capabilities: { tools: {}, resources: {} } });
+  const server = new Server({ name: "artifacts", version: "0.1.0" }, { capabilities: { tools: {}, resources: {},
+    extensions: { "openai/settings": ARTIFACTS_SETTINGS_CAPABILITY }, experimental: { "openai/settings": ARTIFACTS_SETTINGS_CAPABILITY },
+  } });
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: toolsForClient(CLOUD_MCP_TOOLS, server.getClientCapabilities() === undefined || clientSupportsApps(server.getClientCapabilities())) }));
   const resource = service.fileStorage ? { ...ARTIFACTS_RESOURCE, _meta: { ...ARTIFACTS_RESOURCE._meta, ui: { ...ARTIFACTS_RESOURCE._meta.ui,
     csp: { ...ARTIFACTS_RESOURCE._meta.ui.csp, connectDomains: [service.fileStorage.origin] },
   } } } : ARTIFACTS_RESOURCE;
   server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: [resource] }));
-  server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({ resourceTemplates: [{ uriTemplate: "artifact://project?workspace={workspace}&name={name}", name: "Artifact source", description: "Read an artifact source snapshot in the authenticated library.", mimeType: "application/json" }] }));
+  server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({ resourceTemplates: [{ uriTemplate: "artifact://project?workspace={workspace}&kind={kind}&name={name}", name: "Artifact or script project", description: "Read a complete artifact or script project in the authenticated library.", mimeType: "application/json" }] }));
   server.setRequestHandler(ReadResourceRequestSchema, async ({ params }) => {
     if (params.uri.startsWith("artifact://")) {
-      const uri = new URL(params.uri);
-      if (uri.hostname !== "project" || uri.pathname || !uri.searchParams.get("workspace") || !uri.searchParams.get("name")) throw new McpError(ErrorCode.InvalidParams, "Invalid artifact resource");
+      const { kind, ...selection } = parseArtifactResourceUri(params.uri);
       // Admission is repeated for every read; a previously issued mention URI is
       // descriptive context, never an authorization capability.
-      const selection = { workspace: uri.searchParams.get("workspace")!, name: uri.searchParams.get("name")!, ...(uri.searchParams.has("version_id") ? { version_id: uri.searchParams.get("version_id")! } : {}) };
-      const snapshot = await service.snapshot(selection);
+      const snapshot = kind === "script" ? await service.scriptReadSource(selection) : await service.snapshot(selection);
       if (snapshot.name !== selection.name) throw new McpError(ErrorCode.InvalidParams, "Artifact version does not match name");
-      return { contents: [{ uri: params.uri, mimeType: "application/json", text: JSON.stringify({ name: snapshot.name, workspace: snapshot.workspace, version_id: snapshot.version_id ?? null, revision_token: snapshot.revision_token, description: `React artifact ${snapshot.name} in workspace ${snapshot.workspace}`, source: snapshot.source, server_source: snapshot.server_source, project: snapshot.project }) }] };
+      return { contents: [{ uri: params.uri, mimeType: "application/json", text: JSON.stringify({ ...snapshot, kind, workspace: selection.workspace, description: `${kind} ${snapshot.name} in workspace ${selection.workspace}` }) }] };
     }
     if (params.uri !== ARTIFACTS_APP_URI) throw new McpError(ErrorCode.InvalidParams, "Unknown resource");
     return { contents: [{ ...resource, text: shell }] };
@@ -51,7 +54,7 @@ export async function handleCloudMcp(request: Request, service: Pick<CloudArtifa
       return result;
     }
     catch (error) {
-      return { content: [{ type: "text" as const, text: error instanceof Error ? error.message : String(error) }], isError: true };
+      return toolErrorResult(error);
     }
   });
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });

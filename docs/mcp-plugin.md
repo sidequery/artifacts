@@ -30,13 +30,15 @@ The server builds on MCP Apps and advertises optional OpenAI extensions. Actual 
 
 | Surface | Purpose and boundary |
 | --- | --- |
-| Global sidebar | Open the Artifacts library through an empty-argument entrypoint; list only the connected identity's accessible artifacts. |
-| Conversation view | Browse working artifacts in the connected workspace and keep the selected artifact context available in the host view. There is no stored host conversation identifier or separate conversation membership list. |
-| Mentions | Search accessible artifacts for composer selection. Mention results do not grant access. |
+| Global sidebar | Open the shared Artifacts gallery: folders, search, artifacts and scripts, Preview/Source, saved revisions, Share and Remix. Worker apps open the existing product. The catalog remains permission-filtered. |
+| Conversation view | Restore the explicit attached selection or choose an artifact from the library. Browsing does not attach context automatically. There is no stored host conversation identifier or separate conversation membership list. |
+| Plugin settings | Native connection settings report the actual workspace and provide an authorized connection check. Endpoint configuration stays with the host; no fake editable preference is stored. |
+| Mentions | Search accessible artifacts and scripts with workspace/kind identity; references resolve complete source projects. Mention results do not grant access. |
 | Deep links | Open `/artifact?workspace=WORKSPACE&name=NAME` or `/artifact?workspace=WORKSPACE&version_id=ID`, with optional `route` for internal navigation. Encode query values. Server authorization still applies; a link never bypasses owner/team checks. |
 | Model context | Publish selected artifact/revision, route, and filter context without automatically sending a prompt. Prompt actions are deliberate user actions. |
 | File editor | Open the owned `.artifact.tsx` format through opaque host resources. Writing requires writable capability and an ETag; conflicts require rereading before retrying. |
 | Display and theme | Use the host's supported display modes, theme, styles, locale, and timezone; hide unavailable controls and tolerate rejected requests. |
+| Onboarding | Verify the configured connection without creating examples, then open the existing library or begin the user's own artifact request. |
 
 Tool visibility distinguishes model calls from app calls; it does not replace server authorization. Host context and file resource identifiers are untrusted input. UI selection, attachments, and cached state cannot expand library, owner, or team access.
 
@@ -46,6 +48,8 @@ The author skill reads `artifact_guide`, guards source edits using `source_hash`
 
 Setup verifies connection using tool discovery, `artifact_guide`, and `artifact_list`. It does not create example artifacts or alter the user's library. Host file editing requires its own advertised resource and write capabilities; it is separate from hosted artifact file storage described in [files](files.md).
 
-Rich OpenAI forms and migration to multi-round-trip requests (MRTR) are deliberately deferred. Packaging this plugin does not claim support for those protocol extensions or for every surface in every host.
+Hosted project edits use complete snapshots, revision tokens and the existing service authorization. Stale saves preserve the draft for comparison/reload. Legacy local filesystem connections show source read-only; host-managed file editing remains a separate ETag-protected surface. Authored previews run in isolated, sandboxed blob frames so their CSS and React root cannot replace the gallery.
+
+Native rich forms require a transport change: the hosted MCP endpoint uses stateless JSON replies, and local stdio has no server-request response router. Neither currently retains the callback correlation needed for OpenAI elicitation. Remix therefore uses the real product form. Migration to bidirectional elicitation or MRTR is not claimed by this package.
 
 The portable manifest and connection shapes follow the [plugin schema](https://agent-plugins.org/schemas/1.0.0/plugin.schema.json) and [MCP schema](https://agent-plugins.org/schemas/1.0.0/mcp.schema.json). Optional host integration follows the [OpenAI MCP Extensions specification](https://github.com/openai/mcp-extensions/blob/main/docs/spec.md); the installed SDK and capability negotiation determine the implemented contract.

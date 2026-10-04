@@ -1,6 +1,8 @@
 import { ARTIFACTS_FILE_TOOL } from "../src/mcp/file-contract";
 import { applyToolVisibility } from "../src/mcp/host-contract";
 import { ARTIFACTS_WORKSPACE_TOOLS } from "../src/mcp/workspace-contract";
+import { galleryToolDefinition } from "../src/mcp/gallery-contract";
+import { ARTIFACTS_SETTINGS_TOOLS } from "../src/mcp/settings-contract";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { MCP_TOOLS } from "../src/mcp/tools";
 import { PROJECT_ARCHIVE_SCHEMA } from "../src/project-archive-contract";
@@ -169,3 +171,5 @@ for (const tool of CLOUD_MCP_TOOLS) {
   if (tool.name === "artifacts_mentions") tool.inputSchema.properties!.offset = { type: "integer", minimum: 0, description: "Continue the next_offset returned by a previous mention search." };
 }
 applyToolVisibility(CLOUD_MCP_TOOLS);
+CLOUD_MCP_TOOLS.push(galleryToolDefinition(CLOUD_MCP_TOOLS));
+CLOUD_MCP_TOOLS.push(...ARTIFACTS_SETTINGS_TOOLS);

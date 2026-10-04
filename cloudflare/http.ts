@@ -4,10 +4,12 @@ import { PROJECT_IMPORT_REQUEST_BYTES } from "../src/project-archive-contract";
 export async function readToolBody(request: Request, mcp = false): Promise<unknown> {
   const text = await readRequestText(request, PROJECT_IMPORT_REQUEST_BYTES);
   const oversized = new TextEncoder().encode(text).byteLength > 1024 * 1024;
-  let value: { name?: string; method?: string; params?: { name?: string } } | null;
+  type ToolEnvelope = { name?: string; arguments?: { tool?: string } };
+  let value: (ToolEnvelope & { method?: string; params?: ToolEnvelope }) | null;
   try { value = JSON.parse(text); }
   catch (error) { if (oversized) throw new RangeError("Request exceeds 1 MiB"); throw error; }
-  const name = mcp ? value?.method === "tools/call" ? value.params?.name : undefined : value?.name;
+  const call = mcp ? value?.method === "tools/call" ? value.params : undefined : value;
+  const name = call?.name === "artifacts_tool" ? call.arguments?.tool : call?.name;
   if (oversized && name !== "artifact_import" && name !== "script_import") throw new RangeError("Request exceeds 1 MiB");
   return value;
 }

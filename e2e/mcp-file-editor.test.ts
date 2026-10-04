@@ -60,7 +60,7 @@ test("owned file editor saves inside an allow-scripts sandbox and preserves conf
     expect(await editor.innerText()).toContain("my draft");
     expect(await save.isDisabled()).toBe(true);
     await frame.getByRole("button", { name: "Discard draft and reload", exact: true }).click();
-    await frame.getByText("No unsaved changes", { exact: true }).waitFor();
+    await frame.getByText("Saved", { exact: true }).waitFor();
     expect(await editor.innerText()).toContain("keyboard");
     await sandbox.evaluate(() => (window as any).fileEditor.dispose());
     expect(await frame.getByRole("textbox").count()).toBe(0);

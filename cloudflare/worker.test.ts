@@ -938,7 +938,7 @@ test("MCP workspace tools admit cross-workspace previews and resources while sup
     const library = await client.callTool({ name: "artifacts_library", arguments: {} });
     expect((library._meta as any).workspace.items).toContainEqual(expect.objectContaining({ name: "workspace-preview", workspace: "workspace-tools" }));
     const working = await client.callTool({ name: "artifacts_working", arguments: {} });
-    expect((working._meta as any).workspace.items.some((item: any) => item.workspace === "workspace-tools")).toBe(false);
+    expect((working._meta as any).workspace.items.some((item: any) => item.workspace === "workspace-tools")).toBe(true);
     const mentions = await client.callTool({ name: "artifacts_mentions", arguments: { query: "WORKSPACE-PREVIEW" } });
     const uri = (mentions.structuredContent as any).items[0].uri;
     const resource = await client.readResource({ uri });
@@ -951,4 +951,45 @@ test("MCP workspace tools admit cross-workspace previews and resources while sup
     const after = payload(await remote.callTool({ name: "artifact_version", arguments: { version_id: versionId } }));
     expect(after.events).toHaveLength(1);
   } finally { await remote.close(); await team.close(); }
+}, 60_000);
+
+test("MCP gallery editor keeps full projects, workspace routing, CAS errors and script resource authorization", async () => {
+  const workspace = "gallery-editor", name = "gallery-source";
+  const contents = source + Array.from({ length: 240 }, (_, index) => `// retained line ${index}\n`).join("");
+  const project = { files: { "helper.ts": "export const retained = true;" }, dependencies: {} };
+  const action = (tool: string, args: Record<string, unknown>) => client.callTool({ name: "artifacts_tool", arguments: { workspace, tool, arguments: args } });
+  const written = await action("artifact_write", { name, contents, project, expected_revision: null, preview: false });
+  expect(written.isError).not.toBe(true);
+  const snapshotResult = await client.callTool({ name: "artifacts_source", arguments: { workspace, kind: "artifact", name } });
+  const snapshot = snapshotResult.structuredContent as { source: string; revision_token: string };
+  expect(snapshotResult.structuredContent).toMatchObject({ workspace, name, source: contents, server_source: null, project });
+  expect(snapshot.revision_token).toMatch(/^[a-f0-9]{64}$/);
+  const invalid = await action("artifact_write", { name, contents: "export default function Artifact() { return <Missing />; }", project, expected_revision: snapshot.revision_token, preview: false });
+  expect(invalid).toMatchObject({ isError: true, structuredContent: { applied: true, diagnostics: expect.any(Array), revision_token: expect.any(String) } });
+  const stale = await action("artifact_write", { name, contents, expected_revision: snapshot.revision_token, preview: false });
+  expect(stale).toMatchObject({ isError: true, structuredContent: { status: 409, conflict: true, applied: false } });
+  const defaultList = payload(await client.callTool({ name: "artifact_list", arguments: {} }));
+  expect(defaultList.artifacts.some((item: { id: string }) => item.id === name)).toBe(false);
+
+  const script = 'export default { fetch() { return new Response("ready"); } };\n' + contents.split("\n").slice(-240).join("\n");
+  expect((await action("script_write", { name, contents: script, project, expected_revision: null })).isError).not.toBe(true);
+  const scriptSnapshot = await client.callTool({ name: "artifacts_source", arguments: { workspace, kind: "script", name } });
+  expect(scriptSnapshot.structuredContent).toMatchObject({ workspace, name, kind: "script", source: script, server_source: null, project, revision_token: expect.any(String) });
+  const library = await client.callTool({ name: "artifacts_working", arguments: {} });
+  const gallery = (library._meta as { workspace: { gallery: { artifacts: { kind: string; name: string; workspace: string }[] } } }).workspace.gallery;
+  expect(gallery.artifacts.filter(item => item.workspace === workspace && item.name === name).map(item => item.kind).sort()).toEqual(["artifact", "script"]);
+  const mentions = await client.callTool({ name: "artifacts_mentions", arguments: { query: name } });
+  const links = (mentions.structuredContent as { items: { uri: string }[] }).items;
+  const scriptUri = links.find(item => new URL(item.uri).searchParams.get("kind") === "script")!.uri;
+  const resource = await client.readResource({ uri: scriptUri });
+  expect(JSON.parse((resource.contents[0] as { text: string }).text)).toMatchObject({ workspace, name, kind: "script", source: script, project });
+  const team = new Client({ name: "gallery-denied", version: "1" });
+  await team.connect(new StreamableHTTPClientTransport(new URL(`${origin}/mcp?workspace=${workspace}&library=team`), { fetch }));
+  try {
+    await expect(team.readResource({ uri: scriptUri })).rejects.toThrow();
+    expect((await team.callTool({ name: "artifacts_source", arguments: { workspace, kind: "script", name } })).isError).toBe(true);
+    const deniedCatalog = await team.callTool({ name: "artifacts_library", arguments: {} });
+    expect((deniedCatalog._meta as any).workspace.gallery.artifacts.some((item: { name: string }) => item.name === name)).toBe(false);
+  } finally { await team.close(); }
+  await expect(client.callTool({ name: "artifacts_tool", arguments: { workspace, tool: "artifact_write", arguments: { name } } })).rejects.toThrow("Invalid tool arguments");
 }, 60_000);

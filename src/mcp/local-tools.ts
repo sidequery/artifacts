@@ -1,4 +1,5 @@
 import { ArtifactService, type ArtifactEdit, type ReadOptions } from "../service";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { artifactIdFromFile } from "../artifactFile";
 import { artifactGuideResult } from "./guide";
 import type { JsonRpcRequest, JsonRpcResponse } from "./protocol";
@@ -10,9 +11,10 @@ export { MCP_TOOLS } from "./tools";
 import { MCP_TOOLS } from "./tools";
 import { parseProjectArchive } from "../project-archive";
 import { ARTIFACTS_WORKSPACE_TOOLS, workspaceResult } from "./workspace-contract";
-import { localWorkspace, localMentions, localResource } from "./local-workspace";
+import { localWorkspace, localMentions, localResource, localSource } from "./local-workspace";
 import { ARTIFACTS_FILE_TOOL, artifactFileResult } from "./file-contract";
 import { clientSupportsApps, toolsForClient } from "./host-contract";
+import { ARTIFACTS_SETTINGS_CAPABILITY, ARTIFACTS_SETTINGS_TOOLS, settingsTool } from "./settings-contract";
 
 const appClients = new WeakMap<ArtifactService, boolean>();
 
@@ -30,7 +32,7 @@ export async function handleMcpRequest(
       appClients.set(service, clientSupportsApps(params?.capabilities));
       return ok(request.id, {
         protocolVersion: PROTOCOL_VERSION,
-        capabilities: { tools: {}, resources: {} },
+        capabilities: { tools: {}, resources: {}, extensions: { "openai/settings": ARTIFACTS_SETTINGS_CAPABILITY }, experimental: { "openai/settings": ARTIFACTS_SETTINGS_CAPABILITY } },
         serverInfo: { name: "artifacts", version: "0.1.0" },
       });
     }
@@ -38,7 +40,7 @@ export async function handleMcpRequest(
       return ok(request.id, {});
     }
     if (request.method === "tools/list") {
-      return ok(request.id, { tools: toolsForClient([...MCP_TOOLS, ...ARTIFACTS_WORKSPACE_TOOLS, ARTIFACTS_FILE_TOOL], appClients.get(service) ?? true) });
+      return ok(request.id, { tools: toolsForClient([...MCP_TOOLS, ...ARTIFACTS_WORKSPACE_TOOLS, ARTIFACTS_FILE_TOOL, ...ARTIFACTS_SETTINGS_TOOLS], appClients.get(service) ?? true) });
     }
     if (request.method === "resources/list") return ok(request.id, { resources: [ARTIFACTS_RESOURCE] });
     if (request.method === "resources/templates/list") return ok(request.id, { resourceTemplates: [] });
@@ -66,8 +68,13 @@ async function callTool(
   service: ArtifactService,
   name: string,
   args: Record<string, unknown>,
-): Promise<{ content: Array<{ type: "text"; text: string }>; isError?: boolean; structuredContent?: Record<string, unknown>; _meta?: Record<string, unknown> }> {
+): Promise<CallToolResult> {
   if (name === "artifacts_file") return artifactFileResult(args);
+  if (ARTIFACTS_SETTINGS_TOOLS.some(tool => tool.name === name)) return settingsTool({ workspace: service.artifactsDir, async gallery() { return localWorkspace(service, "library").gallery!; } }, name, args);
+  if (name === "artifacts_source") {
+    const payload = localSource(service, args);
+    return { ...text(JSON.stringify(payload)), structuredContent: payload };
+  }
   if (name === "artifacts_library" || name === "artifacts_working" || name === "artifacts_search") {
     const view = name === "artifacts_working" || args.view === "working" ? "working" : "library";
     return workspaceResult(localWorkspace(service, view, args.query as string | undefined, args.offset as number | undefined));

@@ -9,6 +9,8 @@ import type { ArtifactFileRequest } from "../src/sdk/files";
 import type { GalleryArtifact, GalleryData } from "../src/gallery/types";
 import { CloudArtifactService } from "./service";
 import { workspaceTool } from "./workspace-tools";
+import { galleryAction, gallerySource } from "./gallery-tools";
+import { ARTIFACTS_SETTINGS_TOOLS, settingsTool } from "../src/mcp/settings-contract";
 import { parseProjectArchive } from "../src/project-archive";
 import { ownershipName } from "./ownership";
 
@@ -17,6 +19,12 @@ type Selection = { workspace?: string; name?: string; version_id?: string; event
 
 /** Management requests select an owner; execution continues on immutable storage. */
 export class ManagedArtifactService {
+  get productUrl() {
+    const url = new URL("/", this.origin);
+    url.searchParams.set("workspace", this.workspace);
+    if (this.libraryKey === "team") url.searchParams.set("library", "team");
+    return url.href;
+  }
   readonly fileStorage;
   private readonly links;
   constructor(private readonly env: Env, readonly workspace: string, readonly libraryKey: string,
@@ -67,6 +75,9 @@ export class ManagedArtifactService {
   }
 
   async callTool(name: string, args: Record<string, unknown>): Promise<CallToolResult> {
+    if (ARTIFACTS_SETTINGS_TOOLS.some(tool => tool.name === name)) return settingsTool(this, name, args);
+    if (name === "artifacts_tool") return galleryAction(this, args);
+    if (name === "artifacts_source") return gallerySource(this, args);
     if (["artifacts_library", "artifacts_working", "artifacts_search", "artifacts_mentions"].includes(name)) return workspaceTool(this, name, args);
     if (name === "artifacts_preview") name = "artifact_open";
     if (name.startsWith("app_")) return this.nativeTool(name, args);
@@ -81,7 +92,7 @@ export class ManagedArtifactService {
     const selection = this.selection(kind, { name: args.name as string | undefined, version_id: args.version_id as string | undefined, ...(typeof args.workspace === "string" ? { workspace: args.workspace } : {}) });
     if (name.endsWith("_import")) {
       parseProjectArchive(args.archive, kind);
-      const target = await this.links.admit(this.selection(kind, { name: args.new_name as string }), true);
+      const target = await this.links.admit(this.selection(kind, { name: args.new_name as string, ...(typeof args.workspace === "string" ? { workspace: args.workspace } : {}) }), true);
       return this.callSelectedTool(target, name, args);
     }
     const target = name.endsWith("_remix")
@@ -169,7 +180,7 @@ export class ManagedArtifactService {
           : await this.env.LIBRARIES.getByName(target.libraryKey).draftRevision({ workspace: item.workspace, name: item.name });
       }
     }
-    return { capabilities: { scripts: true, links: true, moves: true, nativeApps: !!this.env.NATIVE_APPS, subscriptions: true }, workspace: this.workspace,
+    return { libraryScope: this.libraryKey === "team" ? "team" : "private", capabilities: { editing: true, scripts: true, links: true, moves: true, nativeApps: !!this.env.NATIVE_APPS, subscriptions: true }, workspace: this.workspace,
       artifacts: [...artifacts.values()].sort((a, b) => a.name.localeCompare(b.name) || a.workspace.localeCompare(b.workspace)), nextOffset: hasMore ? offset + 100 : null };
   }
 }

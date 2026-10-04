@@ -1,11 +1,19 @@
+import { createElement } from "react";
+import { createRoot } from "react-dom/client";
 import type { App } from "@modelcontextprotocol/ext-apps";
 import type { ArtifactWorkspacePayload } from "../mcp/workspace-contract";
 import type { ArtifactAppPayload } from "../mcp/app-contract";
+import type { GalleryData } from "../gallery/types";
+import { GalleryWorkspace } from "../gallery/workspace";
+import { GalleryToolError, type GalleryTransport, type MutationResult } from "../gallery/transport";
+import type { SourceSnapshot } from "../gallery/drafts";
+import { editableProject } from "../gallery/project-editor";
 
-export type ArtifactSelection = { name?: string; workspace?: string; version_id?: string; route?: string };
+export type ArtifactSelection = { name?: string; workspace?: string; version_id?: string; route?: string; kind?: "artifact" | "script"; tab?: "preview" | "source" };
 
 /** Deep links contain authenticated selectors, never file-transfer credentials. */
 export function parseArtifactDeepLink(value: string): ArtifactSelection | null {
+  if (/[\\\s#]/.test(value)) return null;
   let url: URL;
   try { url = new URL(value, "https://artifacts.invalid"); } catch { return null; }
   if (url.origin !== "https://artifacts.invalid" || url.pathname !== "/artifact") return null;
@@ -13,12 +21,14 @@ export function parseArtifactDeepLink(value: string): ArtifactSelection | null {
   const version_id = url.searchParams.get("version_id") ?? undefined;
   const workspace = url.searchParams.get("workspace") ?? undefined;
   const route = url.searchParams.get("route") ?? "/";
-  if ((!name && !version_id) || !route.startsWith("/") || route.startsWith("//")) return null;
-  return { name: version_id ? undefined : name, workspace, version_id, route };
+  const kind = url.searchParams.get("kind");
+  const tab = url.searchParams.get("tab");
+  if ((!name && !version_id) || !route.startsWith("/") || route.startsWith("//") || route.includes("\\") || (kind && !["artifact", "script"].includes(kind)) || (tab && !["preview", "source"].includes(tab))) return null;
+  return { name: version_id ? undefined : name, workspace, version_id, route, ...(kind ? { kind: kind as "artifact" | "script" } : {}), ...(tab ? { tab: tab as "preview" | "source" } : {}) };
 }
 
 export async function fetchArtifactPreview(app: App, selection: ArtifactSelection): Promise<ArtifactAppPayload> {
-  const { route, ...args } = selection;
+  const { route: _route, kind: _kind, tab: _tab, ...args } = selection;
   const result = await app.callServerTool({ name: "artifacts_preview", arguments: args });
   if (result.isError) throw new Error(result.content?.filter(item => item.type === "text").map(item => item.text).join("\n") || "Unable to open artifact");
   const artifact = result._meta?.artifact as ArtifactAppPayload | undefined;
@@ -26,71 +36,65 @@ export async function fetchArtifactPreview(app: App, selection: ArtifactSelectio
   return artifact;
 }
 
-export function mountWorkspace(root: HTMLElement, app: App, initial: ArtifactWorkspacePayload, open: (selection: ArtifactSelection) => Promise<void>) {
-  let disposed = false;
-  let generation = 0;
-  let query = "";
-  const section = document.createElement("section");
-  const title = document.createElement("h1");
-  title.textContent = initial.view === "library" ? "Artifacts" : "Working artifacts";
-  const label = document.createElement("label");
-  label.textContent = "Search artifacts ";
-  const input = document.createElement("input");
-  input.type = "search";
-  input.maxLength = 200;
-  const form = document.createElement("form");
-  const search = document.createElement("button");
-  search.textContent = "Search";
-  search.type = "button";
-  label.append(input);
-  form.append(label, search);
-  const list = document.createElement("ul");
-  const notice = document.createElement("p");
-  notice.setAttribute("role", "status");
-  const more = document.createElement("button");
-  more.textContent = "Load more";
-  let nextOffset = initial.nextOffset;
-  section.append(title, form, list, notice, more);
-  root.append(section);
-  function render(payload: ArtifactWorkspacePayload, append: boolean) {
-    if (!append) list.replaceChildren();
-    for (const item of payload.items) {
-      const row = document.createElement("li");
-      const button = document.createElement("button");
-      button.textContent = `Open ${item.name}`;
-      const versions = document.createElement("select");
-      versions.setAttribute("aria-label", `Revision of ${item.name}`);
-      if (item.working) versions.add(new Option("Working source", ""));
-      for (const version of item.versions) versions.add(new Option(`Revision ${version.revision}`, version.id));
-      button.addEventListener("click", () => {
-        const version_id = versions.value || undefined;
-        void open({ workspace: item.workspace, name: version_id ? undefined : item.name, version_id }).catch(error => { notice.textContent = String(error); });
-      });
-      row.append(button, versions);
-      list.append(row);
-    }
-    nextOffset = payload.nextOffset;
-    more.hidden = nextOffset === null;
-    notice.textContent = list.children.length ? "" : "No artifacts found.";
+/** Older server pages remain readable during a server/plugin rollout. */
+export function workspaceGallery(payload: ArtifactWorkspacePayload): GalleryData {
+  if (payload.gallery) return payload.gallery;
+  return { workspace: payload.workspace, nextOffset: payload.nextOffset, artifacts: payload.items.map(item => ({
+    ...item, key: JSON.stringify([item.workspace, item.name]),
+    versions: item.versions.map(version => ({ reason: "saved", serveCount: 0, ...version })),
+  })) };
+}
+
+function resultValue(result: Awaited<ReturnType<App["callServerTool"]>>) {
+  const text = result.content?.filter(item => item.type === "text").map(item => item.text).join("\n");
+  let value: unknown = result.structuredContent;
+  if (value === undefined && text) { try { value = JSON.parse(text); } catch { value = text; } }
+  if (result.isError) {
+    const detail = typeof value === "object" && value !== null ? value as MutationResult & { status?: number } : undefined;
+    throw new GalleryToolError(detail?.error ?? text ?? "Artifact operation failed", detail?.status ?? 500, detail);
   }
-  async function load(append: boolean) {
-    const current = ++generation;
-    search.disabled = more.disabled = true;
-    try {
-      const result = await app.callServerTool({ name: "artifacts_search", arguments: { query, view: initial.view, offset: append ? nextOffset : 0 } });
-      if (disposed || current !== generation) return;
-      if (result.isError) throw new Error(result.content?.filter(item => item.type === "text").map(item => item.text).join("\n") || "Search failed");
-      const payload = result._meta?.workspace as ArtifactWorkspacePayload | undefined;
-      if (!payload) throw new Error("Workspace response was missing");
-      render(payload, append);
-    } catch (error) { if (!disposed && current === generation) notice.textContent = String(error); }
-    finally { if (!disposed && current === generation) search.disabled = more.disabled = false; }
-  }
-  const searchNow = () => { query = input.value; void load(false); };
-  search.addEventListener("click", searchNow);
-  input.addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); searchNow(); } });
-  form.addEventListener("submit", event => { event.preventDefault(); });
-  more.addEventListener("click", () => { void load(true); });
-  render(initial, false);
-  return () => { disposed = true; generation++; section.remove(); };
+  return value;
+}
+
+export function createGalleryTransport(app: App): GalleryTransport {
+  return {
+    async tool(workspace, tool, args) {
+      return resultValue(await app.callServerTool({ name: "artifacts_tool", arguments: { workspace, tool, arguments: args } }));
+    },
+    async loadSource(sourceUrl, signal) {
+      signal?.throwIfAborted();
+      const params = new URL(sourceUrl, "https://artifacts.invalid").searchParams;
+      const selection = params.get("version_id") ? { version_id: params.get("version_id")! } : { name: params.get("name")! };
+      const result = await app.callServerTool({ name: "artifacts_source", arguments: { workspace: params.get("workspace")!, kind: params.get("kind") === "script" ? "script" : "artifact", ...selection } });
+      signal?.throwIfAborted();
+      const snapshot = resultValue(result) as SourceSnapshot;
+      if (typeof snapshot?.source !== "string" || !snapshot.project) throw new Error("The server returned an incomplete project snapshot");
+      return { ...snapshot, project: editableProject(snapshot.project) };
+    },
+  };
+}
+
+type WorkspaceProps = Parameters<typeof GalleryWorkspace>[0];
+export type WorkspaceOptions = Pick<WorkspaceProps, "renderPreview" | "attach" | "attachedVersionId" | "selection" | "onSelectionChange" | "openProduct" | "openLink" | "askCreate">;
+
+export function mountWorkspace(root: HTMLElement, app: App, initial: ArtifactWorkspacePayload, options: WorkspaceOptions) {
+  const reactRoot = createRoot(root);
+  const transport = createGalleryTransport(app);
+  const gallery = workspaceGallery(initial);
+  let current = options;
+  let refreshKey = 0;
+  const search = async (query: string, offset: number) => {
+    const result = await app.callServerTool({ name: "artifacts_search", arguments: { query, offset, view: "library" } });
+    if (result.isError) resultValue(result);
+    const payload = result._meta?.workspace as ArtifactWorkspacePayload | undefined;
+    if (!payload) throw new Error("The server returned no library catalog");
+    return workspaceGallery(payload);
+  };
+  const render = () => reactRoot.render(createElement(GalleryWorkspace, { initial: gallery, view: initial.view, transport, search, ...current, refreshKey }));
+  render();
+  return {
+    update(value: Partial<WorkspaceOptions>) { current = { ...current, ...value }; render(); },
+    refresh() { refreshKey++; render(); },
+    dispose() { reactRoot.unmount(); },
+  };
 }

@@ -81,8 +81,8 @@ test("gallery retains complete unsaved projects and new scripts and offers confl
     await page.getByRole("button", { name: "Compare saved project" }).click();
     await page.getByText("Saved project (your edits remain in the editor)").waitFor();
     expect(await client.innerText()).toBe("unsaved client");
-    page.once("dialog", dialog => void dialog.accept());
     await page.getByRole("button", { name: "Reload saved project" }).click();
+    await page.getByRole("button", { name: "Discard edits and reload" }).click();
     await page.waitForFunction(() => document.querySelector('[role="textbox"][aria-label="report.artifact.tsx"]')?.textContent === "agent client");
     await client.fill("merged client");
     await page.getByRole("button", { name: "Save and deploy", exact: true }).click();
