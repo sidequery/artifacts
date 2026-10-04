@@ -56,10 +56,7 @@ Use `artifacts host install` to enable startup at login. See the
 
 ### Docker
 
-The image at `ghcr.io/sidequery/artifacts:latest` supports Linux amd64 and arm64.
-It runs celld directly, with the application and native esbuild already included.
-Bun is used only during the build. The final distroless image has no Bun, Node,
-shell, package manager, or `node_modules` directory and runs as UID/GID 65532.
+Run the full application locally with persistent storage:
 
 ```sh
 docker run -d --name artifacts --restart unless-stopped \
@@ -69,36 +66,9 @@ docker run -d --name artifacts --restart unless-stopped \
   ghcr.io/sidequery/artifacts:latest
 ```
 
-Open [localhost:4786](http://127.0.0.1:4786); the MCP endpoint is
-`http://127.0.0.1:4786/mcp`. The named volume preserves apps, databases, files,
-and schedules across container replacements. Stop the container before backing
-up the volume. Allow 60 seconds for graceful shutdown.
-
-The default command runs single-machine `celld dev` with authentication disabled,
-so the example publishes the port on loopback only. For network access, configure
-[authentication](docs/authentication.md#configure-celld) in a custom Wrangler
-config and mount it at `/app/wrangler.jsonc` (read-only), keeping the image's
-`main` and assets paths. Set `ENVIRONMENT` to `production`; environment variables
-passed with `docker -e` do not replace Wrangler `vars`. For bucket-backed nodes,
-follow the [celld deployment guide](docs/celld-deployment.md). Arguments after the
-image name are passed directly to celld; for example, `--help` lists commands.
-
-Build and test locally:
-
-```sh
-docker build -t artifacts:local .
-bun install --frozen-lockfile
-ARTIFACTS_DOCKER_IMAGE=artifacts:local bun test scripts/docker.integration.test.ts
-```
-
-CI builds and tests both image architectures on pushes and pull requests. Image
-publishing waits for the application, executable, and Docker checks to pass. Pushes
-to `main` publish `latest` and `sha-<full-commit>`; `v*` tags publish the matching
-tag and commit tag. Pin a commit tag or image digest for repeatable deployments.
-The package is public; CI checks anonymous access and fails if the
-image is private. When publishing under a different package name, a package
-administrator must set its visibility to **Public** in GitHub package settings
-after the first push.
+Open [localhost:4786](http://127.0.0.1:4786). This example runs without sign-in
+and accepts connections from your machine only. See the [Docker guide](docs/docker.md)
+for network access, configuration, backups, and image versions.
 
 ### Cloudflare and celld fleets
 
@@ -124,8 +94,11 @@ For a network deployment, follow the celld guide to configure production nodes
 and authentication. The local host command does not provision a fleet or migrate
 its data to one.
 
-Deployments support Cloudflare Access or configurable provider sign-in through
-Better Auth. Personal libraries are private to their owner; admitted team members
+Sign in with the system your team already uses: Google, GitHub, Microsoft Entra ID,
+Okta, Auth0, Keycloak, or another OAuth/OIDC provider. Artifacts uses Better Auth,
+a built-in authentication library, to connect to these services on either deployment.
+Cloudflare Access is an alternative for Cloudflare deployments.
+Personal libraries are private to their owner; admitted team members
 can read and edit the team library. Public links are configured separately from
 library ownership. See [authentication and access](docs/authentication.md)
 and [link access](docs/scripts.md#access).
@@ -178,6 +151,8 @@ inline views, targeted edits, history, and compatibility with older Canvas sourc
 
 ## Documentation
 
+Start with the [documentation index](docs/README.md) to find the guide for your task.
+
 - [Authentication, MCP sign-in, and access permissions](docs/authentication.md)
 - [Host commands and local persistence](docs/daemon.md)
 - [Deploy to Cloudflare](docs/cloudflare.md)
@@ -185,7 +160,7 @@ inline views, targeted edits, history, and compatibility with older Canvas sourc
 - [Scripts, URLs, dependencies, remix, and schedules](docs/scripts.md)
 - [Native Worker apps, manifests, providers, and recovery](docs/native-workers.md)
 - [Complete project export and import](docs/project-portability.md)
-- [App backends and SQLite](docs/cloudflare.md#native-artifact-servers-and-storage)
+- [App backends and SQLite](docs/app-backends.md)
 - [File storage](docs/files.md)
 - [Client-side routing](docs/routing.md)
 - [Runtime plugins](docs/runtime-plugins.md)

@@ -4,27 +4,23 @@ This guide covers the file-based Bun CLI, stdio MCP server, gallery, and
 optional Herdr integration. For the full application with scripts, backends,
 and scheduled runs, use the [Artifacts host](daemon.md).
 
-## Optional Herdr integration
+## Get started
 
-```bash
-herdr plugin install zenbu-labs/terminal-browser/herdr-plugin --yes
-herdr plugin link /path/to/artifacts
+Install the CLI with `bun add --global @sidequery/artifacts`. In your project,
+start a browser gallery for local artifact files:
+
+```sh
+artifacts web --port 4784
 ```
 
-Run `bun install --frozen-lockfile` in the checkout before linking it. The plugin
-ID and pane entrypoint are `herdr.artifacts` and `artifacts`. Relink an existing
-checkout to register the new plugin name.
+Open [localhost:4784](http://127.0.0.1:4784). To let your coding agent work with
+these files, configure a **stdio** MCP server with command `artifacts` and
+arguments `mcp --dir /absolute/path/to/your/project/artifacts`.
+Ask the agent to read `artifact_guide`, then create an artifact.
 
-## Upgrading from Canvas
-
-Use the `artifacts` CLI and `artifact_*` MCP tools. New sources use `.artifact.tsx`,
-`sidequery/artifacts`, and SDK names such as `useArtifactState` and `artifactFetch`.
-Existing `.canvas.tsx` sources, their sidecars, historical SDK imports and exported
-names remain readable and compilable. Existing workspace and application-data
-directories are reused when no new directory exists; files and databases are not
-moved. New `ARTIFACTS_DIR`, `ARTIFACTS_HISTORY_DB`, and `ARTIFACTS_DATA_HOME` overrides
-take precedence over their legacy equivalents. Existing hosted storage identities
-are retained; see [Cloudflare setup](cloudflare.md).
+This workflow stores source files in your project. It is separate from the full
+application at port 4786 and does not synchronize with that application's library.
+Herdr is optional; browser previews and MCP Apps work without it.
 
 ## Agent workflow
 
@@ -42,11 +38,12 @@ Projects can also import their declared helper files and pinned dependencies. Us
 artifacts list
 artifacts write overview --file examples/overview.artifact.tsx
 artifacts typecheck overview
-artifacts open overview
+artifacts web --port 4784
 artifacts mcp
 ```
 
-`open` typechecks and bundles with Bun, then opens the `herdr.artifacts` `artifacts`
+With [Herdr configured](#optional-herdr-integration), `artifacts open overview`
+typechecks and bundles with Bun, then opens the `herdr.artifacts` `artifacts`
 pane entrypoint. That pane starts its own loopback server and runs
 Terminal Browser internally in `--app-mode`. Closing the pane closes its browser
 session and loopback server. `--no-open` is the explicit development-only path
@@ -231,6 +228,28 @@ artifacts execute inside the chat host's MCP Apps sandbox; use trusted local art
 source, as for the other local views. Artifact
 source and saved state can contain private data; keep the history database private.
 
+
+## Optional Herdr integration
+
+```bash
+herdr plugin install zenbu-labs/terminal-browser/herdr-plugin --yes
+herdr plugin link /path/to/artifacts
+```
+
+Run `bun install --frozen-lockfile` in the checkout before linking it. The plugin
+ID and pane entrypoint are `herdr.artifacts` and `artifacts`. Relink an existing
+checkout to register the new plugin name.
+
+## Upgrading from Canvas
+
+Use the `artifacts` CLI and `artifact_*` MCP tools. New sources use `.artifact.tsx`,
+`sidequery/artifacts`, and SDK names such as `useArtifactState` and `artifactFetch`.
+Existing `.canvas.tsx` sources, their sidecars, historical SDK imports and exported
+names remain readable and compilable. Existing workspace and application-data
+directories are reused when no new directory exists; files and databases are not
+moved. New `ARTIFACTS_DIR`, `ARTIFACTS_HISTORY_DB`, and `ARTIFACTS_DATA_HOME` overrides
+take precedence over their legacy equivalents. Existing hosted storage identities
+are retained; see [Cloudflare setup](cloudflare.md).
 
 ## Development checks
 

@@ -1,6 +1,25 @@
 # Scripts and direct artifact links
 
-The hosted gallery supports artifacts and standalone scripts. Either can have a chosen root URL such as `/sales-dashboard` or `/stripe-webhook`. Artifact URLs open the interactive artifact and its backend; script URLs invoke the script's HTTP handler. Slugs are unique across the deployment, including across artifact types and libraries. Existing application routes are reserved.
+Use a script for an API endpoint, webhook, or scheduled job. A script is a
+TypeScript HTTP handler with its own SQLite database and secrets. It runs in the
+full Artifacts application, including `artifacts host` on your machine.
+
+Create one in the gallery with **New script**, or ask your coding agent to read
+`script_guide` and write it. Give it a URL such as `/stripe-webhook`, then choose
+whether it is private or public. Saving valid source makes it live immediately.
+Opening a script URL runs its handler; selecting it in the gallery only opens
+its editor.
+
+- [Create and run a script](#gallery)
+- [Write a handler and store data](#script-handler)
+- [Control who can call it](#access)
+- [Add packages and helper files](#third-party-dependencies)
+- [Schedule a run](#schedules-and-execution-history)
+- [Copy or move an item](#remix)
+
+Apps can also have direct URLs, such as `/sales-dashboard`, which open their
+React interface and backend. URL slugs are unique across the deployment,
+including across item types and libraries; existing application routes are reserved.
 
 ## Gallery
 
@@ -14,7 +33,7 @@ Expand **Run** to choose an HTTP method, path, headers as a JSON object, and a t
 
 Expand **Logs** and select **Load logs** to inspect recent execution output. Under **Secrets**, enter a name and value and select **Save secret**; the value field clears after saving. Enter a name and select **Remove secret** to delete it. Stored secret values are never loaded into the editor or source history.
 
-These controls are available in the hosted gallery. The local gallery continues to support existing artifacts.
+These controls are available on Cloudflare, celld, and `artifacts host`. The file-based `artifacts web` gallery previews React artifacts and does not execute scripts.
 
 ## Script handler
 
@@ -34,7 +53,7 @@ export default {
 } satisfies ExportedHandler<ScriptEnv>;
 ```
 
-`ScriptEnv` is available during type checking. It contains `secrets: Record<string, string>` and `sql: SqlStorage`. Outbound `fetch` is available. `ctx.waitUntil` can extend background work associated with a request. Scripts can import supported `cloudflare:` and `node:` builtins. Use relative helper modules and exact npm dependencies through the project source editor or MCP project fields. Code must be compatible with the Workers runtime; this is not a general server process or scheduling system.
+`ScriptEnv` is available during type checking. It contains `secrets: Record<string, string>` and `sql: SqlStorage`. Outbound `fetch` is available. `ctx.waitUntil` can extend background work associated with a request. Scripts can import supported `cloudflare:` and `node:` builtins. Use relative helper modules and exact npm dependencies through the project source editor or MCP project fields. Code must be compatible with the Workers runtime. Use [schedules](#schedules-and-execution-history) for recurring runs.
 
 Use `env.secrets.NAME` for a configured secret. For example, a handler can verify a provider signature against the original request body. Script HTTP requests preserve their methods, query strings, and body bytes. The gateway strips cookies and Cloudflare Access assertion/service-token headers; private routes also strip the authorization credential used for management authentication.
 
@@ -53,7 +72,7 @@ export default {
 } satisfies ExportedHandler<ScriptEnv>;
 ```
 
-Do not assume an in-memory global persists between requests or updates. On Cloudflare, each execution is limited to 30 seconds of CPU and 50 subrequests, in addition to the Workers runtime limits. The celld configuration omits these per-script budgets because celld 0.5.0 rejects them and does not enforce them. Logs retain the latest 100 entries with messages capped at 2 KiB. Secret strings are redacted from captured console output; handlers still control their own response bodies and outbound requests.
+Do not assume an in-memory global persists between requests or updates. On Cloudflare, each execution is limited to 30 seconds of CPU and 50 subrequests, in addition to the Workers runtime limits. The celld configuration omits these per-script budgets because the pinned celld runtime does not enforce them. Logs retain the latest 100 entries with messages capped at 2 KiB. Secret strings are redacted from captured console output; handlers still control their own response bodies and outbound requests.
 
 ## Access
 

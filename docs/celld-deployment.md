@@ -1,5 +1,15 @@
 # Deploying Artifacts with celld
 
+Use celld to run Artifacts on infrastructure you manage. For a single-machine
+local installation, start with the [host guide](daemon.md) or [Docker guide](docker.md).
+This page covers operating a deployment backed by object storage, including
+multiple nodes, TLS, persistence, and upgrades.
+
+Connect your existing sign-in service, such as Google, Okta, or a self-hosted
+Keycloak server. Artifacts includes **Better Auth**, the authentication library
+that connects to these and other OAuth/OIDC providers. If you place the deployment
+behind Cloudflare Access, that can handle sign-in instead.
+
 The bundled runtime is pinned to celld 0.6.1. This guidance follows the
 [upstream deployment documentation](https://github.com/denoland/celld/blob/v0.6.1/docs/README.md)
 and [security model](https://github.com/denoland/celld/blob/v0.6.1/docs/security.md).
