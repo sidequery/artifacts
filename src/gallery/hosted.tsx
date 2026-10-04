@@ -7,6 +7,7 @@ import type { GalleryArtifact } from "./types";
 import { Select } from "./select";
 import type { Diagnostic } from "../diagnostics";
 import type { SourceLocation } from "./source-editor";
+import { PROJECT_ARCHIVE_FORMAT } from "../project-archive-contract";
 export type ScriptView = "source" | "requests" | "schedule" | "settings";
 
 export { GalleryToolError, galleryTool, type MutationResult } from "./transport";
@@ -103,6 +104,19 @@ function ConflictActions({ sourceUrl, dirty, onReload }: { sourceUrl: string; di
   </div>;
 }
 const initialSource = `export default {\n  async fetch(request, env, ctx) {\n    return Response.json({ message: "Hello" });\n  },\n} satisfies ExportedHandler<ScriptEnv>;\n`;
+const initialArtifactSource = `import { Button, H1, Stack, Text, useArtifactState } from "sidequery/artifacts";
+
+export default function Artifact() {
+  const [count, setCount] = useArtifactState("count", 0);
+  return (
+    <Stack>
+      <H1>Hello</H1>
+      <Text>Your artifact is ready to edit.</Text>
+      <Button onClick={() => setCount(count + 1)}>Count: {count}</Button>
+    </Stack>
+  );
+}
+`;
 export function AgentOnboarding({ workspace }: { workspace: string }) {
   const [status, setStatus] = useState("");
   const url = new URL("/mcp", window.location.origin);
@@ -116,7 +130,7 @@ export function AgentOnboarding({ workspace }: { workspace: string }) {
   }
   return <div className="agent-onboarding">
     <h2>Create your first artifact</h2>
-    <p>Connect your agent to this deployment’s MCP URL, then send the starter prompt. You can also create an HTTP handler with New script.</p>
+    <p>Choose New artifact from the + menu beside Artifacts, or connect your agent using the MCP URL below.</p>
     <details open><summary>Connect agent</summary>
       <label>MCP URL<input aria-label="Deployment MCP URL" readOnly value={url.href} /></label>
       <button type="button" onClick={() => void copy(url.href, "MCP URL")}>Copy MCP URL</button>
@@ -228,10 +242,15 @@ export function ScriptPanel({ artifact, workspace, version, sourceUrl, onSaved, 
   </div>;
 }
 
-export function ArtifactSourcePanel({ artifact, version, sourceUrl, onSaved }: { artifact: GalleryArtifact; version: string; sourceUrl: string; onSaved: () => Promise<void> }) {
+export function ArtifactSourcePanel({ artifact, workspace = artifact?.workspace ?? "default", hosted = true, version = "working", sourceUrl, onSaved, onCancel }: {
+  artifact?: GalleryArtifact; workspace?: string; hosted?: boolean; version?: string; sourceUrl?: string;
+  onSaved: (name: string) => Promise<void>; onCancel?: () => void;
+}) {
   const { tool: galleryTool, loadSource: loadSourceSnapshot } = useGalleryTransport();
-  const buffer = useProjectDraft(`${artifact.key}:${version}`);
+  const buffer = useProjectDraft(artifact ? `${artifact.key}:${version}` : `new-artifact:${workspace}`);
   const snapshot = buffer.draft?.content;
+  const name = artifact?.name ?? snapshot?.name ?? "";
+  const filename = name.trim() || "artifact";
   const [projectLoad, setProjectLoad] = useState(0);
   const [location, setLocation] = useState<SourceLocation>();
   const [projectValid, setProjectValid] = useState(true);
@@ -239,34 +258,41 @@ export function ArtifactSourcePanel({ artifact, version, sourceUrl, onSaved }: {
   const [error, setError] = useState<unknown>("");
   const [conflict, setConflict] = useState(false);
   const [status, setStatus] = useState("");
-  const historical = version !== "working";
+  const historical = !!artifact && version !== "working";
   useEffect(() => {
-    if (snapshot && (historical || buffer.draft?.dirty || !artifact.draftRevision || snapshot.revision_token === artifact.draftRevision)) return;
+    if (snapshot && (!artifact || historical || buffer.draft?.dirty || !artifact.draftRevision || snapshot.revision_token === artifact.draftRevision)) return;
+    if (!artifact) { buffer.reset({ source: initialArtifactSource, project: emptyEditableProject(), name: "" }); return; }
+    if (!sourceUrl) return;
     const controller = new AbortController(); setError(""); setStatus(""); setProjectValid(true);
     void loadSourceSnapshot(sourceUrl, controller.signal).then(value => { if (!controller.signal.aborted) buffer.reset(value, true); }).catch(error => { if (!controller.signal.aborted) setError(message(error)); });
     return () => controller.abort();
-  }, [sourceUrl, artifact.draftRevision, buffer.reset]);
+  }, [sourceUrl, artifact?.draftRevision, buffer.reset]);
   const loaded = !!snapshot;
   async function save() {
-    if (!loaded || !snapshot) return;
+    if (!loaded || !snapshot || !name.trim()) return;
     setBusy(true); setError(""); setStatus("");
     try {
-      const result = await galleryTool(artifact.workspace, historical ? "artifact_restore" : "artifact_write", historical ? { version_id: version } : { name: artifact.name, contents: snapshot.source, server: snapshot.server_source ?? null, project: snapshot.project, expected_revision: snapshot.revision_token }) as MutationResult;
+      const response = !hosted && !artifact
+        ? await galleryTool(workspace, "artifact_import", { new_name: name.trim(), validate: true, archive: { format: PROJECT_ARCHIVE_FORMAT, version: 1, kind: "artifact", name: name.trim(), source: snapshot.source, server_source: snapshot.server_source ?? null, project: { ...snapshot.project, lock: {} } } })
+        : await galleryTool(workspace, historical ? "artifact_restore" : "artifact_write", historical ? { version_id: version } : { name: name.trim(), contents: snapshot.source, server: snapshot.server_source ?? null, project: snapshot.project, expected_revision: snapshot.revision_token ?? (artifact ? undefined : null), ...(!artifact ? { access: "private" } : {}) });
+      const result = (typeof response === "string" ? JSON.parse(response) : response) as MutationResult;
       buffer.saved(result.revision_token); setConflict(false);
-      if (historical) buffer.invalidateClean(`${artifact.key}:working`);
-      await onSaved(); setStatus(historical ? "Revision restored and deployed" : "Artifact saved and deployed");
+      if (historical) buffer.invalidateClean(`${artifact!.key}:working`);
+      if (!artifact) buffer.clear();
+      await onSaved(name.trim()); setStatus(historical ? "Revision restored and deployed" : "Artifact saved and deployed");
     } catch (error) {
       if (error instanceof GalleryToolError) {
         setConflict(error.status === 409);
-        if (error.result?.applied) { buffer.saved(error.result.revision_token); await onSaved(); }
+        if (error.result?.applied) { buffer.saved(error.result.revision_token); if (artifact) await onSaved(name.trim()); }
       }
       setError(error);
     } finally { setBusy(false); }
   }
   return <form className="script-panel source-form" onSubmit={event => { event.preventDefault(); if (!busy && loaded && projectValid) void save(); }}>
-    <ErrorFeedback error={error} files={[`${artifact.name}.artifact.tsx`, "artifact.artifact.tsx", ...(snapshot?.server_source == null ? [] : [`${artifact.name}.artifact.server.ts`, "artifact.artifact.server.ts"]), ...Object.keys(snapshot?.project.files ?? {})]} onLocate={diagnostic => setLocation({ ...diagnostic, file: diagnostic.file!, request: (location?.request ?? 0) + 1 })} />
-    {conflict ? <ConflictActions sourceUrl={sourceUrl} dirty={buffer.draft?.dirty ?? false} onReload={snapshot => { buffer.reset(snapshot); setConflict(false); setError(""); setProjectLoad(value => value + 1); }} /> : null}
-    {!snapshot ? <p role="status">Loading source…</p> : <ProjectEditor key={projectLoad} location={location} entries={[{ id: "client", filename: `${artifact.name}.artifact.tsx`, source: snapshot.source }, ...(snapshot.server_source === null || snapshot.server_source === undefined ? [] : [{ id: "server", filename: `${artifact.name}.artifact.server.ts`, source: snapshot.server_source }])]} project={snapshot.project} onProjectChange={project => buffer.update({project})} onEntryChange={(id, source) => buffer.update(id === "server" ? { server_source: source } : { source })} dependencyText={buffer.draft!.dependencyText} onDependencyTextChange={text => buffer.update({}, text)} readOnly={historical} disabled={busy} onValidityChange={setProjectValid} />}
-    <div className="source-actions">{historical ? <span className="source-readonly muted">Read-only revision</span> : null}{buffer.draft?.dirty ? <span role="status">Unsaved changes</span> : null}<button className="primary-action" type="submit" disabled={busy || !loaded || !projectValid}>{historical ? "Restore and deploy" : "Save and deploy"}</button>{status ? <p role="status">{status}</p> : null}</div>
+    <ErrorFeedback error={error} files={[`${filename}.artifact.tsx`, "artifact.artifact.tsx", ...(snapshot?.server_source == null ? [] : [`${filename}.artifact.server.ts`, "artifact.artifact.server.ts"]), ...Object.keys(snapshot?.project.files ?? {})]} onLocate={diagnostic => setLocation({ ...diagnostic, file: diagnostic.file!, request: (location?.request ?? 0) + 1 })} />
+    {conflict && sourceUrl ? <ConflictActions sourceUrl={sourceUrl} dirty={buffer.draft?.dirty ?? false} onReload={snapshot => { buffer.reset(snapshot); setConflict(false); setError(""); setProjectLoad(value => value + 1); }} /> : null}
+    {!artifact ? <div className="script-fields"><label>Name<input aria-label="Artifact name" required disabled={busy || !!snapshot?.revision_token} value={name} onChange={event => buffer.update({ name: event.target.value })} /></label></div> : null}
+    {!snapshot ? <p role="status">Loading source…</p> : <ProjectEditor key={projectLoad} location={location} entries={[{ id: "client", filename: `${filename}.artifact.tsx`, source: snapshot.source }, ...(snapshot.server_source === null || snapshot.server_source === undefined ? [] : [{ id: "server", filename: `${filename}.artifact.server.ts`, source: snapshot.server_source }])]} project={snapshot.project} onProjectChange={project => buffer.update({project})} onEntryChange={(id, source) => buffer.update(id === "server" ? { server_source: source } : { source })} dependencyText={buffer.draft!.dependencyText} onDependencyTextChange={text => buffer.update({}, text)} readOnly={historical} disabled={busy} onValidityChange={setProjectValid} />}
+    <div className="source-actions">{historical ? <span className="source-readonly muted">Read-only revision</span> : null}{buffer.draft?.dirty ? <span role="status">Unsaved changes</span> : null}<button className="primary-action" type="submit" disabled={busy || !loaded || !projectValid || !name.trim()}>{historical ? "Restore and deploy" : !artifact ? "Create artifact" : "Save and deploy"}</button>{onCancel ? <button type="button" onClick={onCancel} disabled={busy}>Cancel</button> : null}{status ? <p role="status">{status}</p> : null}</div>
   </form>;
 }

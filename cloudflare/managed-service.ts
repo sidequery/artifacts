@@ -124,6 +124,10 @@ export class ManagedArtifactService {
       default: throw new Error("Unknown app tool");
     }
     const payload = result as Record<string, unknown>;
+    if (["app_write", "app_restore", "app_reconcile", "app_move"].includes(tool) || (tool === "app_secrets" && args.secrets)) {
+      await this.links.nativeAppChanged({ libraryKey: this.libraryKey, workspace: this.workspace });
+      if (tool === "app_move") await this.links.nativeAppChanged({ libraryKey: args.library === "team" ? "team" : this.privateKey, workspace: this.workspace });
+    }
     const failed = payload.ok === false || (payload.deployment as { ok?: boolean } | undefined)?.ok === false;
     return { ...text(result), structuredContent: payload, isError: failed };
   }
@@ -180,7 +184,12 @@ export class ManagedArtifactService {
           : await this.env.LIBRARIES.getByName(target.libraryKey).draftRevision({ workspace: item.workspace, name: item.name });
       }
     }
+    const workers = this.env.NATIVE_APPS
+      ? await this.nativeController().list({ owner: this.libraryKey, workspace: all ? undefined : this.workspace, offset })
+      : null;
+    hasMore ||= workers?.next_offset != null;
     return { libraryScope: this.libraryKey === "team" ? "team" : "private", capabilities: { editing: true, scripts: true, links: true, moves: true, nativeApps: !!this.env.NATIVE_APPS, subscriptions: true }, workspace: this.workspace,
+      ...(workers ? { workerApps: workers.apps.map(app => ({ ...app, kind: "worker" as const, key: JSON.stringify(["worker", app.workspace, app.name]) })), nativeAppProviders: workers.providers } : {}),
       artifacts: [...artifacts.values()].sort((a, b) => a.name.localeCompare(b.name) || a.workspace.localeCompare(b.workspace)), nextOffset: hasMore ? offset + 100 : null };
   }
 }

@@ -63,7 +63,8 @@ test("gallery edits scripts without execution and runs requests only on demand",
     await page.getByRole("button", { name: "Share", exact: true }).click();
     await page.getByRole("button", { name: "Save link", exact: true }).click();
     await page.getByRole("status").filter({ hasText: "Slug is already in use" }).waitFor();
-    await page.getByRole("button", { name: "New script" }).click();
+    await page.getByRole("button", { name: "Create or import", exact: true }).click();
+    await page.getByRole("menuitem", { name: "New script", exact: true }).click();
     await page.getByRole("textbox", { name: "Script name", exact: true }).fill("new-handler");
     await page.getByRole("textbox", { name: "Script slug" }).fill("new-handler");
     await page.getByRole("button", { name: "Save and deploy", exact: true }).click();
@@ -82,7 +83,8 @@ test("gallery edits scripts without execution and runs requests only on demand",
     await page.reload();
     await page.getByRole("tab", { name: "Preview", exact: true }).click();
     await page.getByTitle("Preview of local").waitFor();
-    expect(await page.getByRole("button", { name: "New script" }).count()).toBe(0);
+    await page.getByRole("button", { name: "Create or import", exact: true }).click();
+    expect(await page.getByRole("menuitem", { name: "New script", exact: true }).count()).toBe(0);
     expect(await page.getByRole("textbox", { name: "URL slug" }).count()).toBe(0);
   } finally { await browser.close(); server.stop(true); }
 }, 30000);

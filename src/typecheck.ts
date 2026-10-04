@@ -7,10 +7,15 @@ import { PLUGIN_ROOT, SDK_ENTRY } from "./paths";
 import { relative, resolve } from "node:path";
 import { loadBrowserPlugins } from "./plugins/browser";
 import type { BrowserPlugins } from "./plugins/types";
+import type { ArtifactProject } from "../cloudflare/project";
 
 export function typecheckArtifact(artifactPath: string, plugins: BrowserPlugins = loadBrowserPlugins()): Diagnostic[] {
   const source = readFileSync(artifactPath, "utf8");
   const project = readLocalProject(artifactPath);
+  return typecheckArtifactSource(artifactPath, source, project, plugins);
+}
+
+export function typecheckArtifactSource(artifactPath: string, source: string, project: ArtifactProject, plugins: BrowserPlugins = loadBrowserPlugins()): Diagnostic[] {
   const violations = projectDiagnostics(artifactPath, source, project, Object.keys(plugins.paths));
   if (violations.length > 0) {
     return violations;

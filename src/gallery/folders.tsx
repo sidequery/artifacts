@@ -1,16 +1,16 @@
 import { useState, type ReactNode } from "react";
-import type { GalleryArtifact } from "./types";
+import type { GalleryItem } from "./types";
 
-type Folder = { path: string; name: string; folders: Map<string, Folder>; artifacts: GalleryArtifact[] };
+type Folder<T> = { path: string; name: string; folders: Map<string, Folder<T>>; artifacts: T[] };
 
 /** Trim a shared local parent, retaining the actual containing folder names. */
-export function artifactFolders(artifacts: GalleryArtifact[], workspaces: string[]) {
+export function artifactFolders<T extends GalleryItem>(artifacts: T[], workspaces: string[]) {
   const paths = workspaces.map(path => path.replaceAll("\\", "/").split("/").filter(Boolean));
   let common = 0;
   if (workspaces.every(path => path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path))) {
     while (paths.length && paths.every(parts => common < parts.length - 1 && parts[common] === paths[0]![common])) common++;
   }
-  const root: Folder = { path: "", name: "", folders: new Map(), artifacts: [] };
+  const root: Folder<T> = { path: "", name: "", folders: new Map(), artifacts: [] };
   for (const artifact of artifacts) {
     const parts = artifact.workspace === "default" ? [] : artifact.workspace.replaceAll("\\", "/").split("/").filter(Boolean).slice(common);
     let folder = root;
@@ -24,13 +24,13 @@ export function artifactFolders(artifacts: GalleryArtifact[], workspaces: string
   return root;
 }
 
-export function ArtifactFolders({ artifacts, workspaces, searching, renderArtifact }: {
-  artifacts: GalleryArtifact[]; workspaces: string[]; searching: boolean;
-  renderArtifact: (artifact: GalleryArtifact, depth: number) => ReactNode;
+export function ArtifactFolders<T extends GalleryItem>({ artifacts, workspaces, searching, renderArtifact }: {
+  artifacts: T[]; workspaces: string[]; searching: boolean;
+  renderArtifact: (artifact: T, depth: number) => ReactNode;
 }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const root = artifactFolders(artifacts, workspaces);
-  function contents(folder: Folder, depth: number): ReactNode {
+  function contents(folder: Folder<T>, depth: number): ReactNode {
     return <>
       {[...folder.folders.values()].sort((a, b) => a.name.localeCompare(b.name)).map(child => {
         const expanded = searching || !collapsed.has(child.path);

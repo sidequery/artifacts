@@ -44,6 +44,7 @@ export class ArtifactLinks extends DurableObject<unknown> {
   catalog(input: Parameters<LibraryOwnership["catalog"]>[0]) { return this.ownership.catalog(input); }
   fetch(request: Request) { return this.subscriptions.accept(request); }
   changed(target: ArtifactTarget) { this.subscriptions.changed(this.ownership.owner(target), target.workspace); }
+  nativeAppChanged(selection: { libraryKey: string; workspace: string }) { this.subscriptions.changed(selection.libraryKey, selection.workspace); }
   webSocketMessage(socket: WebSocket) { socket.close(1008, "Receive-only subscription"); }
   webSocketClose(socket: WebSocket, code: number, reason: string) { socket.close(code, reason); }
   webSocketError(socket: WebSocket) { socket.close(1011, "Subscription disconnected"); }

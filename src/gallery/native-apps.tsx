@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
 import { GalleryToolError, galleryTool } from "./hosted";
 import { ProjectEditor, editableProject, emptyEditableProject, type EditableProject } from "./project-editor";
 import { SecretControls } from "./secrets";
@@ -28,33 +28,38 @@ const initialManifest = {
 const initialSource = 'export default { fetch(request: Request) { return new Response("Hello from your Worker"); } };';
 const decode = <T,>(value: unknown): T => (typeof value === "string" ? JSON.parse(value) : value) as T;
 
-export function NativeAppsPanel({ workspace, onClose }: { workspace: string; onClose: () => void }) {
-  const currentUrl = useRef(window.location.href);
+export type NativeAppEditorHandle = { canLeave: () => boolean };
+
+export function NativeAppEditor({ workspace, appName, providers, onNavigate, onSaved, onBack, hidden, ref }: {
+  workspace: string; appName: string | null; providers: string[];
+  onNavigate: (name: string | null) => void; onSaved: () => Promise<void>; onBack: () => void;
+  hidden: boolean; ref: Ref<NativeAppEditorHandle>;
+}) {
+  const heading = useRef<HTMLHeadingElement>(null);
   const [section, setSection] = useState(workerSection());
-  const [creating, setCreating] = useState(false),
+  const [creating, setCreating] = useState(!appName),
     [editingNew, setEditingNew] = useState(false);
-  const [loaded, setLoaded] = useState(false),
-    [template, setTemplate] = useState("http");
+  const [template, setTemplate] = useState("http");
   function navigate(app: string | null, tab = section) {
     const url = new URL(window.location.href);
     url.searchParams.set("view", "workers");
+    url.searchParams.set("workspace", workspace);
     if (app) {
       url.searchParams.set("app", app);
       url.searchParams.set("appTab", tab);
     } else {
+      url.searchParams.delete("view");
       url.searchParams.delete("app");
       url.searchParams.delete("appTab");
     }
     window.history.pushState(null, "", url);
-    currentUrl.current = url.href;
     setSection(tab);
+    onNavigate(app);
   }
-  const [apps, setApps] = useState<App[]>([]),
-    [providers, setProviders] = useState<string[]>([]);
   const [selected, setSelected] = useState<App | null>(null),
     [name, setName] = useState("");
   const [baseRevision, setBaseRevision] = useState<string | null>(null);
-  const [provider, setProvider] = useState(""),
+  const [provider, setProvider] = useState(providers[0] ?? ""),
     [source, setSource] = useState(initialSource);
   const [manifest, setManifest] = useState(JSON.stringify(initialManifest, null, 2));
   const [project, setProject] = useState(emptyEditableProject),
@@ -69,30 +74,18 @@ export function NativeAppsPanel({ workspace, onClose }: { workspace: string; onC
   const [editorKey, setEditorKey] = useState(0);
   const library = new URLSearchParams(window.location.search).get("library") === "team" ? "team" : "private";
   const allowLeave = () => !dirty || window.confirm("Discard unsaved Worker app changes?");
-  async function loadList() {
-    let offset = 0;
-    const rows: App[] = [];
-    for (;;) {
-      const page = decode<{ apps: App[]; providers: string[]; next_offset: number | null }>(
-        await galleryTool(workspace, "app_list", { offset }),
-      );
-      rows.push(...page.apps);
-      setProviders(page.providers);
-      setProvider((value) => value || page.providers[0] || "");
-      if (page.next_offset === null) break;
-      if (page.next_offset <= offset) throw new Error("Invalid app pagination");
-      offset = page.next_offset;
-    }
-    setApps(rows);
-  }
+  useImperativeHandle(ref, () => ({ canLeave: () => !busy && allowLeave() }));
   useEffect(() => {
-    void perform(async () => {
-      await loadList();
-      setLoaded(true);
-      const app = new URLSearchParams(window.location.search).get("app");
-      if (app) await loadApp(app);
-    });
-  }, [workspace]);
+    setSection(workerSection());
+    if (appName && appName !== selected?.name) {
+      setSelected(null);
+      setDirty(false);
+      void perform(() => loadApp(appName));
+    }
+  }, [workspace, appName]);
+  useEffect(() => {
+    if (!hidden) heading.current?.focus({ preventScroll: true });
+  }, [hidden, appName]);
   useEffect(() => {
     if (!dirty) return;
     const listener = (event: BeforeUnloadEvent) => {
@@ -103,33 +96,10 @@ export function NativeAppsPanel({ workspace, onClose }: { workspace: string; onC
     return () => window.removeEventListener("beforeunload", listener);
   }, [dirty]);
   useEffect(() => {
-    const listener = () => {
-      const params = new URLSearchParams(window.location.search);
-      const app = params.get("app");
-      const leavingWorkspace = params.get("view") !== "workers";
-      if (!leavingWorkspace && app === selected?.name) {
-        currentUrl.current = window.location.href;
-        setSection(workerSection());
-        return;
-      }
-      if (busy || !allowLeave()) {
-        window.history.pushState(null, "", currentUrl.current);
-        return;
-      }
-      currentUrl.current = window.location.href;
-      if (leavingWorkspace) return;
-      setCreating(false);
-      setEditingNew(false);
-      setSection(workerSection());
-      if (app) void perform(() => loadApp(app));
-      else {
-        setSelected(null);
-        setDirty(false);
-      }
-    };
-    window.addEventListener("popstate", listener, true);
-    return () => window.removeEventListener("popstate", listener, true);
-  }, [selected, dirty, busy]);
+    const listener = () => setSection(workerSection());
+    window.addEventListener("popstate", listener);
+    return () => window.removeEventListener("popstate", listener);
+  }, []);
   async function perform(action: () => Promise<void>, editorMatchesDraft = false, preserveDraft = false) {
     setBusy(true);
     setError("");
@@ -145,7 +115,7 @@ export function NativeAppsPanel({ workspace, onClose }: { workspace: string; onC
           navigate(name);
         } else if (preserveDraft) setSelected(error.result as App);
         else await loadApp(name);
-        await loadList();
+        await onSaved();
       }
       const diagnostics = error instanceof GalleryToolError ? error.result?.diagnostics : undefined;
       setError(
@@ -187,25 +157,6 @@ export function NativeAppsPanel({ workspace, onClose }: { workspace: string; onC
     setRevisions(revisions);
     setRestoreId(revisions[0]?.id ?? "");
   }
-  function newApp() {
-    if (!allowLeave()) return;
-    navigate(null, "source");
-    setCreating(true);
-    setEditingNew(false);
-    setSelected(null);
-    setBaseRevision(null);
-    setName("");
-    setSource(initialSource);
-    setManifest(JSON.stringify(initialManifest, null, 2));
-    setProject(emptyEditableProject());
-    setDependencies("{}");
-    setRevisions([]);
-    setProvider(providers[0] ?? "");
-    setDirty(false);
-    setError("");
-    setStatus("");
-    setEditorKey((value) => value + 1);
-  }
   const appUrl =
     selected?.status === "active"
       ? (() => {
@@ -229,237 +180,172 @@ export function NativeAppsPanel({ workspace, onClose }: { workspace: string; onC
   const providerAvailable = providers.includes(provider);
   const detail = (!!selected || editingNew) && providerAvailable;
   return (
-    <section
+    <Tabs.Root
+      render={<section />}
       aria-label="Worker apps"
-      className="worker-workspace"
-      style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 24, minWidth: 0 }}
+      className="artifact-detail worker-workspace"
+      hidden={hidden}
+      value={section}
+      onValueChange={(value) => {
+        const tab = value as WorkerSection;
+        setSection(tab);
+        if (selected) navigate(selected.name, tab);
+      }}
     >
       <style>{`
-        .worker-workspace [role="tabpanel"] { min-width: 0; }
+        .worker-workspace .worker-content { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: auto; }
+        .worker-workspace .source-form { flex-shrink: 0; min-height: auto; }
+        .worker-workspace [role="tabpanel"] { flex: 1; min-width: 0; padding: 16px; }
         .worker-workspace [role="tabpanel"][hidden] { display: none; }
-        .worker-workspace .worker-source-panel { height: max(420px, 50vh); }
+        .worker-workspace .worker-source-panel { min-height: 300px; padding: 0; }
         .worker-workspace .worker-source-panel > .project-editor { height: 100%; }
+        .worker-workspace .worker-content > :is(p, .worker-empty, .script-fields, h3, button) { margin: 12px 16px; }
         .worker-workspace .source-actions { flex-wrap: wrap; }
         .worker-workspace input, .worker-workspace textarea { max-width: 100%; box-sizing: border-box; }
         .worker-workspace fieldset { min-width: 0; }
         .worker-workspace .script-fields > label { max-width: 100%; }
-        @media (max-width: 600px) { .worker-workspace { padding: 16px !important; } }
+        .worker-workspace .detail-actions .open-link { display: inline-flex; }
+        @media (max-width: 1100px) {
+          .worker-workspace .detail-header { flex-wrap: wrap; gap: 8px; }
+          .worker-workspace .view-control { order: 3; width: 100%; }
+        }
       `}</style>
-      <header className="script-fields">
-        <div style={{ flex: 1 }}>
-          <h1>{detail ? name : "Worker apps"}</h1>
-          <p className="muted">Native Workers with persistent resources, queues, and scheduled triggers.</p>
+      <header className="detail-header">
+        <button className="back-library" type="button" onClick={onBack} aria-label="Back to library"><span aria-hidden="true">←</span></button>
+        <div className="detail-title">
+          <h1 ref={heading} tabIndex={-1}>{appName || name || "New Worker app"}</h1>
         </div>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => {
-            if (allowLeave()) onClose();
-          }}
-        >
-          Back to gallery
-        </button>
+        {detail ? <Tabs.List aria-label="Worker app sections" className="view-control" activateOnFocus>
+          {workerSections.map(tab => <Tabs.Tab key={tab} value={tab} type="button">{tab[0]!.toUpperCase() + tab.slice(1)}</Tabs.Tab>)}
+        </Tabs.List> : null}
+        {appUrl ? <div className="detail-actions"><a className="download-link open-link" aria-label="Open private app" href={appUrl} target="_blank" rel="noopener">Open<span aria-hidden="true">↗</span></a></div> : null}
       </header>
-      {error ? (
-        <p role="alert" className="error-message" style={{ whiteSpace: "pre-wrap" }}>
-          {error}
-        </p>
-      ) : null}
-      {status ? <p role="status">{status}</p> : null}
-      {!loaded ? <p role="status">Loading Worker apps…</p> : null}
-      {selected && !providerAvailable ? (
-        <p role="status">
-          {selected.name} uses {selected.provider}, which is not available on this deployment. Configure that provider
-          to edit or deploy this app.
-        </p>
-      ) : null}
-      {loaded && !providers.length ? (
-        <div className="worker-empty">
-          <h2>Worker apps are unavailable</h2>
-          <p>
-            No Worker app provider is available on this deployment. Configure a provider to create and deploy Workers.
+      <div className="worker-content">
+        {error ? (
+          <p role="alert" className="error-message" style={{ whiteSpace: "pre-wrap" }}>
+            {error}
           </p>
-          <a href="https://github.com/sidequery/artifacts/blob/main/docs/native-workers.md">
-            Worker setup documentation
-          </a>
-        </div>
-      ) : null}
-      {!detail && !creating ? (
-        <>
-          <div className="script-fields">
-            <button className="primary-action" disabled={busy || !providers.length} onClick={newApp}>
-              New Worker app
-            </button>
-            <button disabled={busy} onClick={() => void perform(loadList)}>
-              Refresh apps
-            </button>
+        ) : null}
+        {status ? <p role="status">{status}</p> : null}
+        {appName && !selected && busy ? <p role="status">Loading Worker app…</p> : null}
+        {selected && !providerAvailable ? (
+          <p role="status">
+            {selected.name} uses {selected.provider}, which is not available on this deployment. Configure that provider
+            to edit or deploy this app.
+          </p>
+        ) : null}
+        {!providers.length ? (
+          <div className="worker-empty">
+            <h2>Worker apps are unavailable</h2>
+            <p>
+              No Worker app provider is available on this deployment. Configure a provider to create and deploy Workers.
+            </p>
+            <a href="https://github.com/sidequery/artifacts/blob/main/docs/native-workers.md">
+              Worker setup documentation
+            </a>
           </div>
-          {apps.length ? (
-            <ul aria-label="Worker app list" style={{ listStyle: "none", padding: 0 }}>
-              {apps.map((app) => (
-                <li key={app.name} style={{ borderBottom: "1px solid var(--line)", padding: "16px 0" }}>
-                  <button
-                    disabled={busy}
-                    onClick={() => {
-                      if (allowLeave())
-                        void perform(async () => {
-                          await loadApp(app.name);
-                          navigate(app.name, "source");
-                        });
-                    }}
-                  >
-                    {app.name}
-                  </button>{" "}
-                  <span>
-                    {app.status.replaceAll("-", " ")} · {app.provider}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          ) : loaded && providers.length ? (
-            <p>No Worker apps saved.</p>
-          ) : null}
-        </>
-      ) : null}
-      {creating && providers.length ? (
-        <form
-          className="source-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            setCreating(false);
-            setEditingNew(true);
-            setDirty(true);
-            setSource(
-              template === "scheduled"
-                ? 'export default { async scheduled(event: ScheduledEvent, env: unknown, ctx: ExecutionContext) { console.log("Scheduled Worker", event.cron); } };'
-                : initialSource,
-            );
-          }}
-        >
-          <h2>New Worker app</h2>
-          <div className="script-fields">
-            <label>
-              Name
-              <input
-                aria-label="Worker app name"
-                value={name}
-                required
-                onChange={(event) => setName(event.target.value)}
-              />
-            </label>
-            {providers.length === 1 ? (
-              <p>Provider: {providers[0]}</p>
-            ) : (
-              <label>
-                Provider
-                <Select
-                  aria-label="Worker app provider"
-                  value={provider}
-                  onChange={(event) => setProvider(event.target.value)}
-                >
-                  {providers.map((value) => (
-                    <option key={value}>{value}</option>
-                  ))}
-                </Select>
-              </label>
-            )}
-            <label>
-              Template
-              <Select
-                aria-label="Worker app template"
-                value={template}
-                onChange={(event) => setTemplate(event.target.value)}
-              >
-                <option value="http">HTTP Worker</option>
-                <option value="scheduled">Scheduled Worker</option>
-              </Select>
-            </label>
-          </div>
-          <div className="source-actions">
-            <button className="primary-action">Continue to editor</button>
-            <button type="button" onClick={() => setCreating(false)}>
-              Cancel
-            </button>
-          </div>
-        </form>
-      ) : null}
-      {detail ? (
-        <>
-          <div className="script-fields">
-            <button
-              disabled={busy}
-              onClick={() => {
-                if (allowLeave()) {
-                  navigate(null);
-                  setSelected(null);
-                  setEditingNew(false);
-                  setDirty(false);
-                }
-              }}
-            >
-              All Worker apps
-            </button>
-            <span>{provider}</span>
-            {selected ? (
-              <span role="status">
-                Deployment: {selected.status.replaceAll("-", " ")}
-                {` · saved ${selected.revision_token.slice(0, 12)}`}
-                {selected.desired_revision ? ` · desired ${selected.desired_revision.slice(0, 12)}` : ""}
-                {selected.active_revision ? ` · active ${selected.active_revision.slice(0, 12)}` : ""}
-              </span>
-            ) : (
-              <span>New draft</span>
-            )}
-            {appUrl ? (
-              <a href={appUrl} target="_blank" rel="noopener">
-                Open private app
-              </a>
-            ) : null}
-          </div>
-          {selected?.error ? <p role="alert">{selected.error}</p> : null}
+        ) : null}
+        {creating && providers.length ? (
           <form
             className="source-form"
             onSubmit={(event) => {
               event.preventDefault();
-              void perform(async () => {
-                const result = decode<App & { ok: boolean }>(
-                  await galleryTool(workspace, "app_write", {
-                    name,
-                    source,
-                    manifest: JSON.parse(manifest),
-                    project,
-                    provider,
-                    expected_revision: baseRevision,
-                  }),
-                );
-                setDirty(false);
-                await loadList();
-                await loadApp(name);
-                navigate(name);
-                setStatus(result.ok ? "Worker app deployed" : "Worker app needs reconciliation");
-              }, true);
+              setCreating(false);
+              setEditingNew(true);
+              setDirty(true);
+              setSource(
+                template === "scheduled"
+                  ? 'export default { async scheduled(event: ScheduledEvent, env: unknown, ctx: ExecutionContext) { console.log("Scheduled Worker", event.cron); } };'
+                  : initialSource,
+              );
             }}
           >
-            <Tabs.Root
-              value={section}
-              onValueChange={(value) => {
-                const tab = value as WorkerSection;
-                setSection(tab);
-                if (selected) navigate(selected.name, tab);
+            <h2>New Worker app</h2>
+            <div className="script-fields">
+              <label>
+                Name
+                <input
+                  aria-label="Worker app name"
+                  value={name}
+                  required
+                  onChange={(event) => { setName(event.target.value); setDirty(true); }}
+                />
+              </label>
+              {providers.length === 1 ? (
+                <p>Provider: {providers[0]}</p>
+              ) : (
+                <label>
+                  Provider
+                  <Select
+                    aria-label="Worker app provider"
+                    value={provider}
+                    onChange={(event) => { setProvider(event.target.value); setDirty(true); }}
+                  >
+                    {providers.map((value) => (
+                      <option key={value}>{value}</option>
+                    ))}
+                  </Select>
+                </label>
+              )}
+              <label>
+                Template
+                <Select
+                  aria-label="Worker app template"
+                  value={template}
+                  onChange={(event) => { setTemplate(event.target.value); setDirty(true); }}
+                >
+                  <option value="http">HTTP Worker</option>
+                  <option value="scheduled">Scheduled Worker</option>
+                </Select>
+              </label>
+            </div>
+            <div className="source-actions">
+              <button className="primary-action">Continue to editor</button>
+              <button type="button" onClick={onBack}>
+                Cancel
+              </button>
+            </div>
+          </form>
+        ) : null}
+        {detail ? (
+          <>
+            <div className="script-fields">
+              <span>{provider}</span>
+              {selected ? (
+                <span role="status">
+                  Deployment: {selected.status.replaceAll("-", " ")}
+                  {` · saved ${selected.revision_token.slice(0, 12)}`}
+                  {selected.desired_revision ? ` · desired ${selected.desired_revision.slice(0, 12)}` : ""}
+                  {selected.active_revision ? ` · active ${selected.active_revision.slice(0, 12)}` : ""}
+                </span>
+              ) : (
+                <span>New draft</span>
+              )}
+            </div>
+            {selected?.error ? <p role="alert">{selected.error}</p> : null}
+            <form
+              className="source-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void perform(async () => {
+                  const result = decode<App & { ok: boolean }>(
+                    await galleryTool(workspace, "app_write", {
+                      name,
+                      source,
+                      manifest: JSON.parse(manifest),
+                      project,
+                      provider,
+                      expected_revision: baseRevision,
+                    }),
+                  );
+                  setDirty(false);
+                  await onSaved();
+                  await loadApp(name);
+                  navigate(name);
+                  setStatus(result.ok ? "Worker app deployed" : "Worker app needs reconciliation");
+                }, true);
               }}
             >
-              <Tabs.List
-                aria-label="Worker app sections"
-                className="view-control"
-                activateOnFocus
-                style={{ display: "flex", gap: 6, overflowX: "auto", padding: "16px 0" }}
-              >
-                {workerSections.map((tab) => (
-                  <Tabs.Tab key={tab} value={tab} type="button">
-                    {tab[0]!.toUpperCase() + tab.slice(1)}
-                  </Tabs.Tab>
-                ))}
-              </Tabs.List>
               <Tabs.Panel value="source" className="worker-source-panel" keepMounted hidden={section !== "source"}>
                 <ProjectEditor
                   key={editorKey}
@@ -541,7 +427,7 @@ export function NativeAppsPanel({ workspace, onClose }: { workspace: string; onC
                         void perform(
                           async () => {
                             await galleryTool(workspace, "app_reconcile", { name });
-                            await loadList();
+                            await onSaved();
                             setSelected(decode<Snapshot>(await galleryTool(workspace, "app_read", { name })));
                             setStatus("Deployment reconciled");
                           },
@@ -580,7 +466,7 @@ export function NativeAppsPanel({ workspace, onClose }: { workspace: string; onC
                           if (allowLeave())
                             void perform(async () => {
                               await galleryTool(workspace, "app_restore", { name, revision_id: restoreId });
-                              await loadList();
+                              await onSaved();
                               await loadApp(name);
                               setStatus("Source restored and deployed; data retained");
                             });
@@ -658,52 +544,51 @@ export function NativeAppsPanel({ workspace, onClose }: { workspace: string; onC
                   </label>
                 </details>
               </Tabs.Panel>
-            </Tabs.Root>
-            <div className="source-actions">
-              <button className="primary-action" disabled={busy || !valid || !provider || !parsed}>
-                Save and deploy Worker
-              </button>
-              {dirty ? <span>Unsaved changes</span> : null}
-            </div>
-          </form>
-          {section === "settings" && selected ? (
-            <>
-              <h3>Secret values</h3>
-              <SecretControls
-                key={selected.name}
-                workspace={workspace}
-                name={selected.name}
-                kind="app"
-                onSaved={async () => {
-                  await loadList();
-                  const saved = decode<Snapshot>(await galleryTool(workspace, "app_read", { name }));
-                  setSelected(saved);
-                }}
-              />
-              <h3>Library</h3>
-              <button
-                disabled={busy || dirty}
-                onClick={() =>
-                  void perform(async () => {
-                    await galleryTool(workspace, "app_move", {
-                      name,
-                      library: library === "team" ? "private" : "team",
-                    });
-                    setSelected(null);
-                    setEditingNew(false);
-                    navigate(null);
-                    await loadList();
-                    setStatus(`App moved to ${library === "team" ? "personal" : "team"} library`);
-                  })
-                }
-              >
-                Move to {library === "team" ? "personal" : "team"} library
-              </button>
-            </>
-          ) : null}
-        </>
-      ) : null}
-    </section>
+              <div className="source-actions">
+                <button className="primary-action" disabled={busy || !valid || !provider || !parsed}>
+                  Save and deploy Worker
+                </button>
+                {dirty ? <span>Unsaved changes</span> : null}
+              </div>
+            </form>
+            {section === "settings" && selected ? (
+              <>
+                <h3>Secret values</h3>
+                <SecretControls
+                  key={selected.name}
+                  workspace={workspace}
+                  name={selected.name}
+                  kind="app"
+                  onSaved={async () => {
+                    await onSaved();
+                    const saved = decode<Snapshot>(await galleryTool(workspace, "app_read", { name }));
+                    setSelected(saved);
+                  }}
+                />
+                <h3>Library</h3>
+                <button
+                  disabled={busy || dirty}
+                  onClick={() =>
+                    void perform(async () => {
+                      await galleryTool(workspace, "app_move", {
+                        name,
+                        library: library === "team" ? "private" : "team",
+                      });
+                      setSelected(null);
+                      setEditingNew(false);
+                      navigate(null);
+                      await onSaved();
+                    })
+                  }
+                >
+                  Move to {library === "team" ? "personal" : "team"} library
+                </button>
+              </>
+            ) : null}
+          </>
+        ) : null}
+      </div>
+    </Tabs.Root>
   );
 }
 
