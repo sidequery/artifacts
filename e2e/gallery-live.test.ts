@@ -70,7 +70,7 @@ test("live changes update clean editors, preserve dirty drafts, and reconcile af
     const connected = page.waitForEvent("websocket").then(socket => socket.waitForEvent("framereceived", { predicate: event => event.payload === "ready" }));
     await page.goto(server.url.href);
     await connected;
-    await page.getByRole("button", { name: "Source", exact: true }).click();
+    await page.getByRole("tab", { name: "Source", exact: true }).click();
     const editor = page.getByRole("textbox", { name: "report.artifact.tsx", exact: true });
     await editor.waitFor();
     source = "agent update"; revision = "two";
@@ -100,10 +100,10 @@ test("live changes update clean editors, preserve dirty drafts, and reconcile af
     expect(await reports.getAttribute("aria-expanded")).toBe("false");
     await reports.click();
     await nested.click();
-    await page.getByRole("button", { name: "Source", exact: true }).click();
+    await page.getByRole("tab", { name: "Source", exact: true }).click();
     await page.getByRole("textbox", { name: "missed.artifact.tsx", exact: true }).waitFor();
     await page.getByTitle("default/report", { exact: true }).click();
-    await page.getByRole("button", { name: "Source", exact: true }).click();
+    await page.getByRole("tab", { name: "Source", exact: true }).click();
     expect(await editor.innerText()).toBe("my unsaved changes");
   } finally { await browser.close(); server.stop(true); }
 }, 30_000);

@@ -27,11 +27,14 @@ test("gallery imports a fresh complete project and exports its saved snapshot th
     expect(await page.getByRole("heading", { level: 1 }).innerText()).toBe("portable-import");
     if (process.env.GALLERY_SCREENSHOT_DIR) { await mkdir(process.env.GALLERY_SCREENSHOT_DIR, { recursive: true }); await page.screenshot({ path: join(process.env.GALLERY_SCREENSHOT_DIR, "gallery-project-import.png"), fullPage: true }); }
     await page.getByRole("button", { name: "Close import", exact: true }).click();
-    const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("link", { name: "Download", exact: true }).click()]);
+    await page.getByRole("button", { name: "More actions", exact: true }).click();
+    const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("menuitem", { name: "Download", exact: true }).click()]);
     expect(download.suggestedFilename()).toBe("portable-import.artifact-project.json");
     const path = join(directory, "export.json"); await download.saveAs(path);
     expect(await Bun.file(path).json()).toEqual({ ...archive, name: "portable-import" });
-    expect(await page.getByRole("link", { name: "Download", exact: true }).getAttribute("href")).toContain("format=project");
+    await page.getByRole("button", { name: "More actions", exact: true }).click();
+    expect(await page.getByRole("menuitem", { name: "Download", exact: true }).getAttribute("href")).toContain("format=project");
+    await page.getByRole("menu").press("Escape");
     await page.getByRole("button", { name: "Share", exact: true }).click();
     const shareUrl = await page.getByRole("textbox", { name: "Share link", exact: true }).inputValue();
     expect(shareUrl).toBe(`${server.url}/a/portable-import`);

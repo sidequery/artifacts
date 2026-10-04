@@ -40,7 +40,8 @@ test("gallery exposes server secret names and writes for artifacts and scripts w
     await page.goto(server.url.href);
     for (const [name, label, kind] of [["app", "app", "artifact"], ["handler", "handler Script", "script"]] as const) {
       await page.getByRole("button", { name: label, exact: true }).click();
-      await page.getByRole("group", { name: kind === "artifact" ? "Artifact view" : "Script view" }).getByRole("button", { name: "Secrets", exact: true }).click();
+      await page.getByRole("button", { name: "More actions", exact: true }).click();
+      await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
       await page.getByRole("button", { name: "Load secret names", exact: true }).click();
       await page.getByLabel("Secret names").getByText("EXISTING", { exact: true }).waitFor();
       expect(await page.locator("body").innerText()).not.toContain("hidden-fixture-value");
@@ -60,6 +61,6 @@ test("gallery exposes server secret names and writes for artifacts and scripts w
     hosted = false;
     await page.reload();
     await page.getByRole("button", { name: "app", exact: true }).click();
-    expect(await page.getByRole("group", { name: "Artifact view" }).getByRole("button", { name: "Secrets", exact: true }).count()).toBe(0);
+    expect(await page.getByRole("tablist", { name: "Artifact view" }).getByRole("tab", { name: "Settings", exact: true }).count()).toBe(0);
   } finally { await browser.close(); server.stop(true); }
 }, 30000);

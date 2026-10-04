@@ -168,7 +168,8 @@ export class CloudArtifactService {
           }
         }
         const { name: _name, ...input } = args;
-        const payload = { schedule: await backend.schedule(input as ArtifactScheduleInput) };
+        const active = await backend.activeRevision();
+        const payload = { schedule: await backend.schedule(input as ArtifactScheduleInput), has_server: active?.has_server ?? snapshot.server_source !== null };
         return { ...text(payload), structuredContent: payload };
       }
       case "artifact_request": {

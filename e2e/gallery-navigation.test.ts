@@ -74,6 +74,19 @@ test("gallery filters, previews revisions, and preserves mobile library navigati
     expect(await campaign.evaluate(el => getComputedStyle(el).borderLeftWidth)).toBe("0px");
     const desktopFilters = (await desktop.getByRole("group", { name: "Filter library" }).boundingBox())!;
     expect((await campaign.boundingBox())!.y).toBe(desktopFilters.y + desktopFilters.height);
+    const assertSingleRow = async (page: Page) => {
+      const header = page.locator(".detail-header");
+      const bounds = (await header.boundingBox())!;
+      for (const control of [header.getByRole("heading", { level: 1 }), header.getByRole("tablist"), header.getByRole("button", { name: "Share", exact: true }), header.getByRole("button", { name: "More actions", exact: true })]) {
+        const item = (await control.boundingBox())!;
+        expect(item.y).toBeLessThan(bounds.y + bounds.height / 2);
+        expect(item.y + item.height).toBeLessThanOrEqual(bounds.y + bounds.height);
+      }
+      expect(await header.locator(".detail-title p").count()).toBe(0);
+      expect(await header.getByRole("tab", { name: "Schedule", exact: true }).count()).toBe(0);
+      expect(await header.getByRole("tab", { name: "Settings", exact: true }).count()).toBe(0);
+    };
+    await assertSingleRow(desktop);
     await screenshot(desktop, "gallery-desktop-preview");
     await desktop.getByRole("button", { name: "Switch to dark theme" }).click();
     await desktop.reload();
@@ -112,7 +125,10 @@ test("gallery filters, previews revisions, and preserves mobile library navigati
     expect(await campaign.getAttribute("aria-current")).toBe("true");
     expect(await script.getAttribute("aria-current")).toBeNull();
 
-    await desktop.getByRole("group", { name: "Artifact view" }).getByRole("button", { name: "Source", exact: true }).click();
+    const previewTab = desktop.getByRole("tab", { name: "Preview", exact: true });
+    await previewTab.focus();
+    await previewTab.press("ArrowRight");
+    expect(await desktop.getByRole("tab", { name: "Source", exact: true }).getAttribute("aria-selected")).toBe("true");
     const source = desktop.getByRole("textbox", { name: "Campaign overview.artifact.tsx", exact: true });
     await source.waitFor();
     expect(await source.innerText()).toBe(sourceFor(false));
@@ -126,19 +142,28 @@ test("gallery filters, previews revisions, and preserves mobile library navigati
     expect(await source.locator("span").evaluateAll(spans => new Set(spans.map(el => getComputedStyle(el).color)).size)).toBeGreaterThan(1);
     const draft = sourceFor(false).replace("Current campaign", "Unsaved campaign");
     await source.fill(draft);
-    await desktop.getByRole("group", { name: "Artifact view" }).getByRole("button", { name: "Preview", exact: true }).click();
-    await desktop.getByRole("group", { name: "Artifact view" }).getByRole("button", { name: "Source", exact: true }).click();
+    await desktop.getByRole("tablist", { name: "Artifact view" }).getByRole("tab", { name: "Preview", exact: true }).click();
+    await desktop.getByRole("tablist", { name: "Artifact view" }).getByRole("tab", { name: "Source", exact: true }).click();
     expect(await source.innerText()).toBe(draft);
+    await desktop.getByRole("button", { name: "More actions" }).click();
+    const menu = desktop.getByRole("menu"); await menu.waitFor();
+    await menu.press("Escape");
+    await menu.waitFor({ state: "hidden" });
+    expect(await desktop.getByRole("button", { name: "More actions" }).evaluate(el => el === document.activeElement)).toBe(true);
     await noHorizontalOverflow(desktop);
     await screenshot(desktop, "gallery-desktop-source");
-    await desktop.getByRole("combobox", { name: "Version", exact: true }).selectOption("campaign-revision-1");
+    await desktop.getByRole("button", { name: "More actions", exact: true }).click();
+    await desktop.getByRole("menuitem", { name: "Versions", exact: true }).click();
+    await desktop.getByRole("menuitem", { name: /^Revision 1 ·/ }).click();
     await desktop.getByRole("button", { name: "Restore and deploy", exact: true }).waitFor();
     await desktop.waitForFunction(() => document.querySelector('[role="textbox"][aria-label="Campaign overview.artifact.tsx"]')?.textContent?.includes("Campaign revision 1"));
     expect(await source.getAttribute("aria-readonly")).toBe("true");
-    await desktop.getByRole("group", { name: "Artifact view" }).getByRole("button", { name: "Preview", exact: true }).click();
+    await desktop.getByRole("tablist", { name: "Artifact view" }).getByRole("tab", { name: "Preview", exact: true }).click();
     await desktop.frameLocator('iframe[title="Preview of Campaign overview"]').getByRole("heading", { name: "Campaign revision 1" }).waitFor();
     expect(new URL(await desktop.getByTitle("Preview of Campaign overview").getAttribute("src") ?? "", server.url).searchParams.get("version")).toBe("campaign-revision-1");
-    await desktop.getByRole("combobox", { name: "Version", exact: true }).selectOption("working");
+    await desktop.getByRole("button", { name: "More actions", exact: true }).click();
+    await desktop.getByRole("menuitem", { name: "Versions", exact: true }).click();
+    await desktop.getByRole("menuitem", { name: "Working copy", exact: true }).click();
     await desktop.frameLocator('iframe[title="Preview of Campaign overview"]').getByRole("heading", { name: "Campaign performance" }).waitFor();
     await desktop.getByRole("button", { name: "Share", exact: true }).click();
     await desktop.getByRole("textbox", { name: "URL slug", exact: true }).fill("campaign-report");
@@ -166,15 +191,17 @@ test("gallery filters, previews revisions, and preserves mobile library navigati
     await mobile.frameLocator('iframe[title="Preview of Campaign overview"]').getByRole("heading", { name: "Campaign performance" }).waitFor();
     await noHorizontalOverflow(mobile);
     await mobile.getByLabel("More actions", { exact: true }).click();
-    expect(await mobile.getByRole("link", { name: "Download", exact: true }).isVisible()).toBe(true);
-    await mobile.getByLabel("More actions", { exact: true }).click();
+    await mobile.getByRole("menuitem", { name: "Download", exact: true }).waitFor();
+    await mobile.getByRole("menu").press("Escape");
+    await mobile.getByRole("menu").waitFor({ state: "hidden" });
+    await assertSingleRow(mobile);
     await screenshot(mobile, "gallery-mobile-preview");
-    await mobile.getByRole("group", { name: "Artifact view" }).getByRole("button", { name: "Source", exact: true }).click();
+    await mobile.getByRole("tablist", { name: "Artifact view" }).getByRole("tab", { name: "Source", exact: true }).click();
     const mobileSource = mobile.getByRole("textbox", { name: "Campaign overview.artifact.tsx", exact: true });
     await mobileSource.waitFor();
     await mobileSource.fill(sourceFor(false).replace("Current campaign", "Mobile unsaved campaign"));
     await mobileSource.press("ControlOrMeta+Home");
-    for (const control of [mobile.getByRole("combobox", { name: "Version", exact: true }), mobile.getByRole("button", { name: "Save and deploy", exact: true }), mobile.getByRole("button", { name: "Find", exact: true }), mobile.getByText("Manage helper files", { exact: true }), mobile.getByText("Dependencies (0)", { exact: true })]) {
+    for (const control of [mobile.getByRole("button", { name: "Save and deploy", exact: true }), mobile.getByRole("button", { name: "Find", exact: true }), mobile.getByText("Manage helper files", { exact: true }), mobile.getByText("Dependencies (0)", { exact: true })]) {
       await control.scrollIntoViewIfNeeded();
       const bounds = (await control.boundingBox())!;
       expect(bounds.x).toBeGreaterThanOrEqual(0);
@@ -196,6 +223,25 @@ test("gallery filters, previews revisions, and preserves mobile library navigati
     expect(await mobileLibrary.getByTitle("default/sync-customers", { exact: true }).count()).toBe(0);
     await noHorizontalOverflow(mobile);
     expect(calls.map(call => call.name)).toEqual(["artifact_link"]);
+    await desktop.route("**/api/tools?*", async route => {
+      const call = route.request().postDataJSON();
+      await route.fulfill({ json: { structuredContent: call.name === "artifact_schedule" ? {
+        has_server: true,
+        schedule: { interval_seconds: 3600, paused: false, next_run_at: Date.now() + 3600000, request: { path: "/tick", method: "POST", headers: [] } },
+      } : { runs: [{ id: "last-run", revision: "validated-revision", trigger: "schedule", started_at: "2026-10-03T18:00:00Z", duration_ms: 24, status: "succeeded", http_status: 200 }] } } });
+    });
+    await desktop.getByRole("button", { name: "Share", exact: true }).click();
+    await desktop.getByRole("button", { name: "More actions", exact: true }).click();
+    await desktop.getByRole("menuitem", { name: "Schedule", exact: true }).click();
+    await desktop.getByRole("status").filter({ hasText: /^Enabled$/ }).waitFor();
+    await desktop.getByText("Last result: succeeded", { exact: false }).waitFor();
+    expect(await desktop.getByLabel("Schedule headers").isVisible()).toBe(false);
+    expect(await desktop.getByLabel("Schedule path").inputValue()).toBe("/tick");
+    await screenshot(desktop, "gallery-desktop-schedule");
+    await desktop.setViewportSize({ width: 390, height: 844 });
+    await desktop.getByRole("status").filter({ hasText: /^Enabled$/ }).waitFor();
+    await noHorizontalOverflow(desktop);
+    await screenshot(desktop, "gallery-mobile-schedule");
   } finally {
     await browser.close();
     server.stop(true);

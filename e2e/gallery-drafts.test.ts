@@ -36,7 +36,7 @@ test("gallery retains complete unsaved projects and new scripts and offers confl
     page.setDefaultTimeout(5000);
     await page.goto(server.url.href);
     await page.getByTitle("default/report", { exact: true }).click();
-    await page.getByRole("group", { name: "Artifact view" }).getByRole("button", { name: "Source", exact: true }).click();
+    await page.getByRole("tablist", { name: "Artifact view" }).getByRole("tab", { name: "Source", exact: true }).click();
     const client = page.getByRole("textbox", { name: "report.artifact.tsx", exact: true });
     await client.fill("unsaved client");
     await page.getByRole("button", { name: "report.artifact.server.ts", exact: true }).click();
@@ -65,11 +65,15 @@ test("gallery retains complete unsaved projects and new scripts and offers confl
     expect(await page.getByRole("textbox", { name: "Project dependencies" }).inputValue()).toBe('{"example":"latest"}');
     expect(await page.getByRole("button", { name: "Save and deploy", exact: true }).isEnabled()).toBe(false);
     await page.getByRole("textbox", { name: "Project dependencies" }).fill("{}");
-    await page.getByRole("combobox", { name: "Version", exact: true }).selectOption("old");
+    await page.getByRole("button", { name: "More actions", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Versions", exact: true }).click();
+    await page.getByRole("menuitem", { name: /^Revision 1 ·/ }).click();
     await page.getByRole("button", { name: "Restore and deploy", exact: true }).waitFor();
     expect(await client.innerText()).toBe("historical client");
     expect(await page.locator(".live-data-note").innerText()).toContain("Historical code uses the current database and files and can change them");
-    await page.getByRole("combobox", { name: "Version", exact: true }).selectOption("working");
+    await page.getByRole("button", { name: "More actions", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Versions", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Working copy", exact: true }).click();
     expect(await client.innerText()).toBe("unsaved client");
     await page.getByRole("button", { name: "Save and deploy", exact: true }).click();
     await page.getByRole("button", { name: "Compare saved project" }).waitFor();
