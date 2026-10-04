@@ -14,6 +14,7 @@ import { createArtifactServer } from "./serve";
 import { ArtifactService } from "./service";
 import { historyPath } from "./history";
 import { PLUGIN_ROOT } from "./paths";
+import { writePluginPackage } from "./plugin-package";
 import type { ProjectArchive } from "./project-archive-contract";
 
 type ServerManager = Pick<ServerDaemonManager, "start" | "stop" | "status" | "logs" | "uninstall">;
@@ -114,6 +115,18 @@ async function main(): Promise<void> {
   if (args.command === "version" || args.command === "--version" || args.command === "-v") {
     const manifest = JSON.parse(readFileSync(join(PLUGIN_ROOT, "package.json"), "utf8")) as { name: string; version: string };
     console.log(`${manifest.name} ${manifest.version}`);
+    return;
+  }
+
+  if (args.command === "plugin") {
+    if (args.positionals.length) throw new Error("plugin accepts options only: --out DIRECTORY [--url URL | --dir WORKSPACE]");
+    for (const [name, value] of Object.entries(args.flags)) {
+      if (!["out", "url", "dir"].includes(name)) throw new Error(`Unknown plugin option: --${name}`);
+      if (value === true || !value.trim()) throw new Error(`--${name} requires a value`);
+    }
+    const directory = flagString(args.flags, "out");
+    if (!directory) throw new Error("plugin requires --out DIRECTORY");
+    printJson(await writePluginPackage({ directory, url: flagString(args.flags, "url"), workspace: flagString(args.flags, "dir") }));
     return;
   }
 
@@ -320,6 +333,7 @@ Usage:
   artifacts serve [--dir PATH] [--port N]
   artifacts web [--port 4784] [--dir PATH]
   artifacts mcp
+  artifacts plugin --out DIRECTORY [--url URL | --dir WORKSPACE]
   artifacts history [NAME]
   artifacts show VERSION_ID [--source]
   artifacts open --version VERSION_ID [--event EVENT_ID] [--placement split|tab|zoomed|overlay]
@@ -338,7 +352,8 @@ Usage:
   artifacts server start [--port 4786] [--at-login]
   artifacts server stop | status | logs [--lines 100] | uninstall
 
-All commands accept --dir PATH and --history-db PATH.
+Workspace commands accept --dir PATH and --history-db PATH.
+plugin creates a portable package in a new directory; its parent must exist.
 read returns up to 200 lines by default, with a source_hash and next_line.
 edit accepts JSON: {"edits":[{"old_text":"exact match","new_text":"replacement"}],"expected_hash":"optional SHA-256"}.
 Edits run sequentially in memory; every old_text must match exactly once. Invalid batches

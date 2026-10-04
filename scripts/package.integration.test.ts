@@ -230,6 +230,13 @@ try {
 `);
     await run([process.execPath, "run", mcpSmoke], clientDirectory, isolatedEnv);
 
+    const pluginDirectory = join(consumer, "artifacts-plugin");
+    await run([artifact, "plugin", "--out", pluginDirectory, "--dir", artifacts], consumer, isolatedEnv);
+    const pluginManifest = JSON.parse(await Bun.file(join(pluginDirectory, "plugin.json")).text());
+    expect(pluginManifest.name).toBe("artifacts");
+    const pluginConfig = JSON.parse(await Bun.file(join(pluginDirectory, "mcp.json")).text());
+    expect(pluginConfig.mcpServers.artifacts.args.slice(-2)).toEqual(["--dir", artifacts]);
+
     if (process.env.CELLD_PACKAGE_INTEGRATION === "1") {
       const target = process.platform === "darwin" && process.arch === "arm64"
         ? "aarch64-apple-darwin"

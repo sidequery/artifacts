@@ -1,0 +1,10 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "artifacts",
+  "version": "0.1.0",
+  "description": "Create, edit, and explore React artifacts in your configured Artifacts workspace.",
+  "author": { "name": "Sidequery" },
+  "repository": "https://github.com/sidequery/artifacts",
+  "license": "MIT",
+  "extensions": { "com.openai": { "onboardingSkill": "./skills/setup/SKILL.md" } }
+}

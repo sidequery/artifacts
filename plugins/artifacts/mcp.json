@@ -1,0 +1,10 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "artifacts": {
+      "type": "stdio",
+      "command": "bunx",
+      "args": ["--bun", "@sidequery/artifacts@0.1.0", "mcp"]
+    }
+  }
+}

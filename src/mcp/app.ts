@@ -62,7 +62,8 @@ export async function artifactAppResult(service: ArtifactService, selection: { n
   if (Boolean(selection.name) === Boolean(selection.version_id)) throw new Error("provide name or version_id, but not both");
   if (selection.event_id && !selection.version_id) throw new Error("event_id requires version_id");
   const saved = selection.version_id ? service.version(selection.version_id) : undefined;
-  const path = saved?.source_path ?? service.resolve(ensureArtifactFileName(selection.name!));
+  if (!saved) ensureArtifactFileName(selection.name!);
+  const path = saved?.source_path ?? service.resolve(selection.name!);
   if (!saved) assertRegularArtifact(path);
   const source = saved?.source ?? readFileSync(path, "utf8");
   const project = saved?.project ?? readLocalProject(path);
@@ -77,7 +78,7 @@ export async function artifactAppResult(service: ArtifactService, selection: { n
     if (event) state = JSON.parse(event.initial_state);
   } else {
     try {
-      const value: unknown = JSON.parse(readFileSync(path.replace(/\.artifact\.tsx$/, ".artifact.data.json"), "utf8"));
+      const value: unknown = JSON.parse(readFileSync(path.replace(/\.(artifact|canvas)\.tsx$/, ".$1.data.json"), "utf8"));
       if (value && typeof value === "object" && !Array.isArray(value)) state = value as Record<string, unknown>;
     } catch { /* Match gallery previews: malformed sidecars remain untouched. */ }
   }
