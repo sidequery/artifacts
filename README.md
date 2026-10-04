@@ -154,6 +154,7 @@ inline views, targeted edits, history, and compatibility with older Canvas sourc
 Start with the [documentation index](docs/README.md) to find the guide for your task.
 
 - [Authentication, MCP sign-in, and access permissions](docs/authentication.md)
+- [Portable MCP plugin and host surfaces](docs/mcp-plugin.md)
 - [Host commands and local persistence](docs/daemon.md)
 - [Deploy to Cloudflare](docs/cloudflare.md)
 - [Deploy celld on your own infrastructure](docs/celld-deployment.md)

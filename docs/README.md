@@ -10,6 +10,7 @@ then open [localhost:4786](http://127.0.0.1:4786).
 | --- | --- |
 | Run Artifacts on my machine | [Local host](daemon.md) or [Docker](docker.md) |
 | Sign in and connect my coding agent | [Authentication and MCP](authentication.md#connect-to-an-existing-deployment) |
+| Install the portable agent plugin | [MCP plugin and host surfaces](mcp-plugin.md) |
 | Share with my team or publish a link | [Libraries and URL permissions](authentication.md#library-and-url-permissions) |
 | Work with source files in a local project | [File-based workspace](local-workspace.md) |
 
