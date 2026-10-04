@@ -187,7 +187,7 @@ celldTest("runs native artifact SQLite and KV across code update and celld resta
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   await page.goto(baseUrl);
-  await page.getByRole("button", { name: "native-counter", exact: true }).waitFor();
+  await page.getByRole("button", { name: "native-counter", exact: true }).click();
   const frame = page.frameLocator("iframe.preview-frame");
   await frame.getByText("Count: 2", { exact: true }).waitFor({ timeout: 30_000 });
   await frame.getByRole("button", { name: "Increment" }).click();
