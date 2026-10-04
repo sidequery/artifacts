@@ -6,11 +6,11 @@ with [app backends](app-backends.md); for an endpoint or scheduled job with SQLi
 start with [scripts](scripts.md).
 
 Your administrator must configure a [deployment provider](#providers) before you
-can deploy native apps. Then use **Worker apps** in the gallery, or ask your agent
+can deploy native apps. Then choose **New Worker app** from the **+** menu beside Artifacts, or ask your agent
 to read `app_guide`. Native app URLs are private; they do not currently support
 public links.
 
-Native apps deploy ordinary Cloudflare Worker modules with their default handler and named Durable Object exports. They use native KV, R2, D1, queue and DO bindings rather than the script SDK's `env.sql` wrapper. The gallery's **Worker apps** button and hosted MCP `app_*` tools use the same authenticated deployment controller.
+Native apps deploy ordinary Cloudflare Worker modules with their default handler and named Durable Object exports. They use native KV, R2, D1, queue and DO bindings rather than the script SDK's `env.sql` wrapper. Worker apps appear alongside artifacts and scripts in the sidebar, with the same folders and search. Select one to edit its source, resources, triggers, deployments, and settings in the detail pane. The gallery and hosted MCP `app_*` tools use the same authenticated deployment controller.
 
 An app belongs to a private or team library and a workspace. Its UUID permanently owns provider resources; source revisions, export names, logical library moves and binding names do not change those identities. App URLs are private:
 

@@ -68,10 +68,12 @@ export class NativeApps extends DurableObject<NativeEnvironment> {
     return { name: row.name, workspace: row.workspace, provider: row.provider, desired_revision: row.desired, active_revision: row.active,
       revision_token: createHash("sha256").update(row.draft).digest("hex"), status: row.status, stage: row.stage, error: row.error, updated_at: row.updated_at };
   }
-  list(input: { owner: string; workspace: string; offset?: number }) {
+  list(input: { owner: string; workspace?: string; offset?: number }) {
     const offset = input.offset ?? 0;
     if (!Number.isSafeInteger(offset) || offset < 0) throw new Error("Invalid app pagination");
-    const rows = this.sql.exec<Row>("select * from native_apps where owner=? and workspace=? order by name limit 100 offset ?", input.owner, input.workspace, offset).toArray();
+    const rows = input.workspace === undefined
+      ? this.sql.exec<Row>("select * from native_apps where owner=? order by name,workspace limit 100 offset ?", input.owner, offset).toArray()
+      : this.sql.exec<Row>("select * from native_apps where owner=? and workspace=? order by name limit 100 offset ?", input.owner, input.workspace, offset).toArray();
     return { apps: rows.map(row => this.summary(row)), next_offset: rows.length === 100 ? offset + 100 : null, providers: nativeProviders(this.env) };
   }
   read(input: Selection & { revision_id?: string }) {
