@@ -307,7 +307,7 @@ function Workspace({ initial, view, search, renderPreview, attach, attachedVersi
                 {artifact.working ? <option value="working">Working copy</option> : null}
                 {resolvedVersion === "working" && !artifact.working ? <option value="working">Working copy unavailable</option> : null}
                 {resolvedVersion !== "working" && !versions.some(item => item.id === resolvedVersion) ? <option value={resolvedVersion}>Selected revision</option> : null}
-                {versions.map(item => <option key={item.id} value={item.id}>Revision {item.revision} · {new Date(item.createdAt).toLocaleDateString()}</option>)}
+                {versions.map(item => <option key={item.id} value={item.id} title={new Date(item.createdAt).toLocaleString()}>Revision {item.revision}{narrow ? "" : ` · ${new Date(item.createdAt).toLocaleDateString()}`}</option>)}
               </Select>
             </div> : null}
             {artifact && resolvedVersion || openProduct ? <div className="detail-actions"><Menu.Root>
