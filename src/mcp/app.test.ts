@@ -89,6 +89,20 @@ test("working preview initializes from sidecar without modifying it and rejects 
   await expect(artifactAppResult(service, { name: "linked" })).rejects.toThrow();
 });
 
+test("library previews resolve legacy names and preserve their sidecar state", async () => {
+  const { dir, call } = fixture();
+  writeFileSync(join(dir, "legacy.canvas.tsx"), VALID_ARTIFACT);
+  writeFileSync(join(dir, "legacy.canvas.data.json"), '{"count":7}');
+  const library = await call("artifacts_library", {});
+  const name = (library.structuredContent.artifacts as Array<{ name: string }>)[0]!.name;
+  for (const tool of ["artifacts_preview", "artifact_open"]) {
+    const preview = await call(tool, { name });
+    expect(preview.isError).toBe(false);
+    expect(preview._meta?.artifact?.name).toBe("legacy");
+    expect(preview._meta?.artifact?.state).toEqual({ count: 7 });
+  }
+});
+
 test("official MCP client can initialize, discover UI, create and show over standard stdio", async () => {
   const dir = tempDir();
   const client = new Client({ name: "artifact-test", version: "1" }, { capabilities: { extensions: { "io.modelcontextprotocol/ui": { mimeTypes: [ARTIFACTS_APP_MIME] } } } });
