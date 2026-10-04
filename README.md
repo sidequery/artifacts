@@ -91,10 +91,11 @@ bun install --frozen-lockfile
 ARTIFACTS_DOCKER_IMAGE=artifacts:local bun test scripts/docker.integration.test.ts
 ```
 
-The Docker workflow tests both architectures before publishing to GHCR. Pushes
+CI builds and tests both image architectures on pushes and pull requests. Image
+publishing waits for the application, executable, and Docker checks to pass. Pushes
 to `main` publish `latest` and `sha-<full-commit>`; `v*` tags publish the matching
 tag and commit tag. Pin a commit tag or image digest for repeatable deployments.
-The package is public; the workflow checks anonymous access and fails if the
+The package is public; CI checks anonymous access and fails if the
 image is private. When publishing under a different package name, a package
 administrator must set its visibility to **Public** in GitHub package settings
 after the first push.
