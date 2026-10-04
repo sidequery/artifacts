@@ -415,7 +415,10 @@ app.onteardown = async () => {
   return {};
 };
 app.onhostcontextchanged = applyContext;
-window.addEventListener("focus", () => workspaceView?.refresh());
+// Moving focus from the preview frame to its toolbar must not reload the artifact.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") workspaceView?.refresh();
+});
 window.addEventListener("error", event => { status.textContent = `Artifact error: ${event.message}`; });
 window.addEventListener("unhandledrejection", event => { status.textContent = `Artifact error: ${String(event.reason)}`; });
 app.connect().then(() => {

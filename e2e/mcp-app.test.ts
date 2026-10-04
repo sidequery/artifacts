@@ -703,7 +703,7 @@ test("workspace keeps search and pinned revisions while its sandboxed preview re
   await page.evaluate(empty => window.mcpHost!.sendResult({ content: [], _meta: { workspace: { ...empty, view: "working", nextOffset: null } } }), empty);
   await app.getByRole("heading", { name: "Choose an artifact for this conversation" }).waitFor();
   expect(await app.getByRole("button", { name: "chosen", exact: true }).count()).toBe(0);
-  await app.locator(".app-header").getByRole("button", { name: "Choose from library" }).click();
+  await app.getByRole("button", { name: "Show library" }).click();
   await app.getByRole("searchbox").fill("chosen");
   await app.getByRole("button", { name: "chosen", exact: true }).click();
   const preview = app.frameLocator(".preview-frame");
@@ -714,7 +714,8 @@ test("workspace keeps search and pinned revisions while its sandboxed preview re
   await preview.getByText("Count: 2", { exact: true }).waitFor();
   await app.getByLabel("Revision of chosen").selectOption(meta.artifact.versionId);
   await preview.getByRole("heading", { name: "Interactive artifact" }).waitFor();
-  await app.getByRole("button", { name: "Refresh", exact: true }).click();
+  await app.getByRole("button", { name: "More actions" }).click();
+  await app.getByRole("menuitem", { name: "Refresh", exact: true }).click();
   await page.waitForFunction(version => window.mcpHost!.serverToolCalls.filter(call => call.name === "artifacts_preview" && call.arguments?.version_id === version).length >= 2, meta.artifact.versionId);
   const calls = await page.evaluate(() => window.mcpHost!.serverToolCalls);
   expect(calls.some(call => call.name === "artifacts_search" && call.arguments?.offset === 100)).toBe(true);
@@ -862,7 +863,27 @@ export default function RefreshArtifact() {
   await preview.getByText("Selected: 42", { exact: true }).waitFor();
   await preview.getByText("Route: /details", { exact: true }).waitFor();
   await preview.getByText("Count: 1", { exact: true }).waitFor();
-  await app.getByRole("button", { name: "Refresh", exact: true }).click();
+  const previewsBeforeToggle = await page.evaluate(() => window.mcpHost!.serverToolCalls.filter(call => call.name === "artifacts_preview").length);
+  await app.getByRole("button", { name: "Hide library" }).click();
+  await app.getByRole("searchbox").waitFor({ state: "hidden" });
+  await preview.getByText("Count: 1", { exact: true }).waitFor();
+  await app.getByRole("button", { name: "Show library" }).click();
+  await app.getByRole("searchbox").waitFor();
+  await preview.getByText("Count: 1", { exact: true }).waitFor();
+  expect(await page.evaluate(() => window.mcpHost!.serverToolCalls.filter(call => call.name === "artifacts_preview").length)).toBe(previewsBeforeToggle);
+  await page.evaluate(() => window.mcpHost!.configure({ styles: { variables: { "--color-text-primary": "rgb(220, 225, 230)", "--color-background-primary": "rgb(35, 36, 37)" } } }));
+  const chrome = await app.locator(".detail-header").evaluate(element => ({
+    height: element.getBoundingClientRect().height,
+    color: getComputedStyle(element).color,
+    bodyBackground: getComputedStyle(document.body).backgroundColor,
+    panelBorder: getComputedStyle(document.querySelector(".artifact-detail")!).borderTopWidth,
+  }));
+  expect(chrome.height).toBeLessThanOrEqual(48);
+  expect(chrome.color).toBe("rgb(220, 225, 230)");
+  expect(chrome.bodyBackground).toBe("rgba(0, 0, 0, 0)");
+  expect(chrome.panelBorder).toBe("0px");
+  await app.getByRole("button", { name: "More actions" }).click();
+  await app.getByRole("menuitem", { name: "Refresh", exact: true }).click();
   await page.waitForFunction(() => window.mcpHost!.serverToolCalls.filter(call => call.name === "artifacts_preview").length >= 2);
   await preview.getByText("Selected: 42", { exact: true }).waitFor();
   await preview.getByText("Route: /details", { exact: true }).waitFor();

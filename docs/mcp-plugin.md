@@ -50,6 +50,8 @@ Setup verifies connection using tool discovery, `artifact_guide`, and `artifact_
 
 Hosted project edits use complete snapshots, revision tokens and the existing service authorization. Stale saves preserve the draft for comparison/reload. Legacy local filesystem connections show source read-only; host-managed file editing remains a separate ETag-protected surface. Authored previews run in isolated, sandboxed inline frames so their CSS and React root cannot replace the gallery.
 
+The embedded gallery uses the host's theme variables and transparent outer chrome, a collapsible library, and one toolbar for the selected artifact. Revision selection stays visible; the actions menu contains conversation context, refresh, sharing, remix, and browser destinations. Previews own their spacing. Moving focus between the preview and gallery does not reload the artifact.
+
 Native rich forms require a transport change: the hosted MCP endpoint uses stateless JSON replies, and local stdio has no server-request response router. Neither currently retains the callback correlation needed for OpenAI elicitation. Remix therefore uses the real product form. Migration to bidirectional elicitation or MRTR is not claimed by this package.
 
 The portable manifest and connection shapes follow the [plugin schema](https://agent-plugins.org/schemas/1.0.0/plugin.schema.json) and [MCP schema](https://agent-plugins.org/schemas/1.0.0/mcp.schema.json). Optional host integration follows the [OpenAI MCP Extensions specification](https://github.com/openai/mcp-extensions/blob/main/docs/spec.md); the installed SDK and capability negotiation determine the implemented contract.

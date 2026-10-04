@@ -141,6 +141,7 @@ function Workspace({ initial, view, search, renderPreview, attach, attachedVersi
   const [tab, setTab] = useState<"preview" | ScriptView>(selection?.tab ?? "preview");
   const [sourceVisited, setSourceVisited] = useState<string | null>(null);
   const [choosing, setChoosing] = useState(view === "library");
+  const [libraryCollapsed, setLibraryCollapsed] = useState(false);
   const [mobileDetail, setMobileDetail] = useState(!!initialSelection || view === "working");
   const [narrow, setNarrow] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 760px)").matches);
   const [loading, setLoading] = useState(false);
@@ -255,8 +256,12 @@ function Workspace({ initial, view, search, renderPreview, attach, attachedVersi
   function chooseLibrary() {
     ++lookupGeneration.current;
     appliedSelection.current = selectionKey;
-    setSelectionLookup(undefined); setChoosing(true); setMobileDetail(false);
+    setSelectionLookup(undefined); setChoosing(true); setLibraryCollapsed(false); setMobileDetail(false);
     if (choosing) void load(query);
+  }
+  function toggleLibrary() {
+    if (showLibrary && !narrow) { setLibraryCollapsed(true); setMobileDetail(true); }
+    else chooseLibrary();
   }
   async function perform(action: () => Promise<void>) {
     setError("");
@@ -269,7 +274,7 @@ function Workspace({ initial, view, search, renderPreview, attach, attachedVersi
     }
     await load(query);
   }
-  const showLibrary = choosing && (!narrow || !mobileDetail);
+  const showLibrary = choosing && !libraryCollapsed && (!narrow || !mobileDetail);
   const showDetail = !narrow || mobileDetail || !choosing;
   const attachedRevision = artifact?.versions.find(item => item.id === attachedVersionId);
   const editing = gallery.capabilities?.editing === true;
@@ -279,18 +284,10 @@ function Workspace({ initial, view, search, renderPreview, attach, attachedVersi
   return <>
     <style>{galleryStyles}{workspaceStyles}</style>
     <main className="gallery-app mcp-gallery" data-view={view}>
-      <header className="app-header">
-        <span className="wordmark">Artifacts</span>
-        <span className="header-context">{view === "working" ? "This conversation" : gallery.libraryScope === "team" ? "Team library" : "Library"}</span>
-        <div className="header-actions">
-          {view === "working" ? <button type="button" onClick={chooseLibrary}>Choose from library</button> : null}
-          {gallery.capabilities?.nativeApps && openProduct ? <button type="button" onClick={() => void perform(openProduct)}>Worker apps<span aria-hidden="true">↗</span></button> : null}
-          {openProduct ? <button type="button" onClick={() => void perform(openProduct)}>Open library<span aria-hidden="true">↗</span></button> : null}
-        </div>
-      </header>
       {error ? <p role="alert" className="refresh-error error-message">{error}</p> : null}
       {notice ? <p role="status" className="workspace-notice">{notice}</p> : null}
-      <div className={`gallery-layout${!choosing ? " workspace-focused" : ""}`}>
+      {!showDetail ? <header className="workspace-library-header"><strong>Library</strong>{artifact ? <button type="button" onClick={() => setMobileDetail(true)}>Return to {artifact.name}</button> : null}</header> : null}
+      <div className={`gallery-layout${!showLibrary ? " workspace-focused" : ""}`}>
         <LibraryNavigation gallery={gallery} artifacts={filtered} query={query} onQueryChange={setQuery}
           kindFilter={kindFilter} onKindFilterChange={setKindFilter} selectedKey={selectedKey} onSelect={selectArtifact}
           isDirty={item => [...drafts.entries()].some(([key, draft]) => key.startsWith(`${item.key}:`) && draft.dirty)}
@@ -298,35 +295,38 @@ function Workspace({ initial, view, search, renderPreview, attach, attachedVersi
           footer={<button type="button" disabled={loading} onClick={() => void load(query)}>Refresh library</button>} />
         <Tabs.Root value={activeTab} onValueChange={value => setTab(value as typeof tab)} className="artifact-detail" hidden={!showDetail}>
           <div className="detail-header">
-            <button className="back-library" type="button" onClick={chooseLibrary} aria-label="Back to library"><span aria-hidden="true">←</span></button>
-            <div className="detail-title"><h1 ref={headingRef} tabIndex={-1}>{artifact?.name ?? (view === "working" ? "Working artifact" : "Your library")}</h1></div>
+            <button className="workspace-library-toggle" type="button" onClick={toggleLibrary} aria-label={narrow ? "Back to library" : showLibrary ? "Hide library" : "Show library"} aria-expanded={showLibrary} title={showLibrary ? "Hide library" : "Show library"}><span className="library-toggle-icon" aria-hidden="true" /></button>
+            <div className="detail-title"><h1 ref={headingRef} tabIndex={-1} title={artifact ? `Workspace: ${artifact.workspace}` : undefined}>{artifact?.name ?? (view === "working" ? "Working artifact" : "Your library")}</h1></div>
             {artifact && resolvedVersion ? <Tabs.List className="view-control" activateOnFocus aria-label={artifact.kind === "script" ? "Script view" : "Artifact view"}>
               {(artifact.kind === "script" ? [["source", "Source"], ...(editing ? [["requests", "Requests"]] : [])] : [["preview", "Preview"], ["source", "Source"]]).map(([value, label]) => <Tabs.Tab key={value} value={value}>{label}</Tabs.Tab>)}
             </Tabs.List> : null}
-            {artifact && resolvedVersion && (gallery.capabilities?.links || editing) ? <div className="detail-actions"><Menu.Root>
+            {artifact && resolvedVersion ? <div className="workspace-revision">
+              <Select aria-label={`Revision of ${artifact.name}`} value={resolvedVersion} onChange={event => {
+                setVersion(event.target.value); setNotice(""); setDisclosure(null); notifySelection(artifact, event.target.value, route);
+              }}>
+                {artifact.working ? <option value="working">Working copy</option> : null}
+                {resolvedVersion === "working" && !artifact.working ? <option value="working">Working copy unavailable</option> : null}
+                {resolvedVersion !== "working" && !versions.some(item => item.id === resolvedVersion) ? <option value={resolvedVersion}>Selected revision</option> : null}
+                {versions.map(item => <option key={item.id} value={item.id}>Revision {item.revision} · {new Date(item.createdAt).toLocaleDateString()}</option>)}
+              </Select>
+            </div> : null}
+            {artifact && resolvedVersion || openProduct ? <div className="detail-actions"><Menu.Root>
               <Menu.Trigger className="more-actions" aria-label="More actions"><span aria-hidden="true">⋮</span></Menu.Trigger>
               <Menu.Portal><Menu.Positioner sideOffset={6} align="end"><Menu.Popup className="action-menu">
-                {gallery.capabilities?.links ? <Menu.Item onClick={() => setDisclosure("share")}>Share</Menu.Item> : null}
-                {editing ? <Menu.Item onClick={() => setDisclosure("remix")}>Remix</Menu.Item> : null}
+                {artifact && resolvedVersion ? <>
+                  {artifact.kind !== "script" ? <Menu.Item disabled={attaching} onClick={() => {
+                    setAttaching(true); void perform(async () => { await attach(artifact, resolvedVersion); setNotice("Artifact context added to this conversation."); }).finally(() => setAttaching(false));
+                  }}>{attaching ? "Attaching…" : attachedVersionId === resolvedVersion ? "Update conversation context" : "Use in conversation"}</Menu.Item> : null}
+                  <Menu.Item disabled={loading} onClick={() => { setRefresh(value => value + 1); void load(query); }}>Refresh</Menu.Item>
+                  {gallery.capabilities?.links ? <Menu.Item onClick={() => setDisclosure("share")}>Share</Menu.Item> : null}
+                  {editing ? <Menu.Item onClick={() => setDisclosure("remix")}>Remix</Menu.Item> : null}
+                </> : null}
+                {openProduct ? <Menu.Item onClick={() => void perform(openProduct)}>Open library in browser</Menu.Item> : null}
+                {gallery.capabilities?.nativeApps && openProduct ? <Menu.Item onClick={() => void perform(openProduct)}>Worker apps</Menu.Item> : null}
               </Menu.Popup></Menu.Positioner></Menu.Portal>
             </Menu.Root></div> : null}
           </div>
-          {artifact && resolvedVersion ? <div className="workspace-item-bar">
-            <span className="workspace-item-location" title={artifact.workspace}>{artifact.workspace}</span>
-            <Select aria-label={`Revision of ${artifact.name}`} value={resolvedVersion} onChange={event => {
-              setVersion(event.target.value); setNotice(""); setDisclosure(null); notifySelection(artifact, event.target.value, route);
-            }}>
-              {artifact.working ? <option value="working">Working copy</option> : null}
-              {resolvedVersion === "working" && !artifact.working ? <option value="working">Working copy unavailable</option> : null}
-              {resolvedVersion !== "working" && !versions.some(item => item.id === resolvedVersion) ? <option value={resolvedVersion}>Selected revision</option> : null}
-              {versions.map(item => <option key={item.id} value={item.id}>Revision {item.revision} · {new Date(item.createdAt).toLocaleDateString()}</option>)}
-            </Select>
-            <button type="button" disabled={loading} onClick={() => { setRefresh(value => value + 1); void load(query); }}>Refresh</button>
-            {artifact.kind !== "script" ? <button type="button" className="primary-action" disabled={attaching} onClick={() => {
-              setAttaching(true); void perform(async () => { await attach(artifact, resolvedVersion); setNotice("Artifact context added to this conversation."); }).finally(() => setAttaching(false));
-            }}>{attaching ? "Attaching…" : attachedVersionId === resolvedVersion ? "Update conversation context" : "Use in conversation"}</button> : null}
-            {attachedRevision ? <span className="workspace-attachment" role="status">Revision {attachedRevision.revision} attached</span> : attachedVersionId === resolvedVersion ? <span className="workspace-attachment" role="status">Revision attached</span> : null}
-          </div> : null}
+          {attachedRevision ? <p className="workspace-notice" role="status">Revision {attachedRevision.revision} attached</p> : attachedVersionId && attachedVersionId === resolvedVersion ? <p className="workspace-notice" role="status">Revision attached</p> : null}
           {artifact && resolvedVersion && disclosure === "share" ? <div className="detail-disclosure">
             <div className="workspace-disclosure-header"><strong>Share {artifact.name}</strong><button type="button" onClick={() => setDisclosure(null)} aria-label="Close sharing settings">Close</button></div>
             <LinkSettings key={artifact.key} artifact={artifact} onSaved={async () => { await load(query); }} openLink={openLink} />
@@ -364,22 +364,52 @@ function Workspace({ initial, view, search, renderPreview, attach, attachedVersi
 }
 
 const workspaceStyles = `
+  :root[data-view="workspace"] {
+    --page: transparent;
+    --panel: var(--color-background-primary, light-dark(#fff, #212121));
+    --raised: var(--color-background-secondary, light-dark(#f4f4f4, #2c2c2c));
+    --selected: var(--color-background-secondary, light-dark(#ededed, #303030));
+    --line: var(--color-border-tertiary, light-dark(#e5e5e5, #383838));
+    --text: var(--color-text-primary, light-dark(#171717, #f5f5f5));
+    --muted: var(--color-text-secondary, light-dark(#666, #aaa));
+    --subtle: var(--color-text-tertiary, light-dark(#777, #999));
+    --focus: var(--color-ring-primary, currentColor);
+  }
+  :root[data-view="workspace"] body { background: transparent; font-family: var(--font-sans, system-ui, sans-serif); }
+  :root[data-view="workspace"] #artifact-viewport { scrollbar-gutter: auto; }
   .mcp-gallery { height: 100%; min-height: 360px; }
+  .mcp-gallery .gallery-layout { grid-template-columns: 216px minmax(0, 1fr); }
   .mcp-gallery .workspace-focused { grid-template-columns: minmax(0, 1fr); }
-  .mcp-gallery .detail-header { flex-wrap: wrap; }
-  .workspace-item-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 16px; border-bottom: 1px solid var(--line); }
-  .workspace-item-location { color: var(--muted); font-size: 12px; flex: 1; min-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .workspace-item-bar .select-control { max-width: 230px; }
-  .workspace-attachment { font-size: 12px; color: var(--muted); }
+  .mcp-gallery .library-panel { padding: 10px 8px 8px; border-right: 1px solid var(--line); }
+  .mcp-gallery .library-footer { border: 0; }
+  .mcp-gallery .artifact-detail { margin: 0; border: 0; border-radius: 0; background: transparent; }
+  .mcp-gallery .detail-header { min-height: 48px; padding: 4px 12px; gap: 8px; background: transparent; }
+  .mcp-gallery .detail-title h1 { font-size: 13px; letter-spacing: normal; }
+  .mcp-gallery .view-control { gap: 2px; }
+  .mcp-gallery .view-control button { height: 32px; border: 0; border-radius: 6px; font-size: 12px; }
+  .mcp-gallery .view-control button[data-active] { background: var(--raised); }
+  .mcp-gallery .workspace-library-toggle { width: 32px; padding: 0; flex-shrink: 0; color: var(--muted); }
+  .library-toggle-icon { display: block; width: 16px; height: 14px; border: 1.5px solid currentColor; border-radius: 3px; position: relative; }
+  .library-toggle-icon::before { content: ""; position: absolute; top: 0; bottom: 0; left: 4px; border-left: 1.5px solid currentColor; }
+  .workspace-revision { min-width: 0; }
+  .workspace-revision .select-control { max-width: 180px; }
+  .workspace-revision select { background: transparent; border-color: transparent; color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; }
+  .workspace-library-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; min-height: 48px; }
   .workspace-notice { padding: 4px 16px; margin: 0; color: var(--muted); }
   .workspace-disclosure-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 16px 0; }
   .workspace-preview { flex: 1; width: 100%; height: 100%; min-height: 0; }
   .workspace-preview iframe { display: block; width: 100%; height: 100%; border: 0; }
   .mcp-gallery .empty-detail button { margin: 8px 4px; }
   @media (max-width: 760px) {
-    .workspace-item-bar { padding: 8px; gap: 4px; }
-    .workspace-item-location { flex-basis: 100%; }
-    .mcp-gallery .header-context { display: inline; }
-    .mcp-gallery .wordmark { width: auto; }
+    .mcp-gallery .detail-header { padding-inline: 6px; gap: 4px; }
+    .mcp-gallery .detail-title { flex: 1; }
+    .mcp-gallery .library-panel { border: 0; }
+    .workspace-revision .select-control { max-width: 115px; }
+  }
+  @media (max-width: 480px) {
+    .mcp-gallery .detail-header { flex-wrap: wrap; }
+    .mcp-gallery .detail-title { flex-basis: calc(100% - 44px); }
+    .mcp-gallery .view-control { margin-left: 36px; }
+    .workspace-revision { margin-left: auto; }
   }
 `;

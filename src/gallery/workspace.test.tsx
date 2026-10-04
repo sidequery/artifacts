@@ -75,7 +75,7 @@ test("thread entry does not select a global catalog item without an explicit sel
   const markup = renderToStaticMarkup(<GalleryWorkspace initial={gallery} view="working" transport={transport}
     search={async () => gallery} renderPreview={async () => () => {}} attach={async () => {}} openProduct={async () => {}} />);
   expect(markup).toContain("Choose an artifact for this conversation");
-  expect(markup).toContain("Worker apps");
+  expect(markup).toContain('aria-label="More actions"');
   expect(markup).not.toContain('aria-label="Revision of chart"');
 });
 
