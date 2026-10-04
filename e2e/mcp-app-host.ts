@@ -27,6 +27,7 @@ declare global {
       setTheme(theme: "dark" | "light"): void;
       configure(update: Partial<McpUiHostContext>): void;
       setInlineFrameLimit(limit?: number): void;
+      setFrameHeight(height: number): void;
       setRequestBehavior(behavior: RequestBehavior): void;
       setServerToolResult(result: CallToolResult): void;
       setServerToolResults(results: Record<string, CallToolResult[]>): void;
@@ -117,6 +118,11 @@ window.mcpHost = {
   setInlineFrameLimit(limit) {
     inlineFrameLimit = limit;
     applyFrameSize();
+  },
+  setFrameHeight(height) {
+    // A native host can reparent the same view after its mode notification and
+    // restore a previously measured frame size without changing the context.
+    iframe.style.height = `${height}px`;
   },
   setRequestBehavior(behavior) {
     requestBehavior = behavior;

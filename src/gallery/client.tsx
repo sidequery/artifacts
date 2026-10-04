@@ -261,6 +261,9 @@ function App() {
     () => gallery?.artifacts.find((artifact) => artifact.key === selectedKey) ?? null,
     [gallery, selectedKey],
   );
+  const selectedWorkerKey = selectedWorker
+    ? gallery?.workerApps?.find(worker => worker.workspace === selectedWorker.workspace && worker.name === selectedWorker.name)?.key ?? null
+    : null;
 
   const activeTab: DetailTab = selectedArtifact?.kind === "script"
     ? tab === "preview" ? "source" : tab
@@ -559,7 +562,7 @@ function App() {
         <div className="gallery-layout">
           <LibraryNavigation gallery={gallery} artifacts={filteredArtifacts} query={query} onQueryChange={setQuery}
             kindFilter={kindFilter} onKindFilterChange={setKindFilter}
-            selectedKey={selectedWorker ? JSON.stringify(["worker", selectedWorker.workspace, selectedWorker.name]) : creatingKind ? null : selectedKey}
+            selectedKey={selectedWorker ? selectedWorkerKey : creatingKind ? null : selectedKey}
             onSelect={selectArtifact} onSelectWorker={gallery?.capabilities?.nativeApps ? selectWorker : undefined}
             isDirty={artifact => [...drafts.entries()].some(([key, draft]) => key.startsWith(artifact.key + ":") && draft.dirty)}
             loading={loading} error={galleryError} onRetry={() => void loadGallery()} connected={liveConnected}

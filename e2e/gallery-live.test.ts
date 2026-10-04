@@ -20,7 +20,8 @@ test("local gallery subscribes to external file changes without refreshing unrel
     await preview.getByRole("heading", { name: "First version" }).waitFor();
     expect(await page.getByRole("button", { name: "Refresh", exact: true }).count()).toBe(0);
     expect(await page.getByPlaceholder("Search", { exact: true }).isVisible()).toBe(true);
-    expect(await page.locator(".library-heading").count()).toBe(0);
+    expect(await page.getByRole("button", { name: "Create or import", exact: true }).isVisible()).toBe(true);
+    expect(await page.getByRole("complementary").getByText("Artifacts", { exact: true }).count()).toBe(0);
     expect(await page.locator(".scope-control").count()).toBe(0);
     expect(await page.getByText("In this project", { exact: true }).count()).toBe(0);
     expect(await page.getByRole("img", { name: "Sidequery" }).count()).toBe(0);

@@ -138,6 +138,11 @@ test("official HTTP MCP client lists contracts, writes, edits, restores and retr
   version = artifact.versionId;
   const resource = await client.readResource({ uri: ARTIFACTS_APP_URI });
   expect(resource.contents[0]!.mimeType).toContain("text/html");
+  for (const uri of ["ui://artifacts/viewer.html", "ui://artifacts/v4/viewer.html", "ui://artifacts/v5/viewer.html"]) {
+    const legacy = await client.readResource({ uri });
+    expect(legacy.contents[0]).toEqual({ ...resource.contents[0], uri });
+  }
+  await expect(client.readResource({ uri: "ui://artifacts/v999/viewer.html" })).rejects.toThrow("Unknown resource");
   expect(payload(await client.callTool({ name: "artifact_read", arguments: { name: "overview" } })).source).toBe(source);
   const failedEdit = await client.callTool({ name: "artifact_edit", arguments: { name: "overview", expected_hash: "0".repeat(64), edits: [{ old_text: "Hosted artifact", new_text: "Wrong" }] } });
   expect(failedEdit.isError).toBe(true);

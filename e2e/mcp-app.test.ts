@@ -358,6 +358,48 @@ test("applies natural, capped, shrinking, narrow, and fixed inline sizes without
   await page.close();
 }, 30_000);
 
+test("returning from a native panel reasserts a bounded inline height after reparenting", async () => {
+  const source = `import { Button, useArtifactState } from "sidequery/artifacts";
+export default function ViewportArtifact() {
+  const [count, setCount] = useArtifactState("count", 0);
+  return (
+    <div style={{ minHeight: "100vh" }}>
+      <h1>Viewport artifact</h1>
+      <Button onClick={() => setCount(value => value + 1)}>Count: {count}</Button>
+      <div style={{ height: 2400 }} />
+      <p>Last content</p>
+    </div>
+  );
+}`;
+  const meta = await resultFor(source, "viewport-artifact");
+  const { page, app, errors } = await openHost();
+  await page.evaluate(meta => window.mcpHost!.sendResult({ content: [], _meta: meta }), meta);
+  await app.getByRole("button", { name: "Count: 0", exact: true }).click();
+  await app.getByRole("button", { name: "Expand artifact" }).click();
+  await app.locator('html[data-display-mode="fullscreen"]').waitFor();
+  // Codex has no maxHeight constraint for a normal inline card. Closing its tab
+  // changes the mode independently of the native view's subsequent resize.
+  await page.evaluate(() => window.mcpHost!.configure({ displayMode: "inline", containerDimensions: { maxWidth: 640 } }));
+  await app.locator('html[data-display-mode="inline"]').waitFor();
+  await page.waitForFunction(() => document.querySelector("iframe")!.getBoundingClientRect().height === 600);
+  await page.waitForTimeout(150);
+  await page.evaluate(() => window.mcpHost!.setFrameHeight(6000));
+  await page.waitForFunction(() => document.querySelector("iframe")!.getBoundingClientRect().height === 600);
+  await app.getByRole("button", { name: "Count: 1", exact: true }).waitFor();
+  expect((await layout(app)).shellHeight).toBe(600);
+  const last = app.getByText("Last content", { exact: true });
+  await last.scrollIntoViewIfNeeded();
+  const lastBox = (await last.boundingBox())!;
+  const viewportBox = (await app.locator("#artifact-viewport").boundingBox())!;
+  expect(lastBox.y + lastBox.height).toBeLessThanOrEqual(viewportBox.y + viewportBox.height + 1);
+  await page.waitForTimeout(150);
+  const count = await page.evaluate(() => window.mcpHost!.sizeChanges.length);
+  await page.waitForTimeout(150);
+  expect(await page.evaluate(() => window.mcpHost!.sizeChanges.length)).toBe(count);
+  expect(await page.evaluate(() => window.mcpHost!.sizeChanges.every(change => change.height! <= 600))).toBe(true);
+  expect(errors).toEqual([]);
+}, 30_000);
+
 test("negotiates fullscreen while preserving state and survives external, declined, and failed changes", async () => {
   const meta = await resultFor(INTERACTIVE_ARTIFACT, "modes", { count: 4 });
   const { page, app, errors } = await openHost();

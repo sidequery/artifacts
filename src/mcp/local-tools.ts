@@ -3,7 +3,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { artifactIdFromFile } from "../artifactFile";
 import { artifactGuideResult } from "./guide";
 import type { JsonRpcRequest, JsonRpcResponse } from "./protocol";
-import { ARTIFACTS_APP_URI, ARTIFACTS_RESOURCE, artifactAppHtml, artifactAppResult } from "./app";
+import { isArtifactAppUri, ARTIFACTS_RESOURCE, artifactAppHtml, artifactAppResult } from "./app";
 
 const PROTOCOL_VERSION = "2025-06-18";
 
@@ -47,8 +47,8 @@ export async function handleMcpRequest(
     if (request.method === "resources/read") {
       const params = request.params as { uri?: string } | undefined;
       if (params?.uri?.startsWith("artifact:")) return ok(request.id, { contents: [{ uri: params.uri, mimeType: "application/json", text: JSON.stringify(localResource(service, params.uri)) }] });
-      if (params?.uri !== ARTIFACTS_APP_URI) return error(request.id, -32002, "unknown resource");
-      return ok(request.id, { contents: [{ ...ARTIFACTS_RESOURCE, text: await artifactAppHtml() }] });
+      if (!isArtifactAppUri(params?.uri)) return error(request.id, -32002, "unknown resource");
+      return ok(request.id, { contents: [{ ...ARTIFACTS_RESOURCE, uri: params.uri, text: await artifactAppHtml() }] });
     }
     if (request.method === "tools/call") {
       const params = (request.params ?? {}) as { name?: string; arguments?: Record<string, unknown> };

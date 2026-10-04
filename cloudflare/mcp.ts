@@ -5,7 +5,7 @@ import {
   ListResourceTemplatesRequestSchema, ReadResourceRequestSchema,
   ErrorCode, McpError, type CallToolResult,
 } from "@modelcontextprotocol/sdk/types.js";
-import { ARTIFACTS_APP_URI, ARTIFACTS_RESOURCE } from "../src/mcp/app-contract";
+import { isArtifactAppUri, ARTIFACTS_RESOURCE } from "../src/mcp/app-contract";
 import shell from "../dist/cloudflare/mcp-app.json";
 import * as validators from "../dist/cloudflare/tool-validators.js";
 import { artifactFileResult } from "../src/mcp/file-contract";
@@ -37,8 +37,8 @@ export async function handleCloudMcp(request: Request, service: Pick<CloudArtifa
       if (snapshot.name !== selection.name) throw new McpError(ErrorCode.InvalidParams, "Artifact version does not match name");
       return { contents: [{ uri: params.uri, mimeType: "application/json", text: JSON.stringify({ ...snapshot, kind, workspace: selection.workspace, description: `${kind} ${snapshot.name} in workspace ${selection.workspace}` }) }] };
     }
-    if (params.uri !== ARTIFACTS_APP_URI) throw new McpError(ErrorCode.InvalidParams, "Unknown resource");
-    return { contents: [{ ...resource, text: shell }] };
+    if (!isArtifactAppUri(params.uri)) throw new McpError(ErrorCode.InvalidParams, "Unknown resource");
+    return { contents: [{ ...resource, uri: params.uri, text: shell }] };
   });
   server.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
     if (!Object.hasOwn(validators, params.name)) throw new McpError(ErrorCode.InvalidParams, "Unknown tool");

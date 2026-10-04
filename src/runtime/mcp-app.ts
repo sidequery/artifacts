@@ -78,6 +78,15 @@ function reportSize() {
 const resizeObserver = new ResizeObserver(reportSize);
 for (const element of [shell, viewport, root, status, toolbar, controls]) resizeObserver.observe(element);
 
+function reportViewportSize() {
+  // Moving a native view from its tab back into the chat can resize the frame
+  // after the mode notification. Reassert our inline size even if the content
+  // did not change; the host may have restored an older intrinsic height.
+  lastHeight = undefined;
+  reportSize();
+}
+window.addEventListener("resize", reportViewportSize);
+
 function updateDisplay() {
   const mode = context.displayMode ?? "inline";
   document.documentElement.dataset.displayMode = mode;
@@ -408,7 +417,9 @@ attachButton.addEventListener("click", () => {
 app.ontoolcancelled = () => { ++opening; if (fileEditor?.hasUnsavedChanges()) { status.textContent = "Request cancelled. Your unsaved file draft is preserved."; return; } clear(); status.textContent = "Artifact request cancelled."; };
 app.onteardown = async () => {
   ++opening;
+  connected = false;
   resizeObserver.disconnect();
+  window.removeEventListener("resize", reportViewportSize);
   if (sizeFrame) cancelAnimationFrame(sizeFrame);
   clear();
   await viewDisposal;
@@ -417,7 +428,10 @@ app.onteardown = async () => {
 app.onhostcontextchanged = applyContext;
 // Moving focus from the preview frame to its toolbar must not reload the artifact.
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") workspaceView?.refresh();
+  if (document.visibilityState === "visible") {
+    reportViewportSize();
+    workspaceView?.refresh();
+  }
 });
 window.addEventListener("error", event => { status.textContent = `Artifact error: ${event.message}`; });
 window.addEventListener("unhandledrejection", event => { status.textContent = `Artifact error: ${String(event.reason)}`; });

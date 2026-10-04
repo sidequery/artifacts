@@ -1,5 +1,14 @@
-// Bump this resource version for incompatible shell or payload changes. Hosts cache by URI.
-export const ARTIFACTS_APP_URI = "ui://artifacts/v5/viewer.html";
+// Bump to refresh cached shells; keep older tool-result payloads readable.
+const ARTIFACTS_APP_VERSION = 6;
+export const ARTIFACTS_APP_URI = `ui://artifacts/v${ARTIFACTS_APP_VERSION}/viewer.html`;
+
+/** Saved chat cards keep their original URI across compatible shell updates. */
+export function isArtifactAppUri(uri: unknown): uri is string {
+  if (uri === "ui://artifacts/viewer.html") return true;
+  if (typeof uri !== "string") return false;
+  const version = /^ui:\/\/artifacts\/v([1-9]\d*)\/viewer\.html$/.exec(uri)?.[1];
+  return version !== undefined && Number(version) <= ARTIFACTS_APP_VERSION;
+}
 export const ARTIFACTS_APP_MIME = "text/html;profile=mcp-app";
 export const ARTIFACTS_APP_META = { ui: { resourceUri: ARTIFACTS_APP_URI } };
 export const ARTIFACTS_RESOURCE = {
