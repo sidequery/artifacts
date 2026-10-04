@@ -2,6 +2,7 @@ export type { ArtifactAction, SetArtifactState } from "./hooks";
 export { useState, useReducer, useRef, useMemo, useCallback, useEffect } from "react";
 export { useArtifactAction, useArtifactState, useHostTheme } from "./hooks";
 export { getArtifactCapabilities, type ArtifactCapabilities } from "./hooks";
+export { updateArtifactContext, useArtifactContext, useHostEnvironment, type ArtifactModelContext, type ArtifactEnvironment, type ArtifactHostActions } from "./hooks";
 export { artifactFetch, type ArtifactHttpRequest, type ArtifactHttpResponse } from "./server";
 export { pluginCall, type PluginRequest } from "./plugins";
 export { artifactFiles, MAX_ARTIFACTS_FILE_BYTES, type ArtifactFile, type ArtifactFileRequest, type ArtifactFileResult, type ArtifactFileList, type ArtifactFileTransfer } from "./files";

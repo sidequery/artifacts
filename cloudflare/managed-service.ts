@@ -8,11 +8,12 @@ import type { ArtifactHttpRequest } from "../src/httpTypes";
 import type { ArtifactFileRequest } from "../src/sdk/files";
 import type { GalleryArtifact, GalleryData } from "../src/gallery/types";
 import { CloudArtifactService } from "./service";
+import { workspaceTool } from "./workspace-tools";
 import { parseProjectArchive } from "../src/project-archive";
 import { ownershipName } from "./ownership";
 
 const text = (value: unknown): CallToolResult => ({ content: [{ type: "text", text: JSON.stringify(value, null, 2) }] });
-type Selection = { name?: string; version_id?: string; event_id?: string };
+type Selection = { workspace?: string; name?: string; version_id?: string; event_id?: string };
 
 /** Management requests select an owner; execution continues on immutable storage. */
 export class ManagedArtifactService {
@@ -44,7 +45,7 @@ export class ManagedArtifactService {
 
   private async callSelectedTool(target: ArtifactTarget, name: string, args: Record<string, unknown>) {
     const changesGallery = /^(artifact|script)_(write|edit|restore|remix|import|open|link)$/.test(name);
-    try { return await this.physical(target).callTool(name, args); }
+    try { return await this.physical(target).callTool(name, { ...args, workspace: target.workspace }); }
     finally {
       // A failed compile may still have saved a draft. Resolve current ownership
       // after the operation, including writes admitted before a library move.
@@ -66,6 +67,8 @@ export class ManagedArtifactService {
   }
 
   async callTool(name: string, args: Record<string, unknown>): Promise<CallToolResult> {
+    if (["artifacts_library", "artifacts_working", "artifacts_search", "artifacts_mentions"].includes(name)) return workspaceTool(this, name, args);
+    if (name === "artifacts_preview") name = "artifact_open";
     if (name.startsWith("app_")) return this.nativeTool(name, args);
     if (["artifact_guide", "script_guide", "plugins_list", "plugin_guide", "artifact_plugin_call"].includes(name)) return this.physical({ libraryKey: this.libraryKey, workspace: this.workspace }).callTool(name, args);
     const kind = name.startsWith("script_") ? "script" : name === "artifact_link" ? args.kind as "artifact" | "script" : "artifact";
@@ -75,7 +78,7 @@ export class ManagedArtifactService {
       if (!history) for (const row of rows) Object.assign(row, await this.linkDetails(kind, row.workspace, kind === "artifact" ? row.id! : row.name));
       return text({ [history ? "versions" : kind === "script" ? "scripts" : "artifacts"]: rows, next_offset: rows.length === 100 ? offset + 100 : null });
     }
-    const selection = this.selection(kind, { name: args.name as string | undefined, version_id: args.version_id as string | undefined });
+    const selection = this.selection(kind, { name: args.name as string | undefined, version_id: args.version_id as string | undefined, ...(typeof args.workspace === "string" ? { workspace: args.workspace } : {}) });
     if (name.endsWith("_import")) {
       parseProjectArchive(args.archive, kind);
       const target = await this.links.admit(this.selection(kind, { name: args.new_name as string }), true);
@@ -125,7 +128,7 @@ export class ManagedArtifactService {
   async request(selection: Selection, request: ArtifactHttpRequest) { return (await this.service("artifact", selection)).request(selection, request); }
   async fileRequest(selection: Selection, request: ArtifactFileRequest) { return (await this.service("artifact", selection)).fileRequest(selection, request); }
   async preview(snapshot: Awaited<ReturnType<CloudArtifactService["snapshot"]>>) {
-    const selection = snapshot.version_id ? { version_id: snapshot.version_id, event_id: (snapshot as { event_id?: string | null }).event_id ?? undefined } : { name: snapshot.name };
+    const selection = snapshot.version_id ? { workspace: snapshot.workspace, version_id: snapshot.version_id, event_id: (snapshot as { event_id?: string | null }).event_id ?? undefined } : { workspace: snapshot.workspace, name: snapshot.name };
     const service = await this.service("artifact", selection);
     // The gallery's snapshot and preview are separate calls. Re-read after fresh
     // ownership admission instead of reusing a possibly moved/recreated draft.

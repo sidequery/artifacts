@@ -381,7 +381,7 @@ export class ArtifactLibrary extends DurableObject<unknown> {
   recordServe(input: {
     workspace: string; name: string; source: string; server_source?: string | null; project?: ArtifactProject; runtime: string;
     initial_state: Record<string, unknown>; mode: "live" | "replay" | "preview";
-    pane_id?: string; session_id?: string; version_id?: string; compiled_id?: string;
+    pane_id?: string; session_id?: string; version_id?: string; compiled_id?: string; record_event?: boolean;
   }) {
     const workspace = workspaceName(input.workspace); const name = artifactName(input.name);
     const source = sourceText(input.source); const runtime = runtimeName(input.runtime);
@@ -414,6 +414,7 @@ export class ArtifactLibrary extends DurableObject<unknown> {
       } else {
         version = this.capture(workspace, name, source, server_source, project, runtime, "served", null, false, input.compiled_id);
       }
+      if (input.record_event === false) return { version, event: null };
       const event: ServeEvent = {
         id: uuid(), version_id: version.id, served_at: now(), pane_id: input.pane_id ?? null,
         session_id: input.session_id ?? null, mode: input.mode, initial_state, runtime,

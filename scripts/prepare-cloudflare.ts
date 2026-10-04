@@ -83,7 +83,7 @@ await writeFile(join(dirname(output), "gallery-request.json"), JSON.stringify(aw
 // Compile trusted schemas at build time: Workers must not need eval() to
 // validate arguments, and the listed schema stays the validation source.
 const ajv = new Ajv({ allErrors: true, strict: false, code: { source: true, esm: true } });
-for (const tool of CLOUD_MCP_TOOLS) ajv.addSchema(tool.inputSchema, tool.name);
+for (const tool of CLOUD_MCP_TOOLS) ajv.addSchema(structuredClone(tool.inputSchema), tool.name);
 await writeFile(join(dirname(output), "tool-validators.js"), standaloneCode(ajv, Object.fromEntries(CLOUD_MCP_TOOLS.map(tool => [tool.name, tool.name]))));
 await writeFile(join(dirname(output), "tool-validators.d.ts"), 'import type { ValidateFunction } from "ajv";\n' + CLOUD_MCP_TOOLS.map(tool => `export const ${tool.name}: ValidateFunction;`).join("\n"));
 console.log(`Prepared ${Object.keys(files).length} compiler files: ${relative(root, output)}`);

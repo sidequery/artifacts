@@ -8,9 +8,9 @@ test("capability discovery reports installed runtime bridges without executing t
   let calls = 0;
   try {
     delete host.__artifacts;
-    expect(getArtifactCapabilities()).toEqual({ server: false, files: false, plugins: false, hostActions: false, statePersistence: "session" });
+    expect(getArtifactCapabilities()).toEqual({ server: false, files: false, plugins: false, hostActions: false, actions: { openUrl: false, promptAgent: false, openFile: false }, modelContext: false, statePersistence: "session" });
     host.__artifacts = { onRequest: async () => { calls++; throw new Error("should not execute"); }, onFileRequest: async () => { calls++; }, onPluginCall: async () => { calls++; }, onAction: () => { calls++; } };
-    expect(getArtifactCapabilities()).toEqual({ server: true, files: true, plugins: true, hostActions: true, statePersistence: "session" });
+    expect(getArtifactCapabilities()).toEqual({ server: true, files: true, plugins: true, hostActions: true, actions: { openUrl: true, promptAgent: true, openFile: true }, modelContext: false, statePersistence: "session" });
     host.__artifacts = { actionUrl: "/action", persistUrl: "/state" };
     expect(getArtifactCapabilities()).toMatchObject({ hostActions: true, statePersistence: "persistent", server: false });
     expect(calls).toBe(0);

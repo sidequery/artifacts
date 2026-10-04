@@ -5,6 +5,7 @@ import { Miniflare } from "miniflare";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { chromium } from "playwright";
+import { ARTIFACTS_APP_URI } from "../src/mcp/app-contract";
 import { ROUTING_ARTIFACT } from "../src/test/routing";
 import { openGallerySubscription } from "../src/test/gallery-subscription";
 
@@ -135,7 +136,7 @@ test("official HTTP MCP client lists contracts, writes, edits, restores and retr
   expect(artifact.js).toContain("Hosted artifact");
   expect(JSON.stringify(result.content)).not.toContain("__artifactsRuntime");
   version = artifact.versionId;
-  const resource = await client.readResource({ uri: "ui://artifacts/viewer.html" });
+  const resource = await client.readResource({ uri: ARTIFACTS_APP_URI });
   expect(resource.contents[0]!.mimeType).toContain("text/html");
   expect(payload(await client.callTool({ name: "artifact_read", arguments: { name: "overview" } })).source).toBe(source);
   const failedEdit = await client.callTool({ name: "artifact_edit", arguments: { name: "overview", expected_hash: "0".repeat(64), edits: [{ old_text: "Hosted artifact", new_text: "Wrong" }] } });
@@ -686,7 +687,7 @@ test("artifact files use per-artifact storage through MCP and standalone control
   expect((await publicRequest({ operation: "list" }, b.versionId)).status).toBe(409);
   const forged = await fetch(`${origin}/api/artifact/files?workspace=test`, { method: "POST", headers: { Origin: "null" }, body: JSON.stringify({ name: "files-a", request: { operation: "list" } }) });
   expect(forged.status).toBe(403);
-  const resource = await client.readResource({ uri: "ui://artifacts/viewer.html" });
+  const resource = await client.readResource({ uri: ARTIFACTS_APP_URI });
   expect(JSON.stringify(resource)).toContain(`\"connectDomains\":[\"${origin}\"]`);
 }, 60_000);
 
@@ -916,3 +917,38 @@ export class ArtifactServer extends DurableObject<ArtifactEnv> {
   await call("artifact_secrets", { name, secrets: { TOKEN: null } });
   expect(await run(name)).toEqual({ secret: null, count: 5 });
 }, 60000);
+
+
+test("MCP workspace tools admit cross-workspace previews and resources while suppressed mutations save without delivery", async () => {
+  const remote = new Client({ name: "workspace-integration", version: "1" });
+  const team = new Client({ name: "workspace-team-integration", version: "1" });
+  await remote.connect(new StreamableHTTPClientTransport(new URL(`${origin}/mcp?workspace=workspace-tools`), { fetch }));
+  await team.connect(new StreamableHTTPClientTransport(new URL(`${origin}/mcp?workspace=workspace-tools&library=team`), { fetch }));
+  try {
+    const written = await remote.callTool({ name: "artifact_write", arguments: { name: "workspace-preview", slug: "workspace-preview-suppressed", contents: source, preview: false } });
+    expect(written.isError).not.toBe(true);
+    expect(written._meta).toBeUndefined();
+    const saved = written.structuredContent as { preview: { artifact: { versionId: string } } };
+    const versionId = saved.preview.artifact.versionId;
+    const before = payload(await remote.callTool({ name: "artifact_version", arguments: { version_id: versionId } }));
+    expect(before.events).toEqual([]);
+    expect(before.compiled_id).toBeTruthy();
+    expect(payload(written).liveId).toBe(versionId);
+
+    const library = await client.callTool({ name: "artifacts_library", arguments: {} });
+    expect((library._meta as any).workspace.items).toContainEqual(expect.objectContaining({ name: "workspace-preview", workspace: "workspace-tools" }));
+    const working = await client.callTool({ name: "artifacts_working", arguments: {} });
+    expect((working._meta as any).workspace.items.some((item: any) => item.workspace === "workspace-tools")).toBe(false);
+    const mentions = await client.callTool({ name: "artifacts_mentions", arguments: { query: "WORKSPACE-PREVIEW" } });
+    const uri = (mentions.structuredContent as any).items[0].uri;
+    const resource = await client.readResource({ uri });
+    expect(JSON.parse((resource.contents[0] as { text: string }).text)).toMatchObject({ workspace: "workspace-tools", name: "workspace-preview", source });
+    await expect(team.readResource({ uri })).rejects.toThrow();
+    expect((await team.callTool({ name: "artifacts_preview", arguments: { workspace: "workspace-tools", version_id: versionId } })).isError).toBe(true);
+    const opened = await client.callTool({ name: "artifacts_preview", arguments: { workspace: "workspace-tools", version_id: versionId } });
+    expect(opened.isError).not.toBe(true);
+    expect((opened._meta as any).artifact).toMatchObject({ workspace: "workspace-tools", versionId });
+    const after = payload(await remote.callTool({ name: "artifact_version", arguments: { version_id: versionId } }));
+    expect(after.events).toHaveLength(1);
+  } finally { await remote.close(); await team.close(); }
+}, 60_000);

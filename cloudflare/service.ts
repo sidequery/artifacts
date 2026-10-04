@@ -23,6 +23,9 @@ import { ArtifactFileError, validateFileRequest } from "./files";
 import type { ArtifactFileRequest } from "../src/sdk/files";
 import { parseProjectArchive, projectArchive } from "../src/project-archive";
 
+import { ARTIFACTS_WORKSPACE_TOOLS } from "../src/mcp/workspace-contract";
+import { workspaceTool } from "./workspace-tools";
+
 import { dispatchPlugin, pluginCatalog, PLUGIN_GUIDE, type PluginInvocationContext } from "./plugins";
 import type { PluginRequest } from "../src/plugins/types";
 
@@ -48,6 +51,11 @@ export class CloudArtifactService {
   }
 
   async callTool(name: string, args: Record<string, unknown>): Promise<CallToolResult> {
+    if (typeof args.workspace === "string" && args.workspace !== this.workspace && ["artifacts_preview", "artifact_request", "artifact_files", "artifact_read", "artifact_export"].includes(name)) {
+      const { workspace, ...selectedArgs } = args;
+      return new CloudArtifactService(this.library, workspace, this.backends, this.libraryKey, this.hosted, this.plugins, this.fileStorage).callTool(name, selectedArgs);
+    }
+    if (ARTIFACTS_WORKSPACE_TOOLS.some(tool => tool.name === name) && name !== "artifacts_preview") return workspaceTool(this, name, args);
     if (name.startsWith("script_")) return this.scripts.callTool(name, args);
     if (name === "artifact_link") return this.artifactLink(args);
     switch (name) {
@@ -96,7 +104,7 @@ export class CloudArtifactService {
         if (this.hosted) await this.hosted.links.check(target, slug);
         const mutation = await this.library.importDraft({ workspace: this.workspace, name: target.name, source: archive.source, server_source: archive.server_source, project: archive.project, runtime });
         const generation = await this.hosted?.links.begin(target);
-        return this.mutationResult(mutation, generation, this.hosted ? { slug, access: "private" } : {});
+        return this.mutationResult(mutation, generation, this.hosted ? { slug, access: "private" } : {}, args.preview !== false);
       }
       case "artifact_remix": {
         const target = this.artifacts.target("artifact", args.new_name as string);
@@ -104,7 +112,7 @@ export class CloudArtifactService {
         if (this.hosted) await this.hosted.links.check(target, slug);
         const mutation = await this.library.remix({workspace:this.workspace,name:args.name as string | undefined,version_id:args.version_id as string | undefined,new_name:args.new_name as string,runtime});
         const generation = await this.hosted?.links.begin(target);
-        return this.mutationResult(mutation, generation, this.hosted ? {slug,access:"private"} : {});
+        return this.mutationResult(mutation, generation, this.hosted ? {slug,access:"private"} : {}, args.preview !== false);
       }
       case "artifact_write": {
         const target = this.artifacts.target("artifact", args.name as string);
@@ -118,16 +126,16 @@ export class CloudArtifactService {
         const generation = await this.hosted?.links.begin(target);
         const previous = args.project === undefined ? undefined : await this.snapshot({name: args.name as string}).catch(error => { if (error instanceof Error && error.message.includes("artifact not found")) return undefined; throw error; });
         const project = args.project === undefined ? undefined : await resolveProject(args.project, previous?.project, fetch, browserRuntime.sharedVersions);
-        return this.mutationResult(await this.library.writeDraft({ workspace: this.workspace, name: args.name as string, source: args.contents as string, server_source: args.server as string | null | undefined, project, expected_revision: args.expected_revision as string | null | undefined }), generation, { ...(args.slug === undefined ? {} : { slug: args.slug as string }), ...(args.access === undefined ? {} : { access: args.access as "private" | "public" }) });
+        return this.mutationResult(await this.library.writeDraft({ workspace: this.workspace, name: args.name as string, source: args.contents as string, server_source: args.server as string | null | undefined, project, expected_revision: args.expected_revision as string | null | undefined }), generation, { ...(args.slug === undefined ? {} : { slug: args.slug as string }), ...(args.access === undefined ? {} : { access: args.access as "private" | "public" }) }, args.preview !== false);
       }
       case "artifact_edit": {
         const generation = await this.hosted?.links.begin(this.artifacts.target("artifact", args.name as string));
-        return this.mutationResult(await this.library.editDraft({ workspace: this.workspace, name: args.name as string, file: args.file as string | undefined, part: args.part as "client" | "server" | undefined, edits: args.edits as ArtifactEdit[], expected_hash: args.expected_hash as string | undefined }), generation);
+        return this.mutationResult(await this.library.editDraft({ workspace: this.workspace, name: args.name as string, file: args.file as string | undefined, part: args.part as "client" | "server" | undefined, edits: args.edits as ArtifactEdit[], expected_hash: args.expected_hash as string | undefined }), generation, {}, args.preview !== false);
       }
       case "artifact_restore": {
         const version = await this.library.version({ workspace: this.workspace, id: args.version_id as string });
         const generation = await this.hosted?.links.begin(this.artifacts.target("artifact", version.name));
-        return this.mutationResult(await this.library.restore({ workspace: this.workspace, id: args.version_id as string, runtime }), generation);
+        return this.mutationResult(await this.library.restore({ workspace: this.workspace, id: args.version_id as string, runtime }), generation, {}, args.preview !== false);
       }
       case "artifact_typecheck": {
         const snapshot = await this.snapshot({ name: args.name as string });
@@ -142,6 +150,7 @@ export class CloudArtifactService {
         });
         return text({ ok: compiled.ok, path: snapshot.path, check: formatArtifactCheck(compiled.diagnostics), diagnostics: compiled.diagnostics, bytes: compiled.js?.length ?? 0 }, !compiled.ok);
       }
+      case "artifacts_preview":
       case "artifact_open": {
         const snapshot = await this.snapshot(args as { name?: string; version_id?: string; event_id?: string });
         const preview = await this.preview(snapshot);
@@ -196,11 +205,11 @@ export class CloudArtifactService {
       runtime: compiled.artifact.runtime, compiled_id: compiled.artifact.id, initial_state: snapshot.state, mode: "preview",
       ...(snapshot.version_id ? { version_id: snapshot.version_id } : {}),
     });
-    const artifact = { name: version.name, versionId: version.id, revision: version.revision, eventId: event.id, sourceHash: version.source_hash };
+    const artifact = { workspace: snapshot.workspace, name: version.name, versionId: version.id, revision: version.revision, eventId: event!.id, sourceHash: version.source_hash };
     return { ...base, ok: true, artifact, _meta: { artifact: { ...artifact, js: compiled.js, state: snapshot.state, server: snapshot.server_source !== null, ...(this.plugins ? { plugins: true } : {}), ...(this.fileStorage ? { files: true } : {}) } satisfies ArtifactAppPayload } };
   }
 
-  private async mutationResult(mutation: Mutation, generation?: number | null, settings: LinkUpdate = {}): Promise<CallToolResult> {
+  private async mutationResult(mutation: Mutation, generation?: number | null, settings: LinkUpdate = {}, deliverPreview = true): Promise<CallToolResult> {
     const { source, server_source, state, project, ...summary } = mutation;
     const target = this.artifacts.target("artifact", mutation.name);
     if (generation != null) {
@@ -216,7 +225,7 @@ export class CloudArtifactService {
     // The draft is already committed. A delivery error must never look like a
     // rollback, and compilation must use that exact committed source snapshot.
     try {
-      const { _meta, ...details } = await this.preview(snapshot, compiled);
+      const { _meta, ...details } = deliverPreview ? await this.preview(snapshot, compiled) : await this.saveRevision(snapshot, compiled);
       const target = this.artifacts.target("artifact", mutation.name);
       if (generation != null && details.ok && "artifact" in details && (settings.slug !== undefined || await this.hosted!.links.find(target))) {
         const link = await this.hosted!.links.commit(target, generation, { ...settings, version_id: details.artifact.versionId, live: { id: details.artifact.versionId, revision: details.artifact.revision, revision_token: projectRevision(mutation.source, mutation.server_source, mutation.project ?? emptyProject()) } });
@@ -232,6 +241,16 @@ export class CloudArtifactService {
       const failed = { ...payload, ok: false, preview: { ok: false, error: error instanceof Error ? error.message : String(error) } };
       return { ...text(failed, true), structuredContent: failed };
     }
+  }
+
+  private async saveRevision(snapshot: Snapshot, compiled: Compiled) {
+    const { version } = await this.library.recordServe({
+      workspace: snapshot.workspace, name: snapshot.name, source: snapshot.source,
+      server_source: snapshot.server_source, project: snapshot.project, runtime: compiled.artifact!.runtime,
+      compiled_id: compiled.artifact!.id, initial_state: snapshot.state, mode: "preview", record_event: false,
+      ...(snapshot.version_id ? { version_id: snapshot.version_id } : {}),
+    });
+    return { ok: true, artifact: { workspace: snapshot.workspace, name: version.name, versionId: version.id, revision: version.revision, sourceHash: version.source_hash }, _meta: undefined };
   }
 
   private async compile(snapshot: Snapshot): Promise<Compiled> {
