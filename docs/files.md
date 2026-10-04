@@ -1,5 +1,11 @@
 # Artifact files
 
+Use file storage when an app needs uploads, attachments, or downloadable results.
+Files persist independently of source revisions. Publishing an app makes its files
+readable through the public app; public viewers cannot upload or delete them.
+
+## Upload and download from an app
+
 Hosted artifacts and the managed local celld server support persistent files without
 requiring artifacts server code. Import `artifactFiles` from `sidequery/artifacts`:
 
@@ -18,6 +24,8 @@ and ISO `uploaded` timestamp. Uploads create new files even when names match. Ea
 file may be at most 25 MiB. Empty files are supported. Upload failures require a
 new upload request; multipart/resumable uploads are not part of this API.
 
+## Ownership and sharing
+
 Files belong to **library + workspace + artifact name**, matching the artifact's
 database identity. Private libraries isolate users; the team library shares files.
 Source changes, archived previews, source restores, and URL renames all use the
@@ -29,6 +37,8 @@ or delete through their public URL. Publishing an artifact therefore exposes its
 files for reading. Private standalone views use the same library authorization
 as the gallery. Plain file-based previews without the hosted/managed server do
 not have persistent file storage; their SDK calls report that files are unavailable.
+
+## MCP file transfers
 
 The `artifact_files` MCP tool accepts `{ name?, version_id?, request }`. Requests are
 `{ operation: "list", cursor? }`, `{ operation: "upload", name, size, type }`, or

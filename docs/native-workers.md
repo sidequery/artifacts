@@ -1,5 +1,15 @@
 # Native Worker apps
 
+Use a native Worker app when you need platform resources such as queues, KV, R2,
+or D1 in addition to a request handler. For a React interface with SQLite, start
+with [app backends](app-backends.md); for an endpoint or scheduled job with SQLite,
+start with [scripts](scripts.md).
+
+Your administrator must configure a [deployment provider](#providers) before you
+can deploy native apps. Then use **Worker apps** in the gallery, or ask your agent
+to read `app_guide`. Native app URLs are private; they do not currently support
+public links.
+
 Native apps deploy ordinary Cloudflare Worker modules with their default handler and named Durable Object exports. They use native KV, R2, D1, queue and DO bindings rather than the script SDK's `env.sql` wrapper. The gallery's **Worker apps** button and hosted MCP `app_*` tools use the same authenticated deployment controller.
 
 An app belongs to a private or team library and a workspace. Its UUID permanently owns provider resources; source revisions, export names, logical library moves and binding names do not change those identities. App URLs are private:

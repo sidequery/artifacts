@@ -1,6 +1,12 @@
 # Deployment plugins
 
-A deployment can install ordinary browser packages and expose authenticated server functions. Artifacts import the browser packages and call functions through the existing viewer bridge. Routing is a separate feature.
+Deployment administrators can make shared UI packages and authenticated server
+functions available to every artifact, for example a company component library
+or an internal directory lookup. This requires changing and rebuilding the
+Artifacts deployment.
+
+If you only need a package in one app or script, use [project dependencies](scripts.md#third-party-dependencies)
+instead. This guide covers installing shared plugins and calling their functions.
 
 ## Configure a deployment
 

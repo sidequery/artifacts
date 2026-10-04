@@ -1,16 +1,37 @@
 # Authentication and access
 
-Artifacts uses your deployment's sign-in system. There is no central Artifacts
-account. Signing in to the application is separate from the Cloudflare or object
-store credentials used to deploy it.
+**Use the sign-in system your team already uses.** Artifacts can connect to
+Google, GitHub, Microsoft Entra ID, Okta, Auth0, Keycloak, and other services
+that support OAuth 2.0 or OpenID Connect (OIDC), the standard protocols for
+signing in through another service. That includes company single sign-on (SSO)
+and identity services you host yourself.
 
-- [Connect to an existing deployment](#connect-to-an-existing-deployment)
-- [Choose an authentication mode](#choose-an-authentication-mode)
-- [Set up Better Auth](#set-up-better-auth)
-- [Set up Cloudflare Access](#set-up-cloudflare-access)
-- [Configure celld](#configure-celld)
-- [Understand library and URL permissions](#library-and-url-permissions)
-- [Troubleshoot sign-in](#troubleshooting)
+This works through **Better Auth**, the authentication library built into
+Artifacts. It connects Artifacts to your chosen sign-in service, keeps users
+signed in, and handles authorization for coding agents. You configure that
+connection in your Artifacts deployment; your users continue signing in with
+their existing accounts. They do not need a Better Auth account.
+
+The provider list is open-ended: Better Auth includes ready-made integrations
+and a [generic OAuth/OIDC integration](https://better-auth.com/docs/plugins/generic-oauth)
+for other providers. Standard providers can be configured through deployment
+settings; custom behavior can be added in TypeScript. This works on both
+Cloudflare and your own servers with celld.
+
+For Cloudflare deployments, **Cloudflare Access is an alternative** that handles
+sign-in at Cloudflare's edge. You do not need Access to use Artifacts on Cloudflare.
+
+Your deployment administrator chooses the provider and who can sign in. There
+is no central Artifacts account, and users do not need Cloudflare or object-store
+credentials. The default local host needs no sign-in.
+
+| What you want to do | Start here |
+| --- | --- |
+| Sign in or connect your coding agent | [Connect to an existing deployment](#connect-to-an-existing-deployment) |
+| Understand personal, team, and public access | [Library and URL permissions](#library-and-url-permissions) |
+| Set up sign-in for your deployment | [Choose an authentication mode](#choose-an-authentication-mode) |
+| Fix a failed sign-in or connection | [Troubleshooting](#troubleshooting) |
+| Build a custom MCP client | [Credential and OAuth reference](#credential-and-oauth-reference) |
 
 ## Connect to an existing deployment
 
@@ -35,36 +56,40 @@ creating or changing anything.
 
 **Local host:** `artifacts host` serves `http://127.0.0.1:4786` and
 `http://127.0.0.1:4786/mcp` without sign-in in its default local configuration.
-This bypass requires `ENVIRONMENT=local`, Access mode, and a loopback request
-hostname. Better Auth always requires sign-in, including during local development.
-For network deployments, follow the setup below and the
-[celld deployment guide](celld-deployment.md).
+For a shared or network deployment, an administrator must configure sign-in;
+see the setup below and the [celld deployment guide](celld-deployment.md).
 
-### Which credential works where?
+## Library and URL permissions
 
-| Surface | Better Auth mode | Cloudflare Access mode |
-| --- | --- | --- |
-| Gallery and management routes such as `/api/tools` | Browser session cookie from provider sign-in | Valid signed Access assertion forwarded by Cloudflare |
-| `/mcp` | OAuth access token issued by this deployment for its MCP resource | Managed OAuth token validated by Access, which forwards a signed assertion |
-| Private app or script URL | Browser session, with the current owner's library permissions | Valid Access assertion, with the current owner's library permissions |
-| Public app or script URL | No Artifacts sign-in; the handler can require application credentials | No Artifacts sign-in; the Access edge policy must also permit the path |
+**Personal libraries** are private to the verified user. **Team library** content
+can be read and edited by every user admitted to the deployment. There are no
+separate team viewer/editor roles. `workspace` organizes content inside a library;
+it does not grant access. Each deployment represents one team. Infrastructure
+administrators can still administer the underlying storage.
 
-Artifacts does not currently issue personal API keys or support a client-credentials
-grant for unattended management. In Better Auth mode, sending an MCP access token
-to `/api/tools` does not authenticate that request: OAuth bearer authentication is
-implemented only on `/mcp`. Use the MCP OAuth flow for programmatic management.
-Provider access tokens and `BETTER_AUTH_SECRET` are not Artifacts API credentials.
+**Private URLs** use the item's current library ownership. **Public URLs** allow
+external callers to view an app or invoke a script, without granting management
+access to its source. Public scripts can verify an application bearer token or
+webhook signature using their stored secrets. The gateway strips management
+cookies and Access credentials before calling user code; private routes also
+strip the management authorization header. See [script access](scripts.md#access).
 
-In Better Auth mode, a custom MCP client should request the `artifacts` scope and
-resource `https://artifacts.example.com/mcp`. The resource excludes library/workspace query
-parameters. Discovery, authorization-code flow with PKCE, and refresh tokens are
-supported. Access tokens expire after five minutes; clients should refresh them.
-Signing out of the Better Auth session also invalidates its MCP access tokens.
-Existing clients using the legacy `canvas` scope continue to work.
-The `artifacts` scope does not distinguish read-only from write access. Clients
-using DPoP-bound tokens must send the corresponding proof with each MCP request.
+If Access protects the entire hostname, add an edge bypass for the specific public
+paths you want external callers to reach. Setting a link to public does not
+override Cloudflare's policy. Keep management paths protected.
+
+Moving an item between personal and team libraries preserves its data, secrets,
+schedule, and URL; its public/private URL setting remains unchanged. Management
+and private-URL permissions follow the new owner.
 
 ## Choose an authentication mode
+
+This section is for the person deploying Artifacts. Choose where sign-in happens:
+
+- **In Artifacts:** connect your existing sign-in service using the built-in
+  Better Auth library. Follow [Set up Better Auth](#set-up-better-auth).
+- **At Cloudflare's edge:** use Cloudflare Access for a Cloudflare deployment.
+  Follow [Set up Cloudflare Access](#set-up-cloudflare-access).
 
 | Mode | Use when | Required setup |
 | --- | --- | --- |
@@ -117,6 +142,19 @@ already enforces your intended membership boundary. Provider hints such as Googl
 hosted domain do not replace Artifacts admission rules.
 
 ### 2. Register an identity provider
+
+Choose the provider your users already use. Artifacts passes provider settings
+to Better Auth rather than maintaining its own list of supported providers:
+
+| Provider integration | Configure it with |
+| --- | --- |
+| A social provider supported by the installed Better Auth version, such as Google or GitHub | `BETTER_AUTH_SOCIAL_PROVIDERS` |
+| Company SSO or a self-hosted identity service using OIDC, such as Microsoft Entra ID, Okta, Auth0, or Keycloak | `BETTER_AUTH_OIDC_PROVIDERS` |
+| A provider needing custom OAuth endpoints, profile mapping, callbacks, or a plugin | Better Auth's generic OAuth options or the TypeScript configuration in [`teamProviderOptions`](../cloudflare/team-auth.ts) |
+
+You can configure multiple providers. Users choose from them on the sign-in page.
+The examples below show the configuration shape; use your provider's application
+registration instructions to obtain a client ID and client secret.
 
 Create an OAuth application with your identity provider. Register the callback
 matching its configured provider ID:
@@ -258,6 +296,9 @@ and callback; `localhost` and `127.0.0.1` are different origins.
 
 ## Set up Cloudflare Access
 
+Use this alternative when Cloudflare Access protects your deployment. It replaces
+the Better Auth setup above; you do not need to configure both.
+
 1. Protect every hostname that reaches the Worker, including `workers.dev`,
    custom domains, and preview URLs. Cover the gallery, assets, and `/mcp`.
 2. Configure an identity provider and an Access policy admitting the intended
@@ -308,36 +349,13 @@ per-path rate-limit bucket instead of trusting caller-supplied IP headers.
 Keep the prepared project's `migrations_dir` inside that project and copy
 `cloudflare/migrations` there. After deploying the configured Worker and starting
 a node, apply its auth migrations before admitting application traffic. Follow
-celld 0.5.0's [D1 operations reference](https://github.com/denoland/celld/blob/v0.5.0/docs/README.md#operate-d1-and-kv)
+the pinned celld runtime's [D1 operations reference](https://github.com/denoland/celld/blob/v0.6.1/docs/README.md#operate-d1-and-kv)
 for the migration command and bucket configuration.
 
 `dev:celld` does not apply local auth migrations. celld's migration command targets
 deployed bucket storage, and workerd's local D1 is a separate database. Use the
 [workerd local setup](#local-better-auth-development) for routine auth development;
 the celld auth integration fixture bootstraps its own temporary schema.
-
-## Library and URL permissions
-
-**Personal libraries** are private to the verified user. **Team library** content
-can be read and edited by every user admitted to the deployment. There are no
-separate team viewer/editor roles. `workspace` organizes content inside a library;
-it does not grant access. Each deployment represents one team. Infrastructure
-administrators can still administer the underlying storage.
-
-**Private URLs** use the item's current library ownership. **Public URLs** allow
-external callers to view an app or invoke a script, without granting management
-access to its source. Public scripts can verify an application bearer token or
-webhook signature using their stored secrets. The gateway strips management
-cookies and Access credentials before calling user code; private routes also
-strip the management authorization header. See [script access](scripts.md#access).
-
-If Access protects the entire hostname, add an edge bypass for the specific public
-paths you want external callers to reach. Setting a link to public does not
-override Cloudflare's policy. Keep management paths protected.
-
-Moving an item between personal and team libraries preserves its data, secrets,
-schedule, and URL; its public/private URL setting remains unchanged. Management
-and private-URL permissions follow the new owner.
 
 ## Troubleshooting
 
@@ -373,3 +391,38 @@ migration to replace it. Maintainers can generate a new schema delta with
 Authentication configuration and token verification live in
 [`better-auth.ts`](../cloudflare/better-auth.ts); Access verification lives in
 [`auth.ts`](../cloudflare/auth.ts).
+
+## Credential and OAuth reference
+
+These details are for custom clients and integrations. For normal use, connect
+your MCP client and complete the browser sign-in described above.
+
+### Which credential works where?
+
+| Surface | Better Auth mode | Cloudflare Access mode |
+| --- | --- | --- |
+| Gallery and management routes such as `/api/tools` | Browser session cookie from provider sign-in | Valid signed Access assertion forwarded by Cloudflare |
+| `/mcp` | OAuth access token issued by this deployment for its MCP resource | Managed OAuth token validated by Access, which forwards a signed assertion |
+| Private app or script URL | Browser session, with the current owner's library permissions | Valid Access assertion, with the current owner's library permissions |
+| Public app or script URL | No Artifacts sign-in; the handler can require application credentials | No Artifacts sign-in; the Access edge policy must also permit the path |
+
+Artifacts does not currently issue personal API keys or support a client-credentials
+grant for unattended management. In Better Auth mode, sending an MCP access token
+to `/api/tools` does not authenticate that request: OAuth bearer authentication is
+implemented only on `/mcp`. Use the MCP OAuth flow for programmatic management.
+Provider access tokens and `BETTER_AUTH_SECRET` are not Artifacts API credentials.
+
+In Better Auth mode, a custom MCP client should request the `artifacts` scope and
+resource `https://artifacts.example.com/mcp`. The resource excludes library/workspace query
+parameters. Discovery, authorization-code flow with PKCE, and refresh tokens are
+supported. Access tokens expire after five minutes; clients should refresh them.
+Signing out of the Better Auth session also invalidates its MCP access tokens.
+Existing clients using the legacy `canvas` scope continue to work.
+The `artifacts` scope does not distinguish read-only from write access. Clients
+using DPoP-bound tokens must send the corresponding proof with each MCP request.
+
+### Local authentication bypass
+
+The default local host bypasses sign-in only with `ENVIRONMENT=local`, Access
+mode, and a loopback request hostname. Better Auth always requires sign-in,
+including during local development.

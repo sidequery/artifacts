@@ -1,13 +1,32 @@
 # Artifacts host
 
-`artifacts host` uses launchd on macOS and systemd user services on Linux.
-`artifacts server` remains a compatible name for the same service and state.
+Run the full Artifacts application on your machine, including the gallery, coding
+agent connection, apps, scripts, storage, and schedules. Start it in a terminal:
 
-`artifacts host install` starts the service and enables future login starts;
-`artifacts host start` starts it without newly enabling login startup; an existing
-login setting is retained. The other commands are `stop`, `status`, `logs`, and `uninstall`. On Linux this requires
-a working systemd user session; boot-before-login operation requires separately
-configured user lingering or a system-level service.
+```sh
+bunx @sidequery/artifacts host
+```
+
+Open [localhost:4786](http://127.0.0.1:4786); connect your agent to
+`http://127.0.0.1:4786/mcp`. No sign-in is needed in this default local setup.
+Saved apps and data survive restarts. Ctrl-C stops the server.
+
+For a background service, install the package globally with
+`bun add --global @sidequery/artifacts`, then use:
+
+| Command | What it does |
+| --- | --- |
+| `artifacts host start` | Start in the background |
+| `artifacts host status` | Show whether the service is ready and its URL |
+| `artifacts host logs` | Show recent logs |
+| `artifacts host stop` | Stop the service, keeping saved data |
+| `artifacts host install` | Start now and enable startup at login |
+| `artifacts host uninstall` | Stop and remove the service, keeping saved data |
+
+Background services use launchd on macOS or a systemd user session on Linux.
+On Linux, running before login requires user lingering or a system-level service.
+`artifacts server` is an alias for `artifacts host` and uses the same state.
+See [celld deployment](celld-deployment.md) for running a network deployment.
 
 ## Local persistent runtime
 
@@ -21,7 +40,7 @@ or download celld.
 Run the server in the current terminal:
 
 ```sh
-artifacts server
+artifacts host
 ```
 
 The default address is `http://127.0.0.1:4786`. `--port` selects another port.
@@ -29,10 +48,10 @@ The server keeps its project and native state under the Artifacts data directory
 `--state-dir PATH` overrides that project directory for a foreground run. Press
 Ctrl-C to request a graceful stop. SIGTERM uses the same shutdown path.
 
-On first use, Artifacts downloads celld 0.5.0 for a supported platform, verifies
+On first use, Artifacts downloads the pinned celld runtime for a supported platform, verifies
 the pinned archive and executable SHA-256 values, and installs it in the Artifact
 data directory with user-only permissions. This release supports Apple Silicon
-macOS and glibc Linux on arm64 or x64. The ordinary Bun commands do not require this native runtime; `artifacts server`
+macOS and glibc Linux on arm64 or x64. The ordinary Bun commands do not require this native runtime; `artifacts host`
 reports an explicit error when the native platform is unsupported.
 
 ## Background service
@@ -40,16 +59,16 @@ reports an explicit error when the native platform is unsupported.
 Use the operating system's user service manager for crash recovery:
 
 ```sh
-artifacts server start
-artifacts server status
-artifacts server logs
-artifacts server stop
+artifacts host start
+artifacts host status
+artifacts host logs
+artifacts host stop
 ```
 
 `start` uses launchd on macOS and `systemd --user` on Linux. It first verifies
 the packaged server assets and managed celld executable, then registers the
-service and waits for owned-process readiness. A manual start does not enable
-the service for future logins. `stop` unloads or stops the current job and waits
+service and waits for owned-process readiness. A manual start does not newly enable
+login startup; an existing login setting is retained. `stop` unloads or stops the current job and waits
 for graceful shutdown. It retains the server project and all SQLite/KV data.
 
 `status` reports the service manager and four separate facts:
@@ -67,7 +86,7 @@ from stopping the service for another. Two roots still cannot listen on the
 same port; `start` checks for that conflict before registration.
 
 `logs` prints the most recent 100 lines from the service log. Select between 1
-and 1000 lines with `artifacts server logs --lines N`. Each read is capped at 256
+and 1000 lines with `artifacts host logs --lines N`. Each read is capped at 256
 KiB even when the log is larger.
 
 ## Start at login
@@ -76,7 +95,7 @@ If the server is already running, stop it first. Then start it and opt in to
 future login starts:
 
 ```sh
-artifacts server start --at-login
+artifacts host install
 ```
 
 Install `@sidequery/artifacts` globally before enabling this option, for example
@@ -85,12 +104,12 @@ the exact Bun executable and absolute installed `src/cli.ts` path. Do not create
 a login service from `bunx` or another transient package cache: cleanup or cache
 rotation can remove that recorded path.
 
-`artifacts server stop` stops the current process but preserves the login setting,
+`artifacts host stop` stops the current process but preserves the login setting,
 so the service starts at the next login. Disable login startup, stop the service,
 and remove its installed supervisor definition with:
 
 ```sh
-artifacts server uninstall
+artifacts host uninstall
 ```
 
 Run `uninstall` before moving or removing the global package. Enabling login is
