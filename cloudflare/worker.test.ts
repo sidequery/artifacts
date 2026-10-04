@@ -761,6 +761,7 @@ test("artifact schedules retain validated revisions, keep host history isolated,
   };
   const saved = await tool("artifact_schedule", { action: "set", interval_seconds: 3600, request: { path: "/counter", method: "POST" } });
   expect(saved.schedule).toMatchObject({ paused: false, interval_seconds: 3600 });
+  expect(saved.has_server).toBe(true);
   await tool("artifact_schedule", { action: "pause" });
   const invalid = await client.callTool({ name: "artifact_write", arguments: { name, contents: "export default function {" } });
   expect(invalid.isError).toBe(true);
@@ -776,7 +777,9 @@ export class ArtifactServer extends DurableObject { fetch() { return Response.js
   const inspected = await tool("artifact_request", { request: { path: "/" } });
   expect(JSON.parse(atob(inspected.response.body))).toEqual([]);
   expect((await client.callTool({ name: "artifact_write", arguments: { name, contents: counterClient, server: null } })).isError).not.toBe(true);
-  expect((await tool("artifact_schedule")).schedule).toMatchObject({ paused: true, next_run_at: null });
+  const unavailable = await tool("artifact_schedule");
+  expect(unavailable.schedule).toMatchObject({ paused: true, next_run_at: null });
+  expect(unavailable.has_server).toBe(false);
   expect((await client.callTool({ name: "artifact_schedule", arguments: { name, action: "resume" } })).isError).toBe(true);
 }, 120000);
 

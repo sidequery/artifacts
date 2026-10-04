@@ -7,7 +7,7 @@ import type { GalleryArtifact } from "./types";
 import { Select } from "./select";
 import type { Diagnostic } from "../diagnostics";
 import type { SourceLocation } from "./source-editor";
-export type ScriptView = "source" | "requests" | "activity" | "secrets";
+export type ScriptView = "source" | "requests" | "schedule" | "settings";
 
 type ToolResult = { error?: string; isError?: boolean; content?: { type: string; text?: string }[]; structuredContent?: unknown };
 export type MutationResult = { applied?: boolean; ok?: boolean; revision_token?: string; error?: string; check?: string; diagnostics?: Diagnostic[] };
@@ -222,11 +222,11 @@ export function ScriptPanel({ artifact, workspace, version, sourceUrl, onSaved, 
         </form>
         {output ? <pre aria-label="Script response">{output}</pre> : null}
       </section>
-      <section className="script-activity artifact-execution" aria-label="Script activity" hidden={view !== "activity"}>
-        <ExecutionControls key={`${workspace}/${name}`} workspace={workspace} name={name}/>
+      <section className="script-activity artifact-execution" aria-label="Script schedule" hidden={view !== "schedule"}>
+        <ExecutionControls key={`${workspace}/${name}`} workspace={workspace} name={name} active={view === "schedule"}/>
         <details><summary>Logs</summary><button disabled={busy} onClick={() => void perform(async () => setLogs(show(await galleryTool(workspace, "script_logs", { name }))))}>Load logs</button><pre aria-label="Script logs">{logs}</pre></details>
       </section>
-      <div hidden={view !== "secrets"}><SecretControls key={`${workspace}/${name}secrets`} workspace={workspace} name={name} kind="script" /></div>
+      <div className="settings-panel" hidden={view !== "settings"}><h2 className="settings-title">Secrets</h2><SecretControls key={`${workspace}/${name}secrets`} workspace={workspace} name={name} kind="script" /></div>
     </> : null}
   </div>;
 }

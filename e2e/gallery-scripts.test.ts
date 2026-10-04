@@ -41,17 +41,17 @@ test("gallery edits scripts without execution and runs requests only on demand",
     expect(await page.locator("iframe").count()).toBe(0);
     expect(calls).toEqual([]);
     await page.getByRole("textbox", { name: "script.ts", exact: true }).fill('export default { fetch() { return new Response("changed"); } };');
-    const views = page.getByRole("group", { name: "Script view" });
+    const views = page.getByRole("tablist", { name: "Script view" });
     const sourceDimensions = await page.locator(".source-code-surface:visible").evaluate(el => ({ editor: el.getBoundingClientRect().height, pane: el.closest(".artifact-detail")!.getBoundingClientRect().height }));
     expect(sourceDimensions.editor).toBeGreaterThan(sourceDimensions.pane / 2);
     await screenshot("gallery-script-source");
-    await views.getByRole("button", { name: "Requests", exact: true }).click();
-    await views.getByRole("button", { name: "Source", exact: true }).click();
+    await views.getByRole("tab", { name: "Requests", exact: true }).click();
+    await views.getByRole("tab", { name: "Source", exact: true }).click();
     expect(await page.getByRole("textbox", { name: "script.ts", exact: true }).innerText()).toContain('new Response("changed")');
     await page.getByRole("button", { name: "Save and deploy", exact: true }).click();
     await page.getByRole("status").filter({ hasText: "Script saved" }).waitFor();
     expect(calls.map(call => call.name)).toEqual(["script_write"]);
-    await views.getByRole("button", { name: "Requests", exact: true }).click();
+    await views.getByRole("tab", { name: "Requests", exact: true }).click();
     await page.getByRole("combobox", { name: "Request method" }).selectOption("POST");
     await page.getByRole("textbox", { name: "Request body" }).fill("hello 🌍");
     await page.getByRole("textbox", { name: "Request headers" }).fill('{"content-type":"text/plain"}');
@@ -70,7 +70,8 @@ test("gallery edits scripts without execution and runs requests only on demand",
     await page.getByRole("button", { name: "new-handler Script", exact: true }).waitFor();
     expect(await page.getByRole("button", { name: "new-handler Script", exact: true }).getAttribute("aria-current")).toBe("true");
     expect(calls.filter(call => call.name === "script_run")).toHaveLength(1);
-    await page.getByRole("button", {name:"Remix",exact:true}).click();
+    await page.getByRole("button", { name: "More actions", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Remix", exact: true }).click();
     await page.getByRole("textbox", {name:"Remix name"}).fill("remixed-handler");
     await page.getByRole("button", {name:"Create remix",exact:true}).click();
     const remixedRow=page.getByRole("button",{name:"remixed-handler Script",exact:true});
@@ -79,6 +80,7 @@ test("gallery edits scripts without execution and runs requests only on demand",
     expect(calls.at(-1)).toEqual({name:"script_remix",arguments:{name:"new-handler",new_name:"remixed-handler"}});
     hosted = false;
     await page.reload();
+    await page.getByRole("tab", { name: "Preview", exact: true }).click();
     await page.getByTitle("Preview of local").waitFor();
     expect(await page.getByRole("button", { name: "New script" }).count()).toBe(0);
     expect(await page.getByRole("textbox", { name: "URL slug" }).count()).toBe(0);
@@ -109,7 +111,7 @@ test("invalid saved drafts show live targets and clickable helper diagnostics", 
     await page.getByRole("textbox", { name: "script.ts", exact: true }).fill("invalid source");
     await page.getByRole("button", { name: "Save and deploy", exact: true }).click();
     await page.getByRole("alert").filter({ hasText: "Invalid draft saved; live revision unchanged." }).waitFor();
-    expect(await page.locator(".deployment-status").innerText()).toBe("Live revision 1 · Saved draft; live revision unchanged");
+    expect(await page.locator(".detail-title p").count()).toBe(0);
     await page.getByRole("button", { name: "lib/value.ts:2:23", exact: false }).click();
     const helper = page.getByRole("textbox", { name: "lib/value.ts", exact: true });
     await helper.waitFor();
@@ -117,7 +119,7 @@ test("invalid saved drafts show live targets and clickable helper diagnostics", 
     expect(await helper.evaluate(() => window.getSelection()?.anchorNode?.parentElement?.textContent)).toContain("export const broken");
     await page.getByText("Raw details", { exact: true }).click();
     expect(await page.locator(".save-feedback pre").innerText()).toContain('"revision_token": "invalid"');
-    await page.getByRole("group", { name: "Script view" }).getByRole("button", { name: "Requests", exact: true }).click();
+    await page.getByRole("tablist", { name: "Script view" }).getByRole("tab", { name: "Requests", exact: true }).click();
     expect(await page.getByText("Run target:", { exact: false }).innerText()).toContain("Live revision 1");
   } finally { await browser.close(); server.stop(true); }
 }, 30000);

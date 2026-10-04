@@ -7,7 +7,7 @@ import { chromium } from "playwright";
 test("schedule loads before editing, preserves request headers and ignores unfinished fields for controls", async () => {
   const directory = await mkdtemp(join(tmpdir(), "execution-controls-"));
   const entry = join(directory, "fixture.tsx");
-  await Bun.write(entry, `import {createElement} from ${JSON.stringify(Bun.resolveSync("react", import.meta.dir))};import {createRoot} from ${JSON.stringify(Bun.resolveSync("react-dom/client", import.meta.dir))};import {ExecutionControls} from ${JSON.stringify(new URL("../src/gallery/execution-controls.tsx", import.meta.url).pathname)};createRoot(document.getElementById("root")).render(createElement(ExecutionControls,{workspace:"default",name:"example"}));`);
+  await Bun.write(entry, `import {createElement} from ${JSON.stringify(Bun.resolveSync("react", import.meta.dir))};import {createRoot} from ${JSON.stringify(Bun.resolveSync("react-dom/client", import.meta.dir))};import {ExecutionControls} from ${JSON.stringify(new URL("../src/gallery/execution-controls.tsx", import.meta.url).pathname)};createRoot(document.getElementById("root")).render(createElement(ExecutionControls,{workspace:"default",name:"example",kind:new URLSearchParams(location.search).has("unsupported")?"artifact":"script"}));`);
   let build;
   try { build = await Bun.build({ entrypoints: [entry], target: "browser" }); }
   finally { await rm(directory, { recursive: true, force: true }); }
@@ -16,12 +16,16 @@ test("schedule loads before editing, preserves request headers and ignores unfin
   type Arguments = { action: string; interval_seconds?: number; request?: { path: string; method: string; headers: [string, string][]; body?: string } };
   const calls: Arguments[] = [];
   let schedule = { interval_seconds: 7200, paused: false, next_run_at: Date.now() + 7200000, request: { path: "/existing", method: "POST", headers: [["x-example", "first"], ["x-example", "second"]] as [string, string][], body: Buffer.from("prior body").toString("base64") } };
+  let unsupported = false;
   let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
   const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
     if (new URL(request.url).pathname === "/client.js") return new Response(js, { headers: { "content-type": "text/javascript" } });
     if (new URL(request.url).pathname === "/api/tools") {
-      const call = await request.json() as { arguments: Arguments }; calls.push(call.arguments);
+      const call = await request.json() as { name: string; arguments: Arguments };
+      if (call.name.endsWith("_runs")) return Response.json({ structuredContent: { runs: [] } });
+      if (unsupported) return Response.json({ structuredContent: { schedule: null, has_server: false } });
+      calls.push(call.arguments);
       if (call.arguments.action === "get") await gate;
       if (call.arguments.action === "pause") schedule = { ...schedule, paused: true };
       if (call.arguments.action === "resume") schedule = { ...schedule, paused: false };
@@ -33,7 +37,6 @@ test("schedule loads before editing, preserves request headers and ignores unfin
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage(); await page.goto(server.url.href);
-    await page.getByText("Schedule", { exact: true }).click();
     await page.getByText("Loading schedule…", { exact: true }).waitFor();
     expect(await page.getByRole("button", { name: "Save schedule", exact: true }).isEnabled()).toBe(false);
     expect(await page.getByLabel("Schedule path").isEnabled()).toBe(false);
@@ -42,6 +45,7 @@ test("schedule loads before editing, preserves request headers and ignores unfin
     expect(await page.getByLabel("Schedule path").inputValue()).toBe("/existing");
     expect(await page.getByLabel("Schedule interval", { exact: true }).inputValue()).toBe("2");
     expect(await page.getByLabel("Schedule interval unit").inputValue()).toBe("hours");
+    await page.getByText("Advanced request settings", { exact: true }).click();
     expect(await page.getByLabel("Schedule body").inputValue()).toBe("prior body");
     await page.getByLabel("Schedule interval unit").selectOption("minutes");
     expect(await page.getByLabel("Schedule interval", { exact: true }).inputValue()).toBe("120");
@@ -60,5 +64,10 @@ test("schedule loads before editing, preserves request headers and ignores unfin
     await page.getByRole("button", { name: "Save schedule", exact: true }).click();
     await page.getByRole("button", { name: "Pause schedule", exact: true }).click();
     expect(calls.filter(call => call.action === "set").at(-1)!.request!.headers).toEqual([["x-new", "value"]]);
+    unsupported = true;
+    await page.goto(`${server.url}?unsupported=1`);
+    await page.getByText("This artifact has no validated server.", { exact: false }).waitFor();
+    expect(await page.getByRole("button", { name: "Save schedule", exact: true }).count()).toBe(0);
+    await page.getByText("No runs recorded yet.", { exact: true }).waitFor();
   } finally { release(); await browser.close(); server.stop(true); }
 }, 30000);

@@ -62,7 +62,7 @@ test("gallery moves artifacts and scripts between libraries, preserves selection
       expect(await selected.getAttribute("title")).toBe(`${workspace}/${name}`);
       expect(await selected.innerText()).toBe(kind === "script" ? `${name}\nScript` : name);
       expect(await page.getByRole("combobox", { name: "Library", exact: true }).inputValue()).toBe("private");
-      await page.getByRole("button", { name: "Move", exact: true }).click();
+      await page.getByRole("button", { name: "More actions", exact: true }).click(); await page.getByRole("menuitem", { name: "Move", exact: true }).click();
       const panel = page.getByRole("form", { name: "Move between libraries" });
       await panel.waitFor();
       expect(await panel.innerText()).toContain("including its data and secrets");
@@ -72,18 +72,18 @@ test("gallery moves artifacts and scripts between libraries, preserves selection
       await panel.getByRole("button", { name: "Cancel", exact: true }).click();
       expect(await panel.count()).toBe(0);
       expect(moves).toHaveLength(beforeCancel);
-      if (kind === "artifact") await page.getByRole("group", { name: "Artifact view" }).getByRole("button", { name: "Source", exact: true }).click();
+      if (kind === "artifact") await page.getByRole("tablist", { name: "Artifact view" }).getByRole("tab", { name: "Source", exact: true }).click();
       const editor = page.getByRole("textbox", { name: kind === "script" ? "script.ts" : `${name}.artifact.tsx`, exact: true });
       const savedSource = await editor.innerText();
       await editor.fill("unsaved project source");
-      await page.getByRole("button", { name: "Move", exact: true }).click();
+      await page.getByRole("button", { name: "More actions", exact: true }).click(); await page.getByRole("menuitem", { name: "Move", exact: true }).click();
       page.once("dialog", dialog => void dialog.dismiss());
       await panel.getByRole("button", { name: "Move to team library", exact: true }).click();
       expect(moves).toHaveLength(beforeCancel);
       expect(await editor.innerText()).toBe("unsaved project source");
       await editor.fill(savedSource);
       await panel.getByRole("button", { name: "Cancel", exact: true }).click();
-      await page.getByRole("button", { name: "Move", exact: true }).click();
+      await page.getByRole("button", { name: "More actions", exact: true }).click(); await page.getByRole("menuitem", { name: "Move", exact: true }).click();
       collision = true;
       await panel.getByRole("button", { name: "Move to team library", exact: true }).click();
       await panel.getByRole("alert").waitFor();
@@ -93,13 +93,13 @@ test("gallery moves artifacts and scripts between libraries, preserves selection
       expect(libraries.private.some(artifact => artifact.kind === kind && artifact.workspace === workspace)).toBe(true);
       collision = false;
       for (const [from, destination, action] of [["private", "team", "Move to team library"], ["team", "private", "Move to my personal library"]] as const) {
-        if (from === "team") await page.getByRole("button", { name: "Move", exact: true }).click();
+        if (from === "team") { await page.getByRole("button", { name: "More actions", exact: true }).click(); await page.getByRole("menuitem", { name: "Move", exact: true }).click(); }
         await panel.getByRole("button", { name: action, exact: true }).click();
         await page.waitForURL(url => url.searchParams.get("library") === destination);
         await page.getByRole("combobox", { name: "Library", exact: true }).waitFor();
         await selected.waitFor();
         expect(await page.getByRole("combobox", { name: "Library", exact: true }).inputValue()).toBe(destination);
-        expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ library: destination, workspace, name, kind });
+        expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ library: destination, workspace, name, kind, tab: "source" });
         expect(await selected.getAttribute("title")).toBe(`${workspace}/${name}`);
         expect(await selected.innerText()).toBe(kind === "script" ? `${name}\nScript` : name);
         expect(moves.at(-1)).toEqual({ from, workspace, kind, name, library: destination });
@@ -112,7 +112,7 @@ test("gallery moves artifacts and scripts between libraries, preserves selection
     await mobile.goto(`${server.url}?${new URLSearchParams({ library: "private", workspace, name, kind: "artifact" })}`);
     const mobileItem = mobile.locator('.artifact-row[aria-current="true"]');
     await mobileItem.waitFor(); await mobileItem.click();
-    await mobile.getByRole("button", { name: "Move", exact: true }).click();
+    await mobile.getByRole("button", { name: "More actions", exact: true }).click(); await mobile.getByRole("menuitem", { name: "Move", exact: true }).click();
     await mobile.getByRole("form", { name: "Move between libraries" }).waitFor();
     expect(await mobile.getByRole("combobox", { name: "Library", exact: true }).isVisible()).toBe(true);
     expect(await mobile.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);

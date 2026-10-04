@@ -1,3 +1,5 @@
+import { Tabs } from "@base-ui/react/tabs";
+import { Menu } from "@base-ui/react/menu";
 import { ArtifactFolders } from "./folders";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -5,7 +7,7 @@ import { authClient, signInUrl } from "../auth/client-api";
 import type { GalleryArtifact, GalleryData } from "./types";
 import { ExecutionControls } from "./execution-controls";
 import { SecretControls } from "./secrets";
-import { AgentOnboarding, ArtifactSourcePanel, LinkSettings, ScriptPanel, liveRevisionLabel, type ScriptView } from "./hosted";
+import { AgentOnboarding, ArtifactSourcePanel, LinkSettings, ScriptPanel, type ScriptView } from "./hosted";
 import { artifactFileTransferUrl } from "../sdk/files";
 import { RemixPanel } from "./remix";
 import { Select } from "./select";
@@ -19,7 +21,7 @@ import { themeStyles } from "./theme";
 import { subscribeGallery } from "./subscription";
 
 type Scope = "current" | "all";
-type DetailTab = "preview" | "source" | "activity" | "requests" | "secrets";
+type DetailTab = "preview" | "source" | "schedule" | "requests" | "settings";
 type KindFilter = "all" | "artifact" | "script";
 type SourceState =
   | { status: "idle"; text: ""; error: "" }
@@ -109,28 +111,23 @@ const styles = `
   .library-footer summary { color: var(--muted); min-height: 24px; padding: 2px 0; }
   .library-footer p { margin: 6px 0; font-size: 12px; }
   .artifact-detail { display: flex; flex-direction: column; min-width: 0; min-height: 0; margin: 0 6px 6px 0; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
-  .detail-header { display: flex; gap: 16px; align-items: center; justify-content: space-between; padding: 10px 16px; flex-shrink: 0; flex-wrap: wrap; border-bottom: 1px solid var(--line); }
+  .detail-header { display: flex; gap: 16px; align-items: center; justify-content: space-between; padding: 10px 16px; flex-shrink: 0; flex-wrap: nowrap; border-bottom: 1px solid var(--line); }
   .detail-title { min-width: 0; flex: 1; }
   .detail-eyebrow { margin: 0 0 2px; color: var(--muted); font-size: 11px; }
-  .detail-title h1 { margin: 0; font-size: 15px; line-height: 1.3; font-weight: 600; letter-spacing: -.35px; overflow-wrap: anywhere; }
+  .detail-title h1 { margin: 0; font-size: 15px; line-height: 1.3; font-weight: 600; letter-spacing: -.35px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .detail-title h1:focus { outline: none; }
-  .detail-actions { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; justify-content: flex-end; }
+  .detail-actions { display: flex; align-items: center; gap: 4px; flex-wrap: nowrap; justify-content: flex-end; flex-shrink: 0; }
   .detail-actions > :is(button, a) { white-space: nowrap; }
   .download-link { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; min-height: 32px; line-height: 20px; padding: 5px 10px; border: 1px solid transparent; border-radius: 8px; text-decoration: none; }
-  .detail-actions .open-link { margin-left: 6px; background: var(--primary); color: var(--primary-text); }
-  .detail-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
-  .view-control { display: flex; align-items: center; gap: 2px; }
-  .view-control button { padding: 5px 10px; color: var(--muted); }
-  .view-control button[aria-pressed="true"] { color: var(--text); background: var(--raised); }
+  .detail-actions .open-link { margin-left: 6px; border-color: var(--line); }
+  .view-control { display: flex; align-items: center; gap: 2px; overflow-x: auto; min-width: 0; }
+  .view-control button { padding: 5px 10px; color: var(--muted); flex-shrink: 0; border-radius: 0; border-bottom: 2px solid transparent; height: 40px; }
+  .view-control button[data-active] { color: var(--text); border-bottom-color: var(--text); background: transparent; }
   .revision-control { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
   .version-select { width: 140px; max-width: 140px; }
   .version-select select { border-color: transparent; background: transparent; color: var(--text); }
   .detail-actions button[aria-expanded="true"] { background: var(--raised); }
-  .back-library, .mobile-more { display: none; }
-  .mobile-more { position: relative; }
-  .mobile-more summary { padding: 5px 10px; list-style: none; }
-  .mobile-more summary::-webkit-details-marker { display: none; }
-  .mobile-more .download-link { position: absolute; top: 100%; right: 0; min-width: 160px; background: var(--panel); border: 1px solid var(--line); z-index: 2; }
+  .back-library { display: none; }
   .detail-disclosure { flex-shrink: 0; max-height: 42vh; overflow: auto; background: var(--panel); border-bottom: 1px solid var(--line); }
   .link-settings, .script-fields { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
   .link-settings { padding: 12px 20px; }
@@ -219,13 +216,13 @@ const styles = `
     button:hover:not(:disabled), .download-link:hover { background: var(--raised); }
     .gallery-app button.primary-action:hover:not(:disabled) { background: var(--primary-hover); }
     .artifact-row[aria-current="true"]:hover { background: var(--selected); }
-    .detail-actions .open-link:hover, .gallery-app .new-script:hover { background: var(--primary-hover); }
-    .view-control button:hover:not([aria-pressed="true"]), .library-filters button:hover:not([aria-pressed="true"]) { color: var(--text); background: transparent; }
+    .gallery-app .new-script:hover { background: var(--primary-hover); }
+    .view-control button:hover:not([data-active]), .library-filters button:hover:not([aria-pressed="true"]) { color: var(--text); background: transparent; }
   }
   @media (max-width: 1100px) {
     .gallery-layout { grid-template-columns: 232px minmax(0, 1fr); }
     .wordmark { width: 200px; }
-    .detail-header { align-items: flex-start; gap: 10px; padding-inline: 16px; }
+    .detail-header { gap: 8px; padding-inline: 12px; }
     .detail-actions { max-width: 300px; }
     .revision-control > span:not(.select-control) { display: none; }
     .account-name { display: none; }
@@ -246,18 +243,18 @@ const styles = `
     .library-panel { border-right: 0; }
     .artifact-row { min-height: 44px; }
     .artifact-name { font-size: 14px; }
-    .back-library { display: inline-flex; align-self: flex-start; margin: 4px 4px 0; min-height: 36px; color: var(--muted); }
-    .detail-header { flex-direction: column; padding: 4px 12px 8px; }
-    .detail-actions { max-width: none; justify-content: flex-start; margin-left: -10px; }
-    .detail-title h1 { font-size: 19px; }
-    .detail-toolbar { gap: 4px; padding-inline: 4px; }
+    .back-library { display: inline-flex; padding: 0; width: 28px; flex-shrink: 0; color: var(--muted); }
+    .detail-header { padding: 4px 8px; gap: 4px; }
+    .detail-actions { max-width: none; }
+    .detail-title h1 { font-size: 13px; }
+    .detail-actions .open-link { display: none; }
+    .detail-header .view-control button { padding-inline: 6px; font-size: 12px; }
+    .detail-actions > button { padding-inline: 8px; }
     .version-select { width: 150px; max-width: 150px; }
     .version-select select { padding-left: 6px; }
     .view-control { gap: 0; }
     .view-control button { padding-inline: 8px; }
     .revision-control { min-width: 0; margin-left: auto; }
-    .desktop-download { display: none; }
-    .mobile-more { display: block; }
     .link-settings { padding: 12px; }
     .script-fields > :is(input, label, .select-control) { max-width: 100%; }
     .link-settings label { flex: 1; min-width: 0; }
@@ -268,6 +265,22 @@ const styles = `
     .source-code-status { padding-inline: 12px; }
     .source-code-status .editor-shortcuts { display: none; }
     .script-activity, .artifact-execution { padding: 12px; }
+  }
+  .more-actions { width: 32px; padding: 0; font-size: 24px; line-height: 1; }
+  .mobile-open { display: none !important; }
+  @media (max-width: 760px) { .mobile-open { display: block !important; } }
+  .action-menu { padding: 4px; min-width: 170px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--text); box-shadow: 0 8px 28px #0002; }
+  .action-menu [role=menuitem] { display: block; padding: 8px 12px; border-radius: 6px; text-decoration: none; cursor: pointer; }
+  .action-menu [data-highlighted] { background: var(--raised); outline: none; }
+  .settings-panel { width: 100%; overflow: auto; }
+  .settings-title { margin: 16px 20px 0; font-size: 15px; }
+  .schedule-summary { padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+  .schedule-summary h2, .run-history h2 { margin: 0 0 8px; font-size: 15px; }
+  .schedule-form { padding-block: 12px; }
+  .run-history { margin-top: 24px; overflow-x: auto; }
+  @media (max-width: 760px) {
+    .detail-actions { margin-left: 0; }
+    .revision-control { padding-bottom: 4px; }
   }
   @media (pointer: coarse) {
     button, input, select, .download-link, summary { height: auto; min-height: 44px; }
@@ -345,7 +358,7 @@ function App() {
   }, [theme]);
   const [remixing, setRemixing] = useState(false);
   const [creatingScript, setCreatingScript] = useState(false);
-  const [showNativeApps, setShowNativeApps] = useState(false);
+  const [showNativeApps, setShowNativeApps] = useState(() => new URLSearchParams(window.location.search).get("view") === "workers");
   const scope: Scope = "all";
   const [query, setQuery] = useState("");
   const [kindFilter, setKindFilter] = useState<KindFilter>("all");
@@ -362,7 +375,12 @@ function App() {
   const [gallery, setGallery] = useState<GalleryData | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [selectedVersion, setSelectedVersion] = useState<string | null>(null);
-  const [tab, setTab] = useState<DetailTab>("preview");
+  const [tab, setTab] = useState<DetailTab>(() => {
+    const value = new URLSearchParams(window.location.search).get("tab");
+    if (value === "activity") return "schedule";
+    if (value === "secrets") return "settings";
+    return ["preview", "source", "schedule", "requests", "settings"].includes(value ?? "") ? value as DetailTab : "preview";
+  });
   const [loading, setLoading] = useState(true);
   const [galleryError, setGalleryError] = useState("");
   const [source, setSource] = useState<SourceState>({ status: "idle", text: "", error: "" });
@@ -493,7 +511,7 @@ function App() {
 
   const activeTab: DetailTab = selectedArtifact?.kind === "script"
     ? tab === "preview" ? "source" : tab
-    : tab === "requests" || (tab === "secrets" && !gallery?.capabilities?.links) ? "preview" : tab;
+    : tab === "requests" || ((tab === "settings" || tab === "schedule") && !gallery?.capabilities?.links) ? "preview" : tab;
 
   const sortedVersions = useMemo(
     () => [...(selectedArtifact?.versions ?? [])].sort((left, right) => right.revision - left.revision),
@@ -642,6 +660,27 @@ function App() {
     }
   };
 
+  function workerDestination(open: boolean) {
+    if (open === showNativeApps) return;
+    const url = new URL(window.location.href);
+    if (open) url.searchParams.set("view", "workers");
+    else { url.searchParams.delete("view"); url.searchParams.delete("app"); url.searchParams.delete("appTab"); }
+    window.history.pushState(null, "", url);
+    setShowNativeApps(open);
+  }
+  useEffect(() => {
+    // Worker apps can restore the URL when browser navigation would discard a draft.
+    const navigate = () => window.setTimeout(() => setShowNativeApps(new URLSearchParams(window.location.search).get("view") === "workers"), 0);
+    window.addEventListener("popstate", navigate);
+    return () => window.removeEventListener("popstate", navigate);
+  }, []);
+  useEffect(() => {
+    if (showNativeApps) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set("tab", activeTab);
+    window.history.replaceState(null, "", url);
+  }, [activeTab, showNativeApps]);
+
   const downloadSource = async (event: React.MouseEvent<HTMLAnchorElement>) => {
     if (!user) return;
     event.preventDefault();
@@ -670,27 +709,27 @@ function App() {
           {gallery?.workspace ? <span className="header-context" title={gallery.workspace}>{gallery.workspace.split(/[\\/]/).filter(Boolean).at(-1) ?? gallery.workspace}</span> : null}
           <div className="header-actions">
             <button className="theme-toggle" type="button" title={`Switch to ${theme === "light" ? "dark" : "light"} theme`} aria-label={`Switch to ${theme === "light" ? "dark" : "light"} theme`} onClick={() => setTheme(theme === "light" ? "dark" : "light")}><span className={`theme-icon ${theme === "light" ? "moon" : "sun"}`} aria-hidden="true" /></button>
-            {gallery?.capabilities?.nativeApps ? <button type="button" onClick={() => setShowNativeApps(true)}>Worker apps</button> : null}
-            <button type="button" onClick={() => { setShowImport(true); setCreatingScript(false); setMobileDetail(true); }}>Import project</button>
+            {gallery?.capabilities?.nativeApps ? <button type="button" aria-current={showNativeApps ? "page" : undefined} onClick={() => workerDestination(true)}>Worker apps</button> : null}
+            <button hidden={showNativeApps} type="button" onClick={() => { setShowImport(true); setCreatingScript(false); setMobileDetail(true); }}>Import project</button>
             {gallery?.libraryScope ? <Select aria-label="Library" value={gallery.libraryScope} onChange={event => {
               if (!confirmLeavingDrafts(drafts)) return;
               const url = new URL(window.location.href);
               url.searchParams.set("library", event.target.value);
               window.location.assign(url.href);
             }}><option value="private">Personal library</option><option value="team">Team library</option></Select> : null}
-            {gallery?.capabilities?.scripts ? <button className="new-script" onClick={() => { setCreatingScript(true); setRemixing(false); setShowLinks(false); setShowMove(false); setMobileDetail(true); }}><span aria-hidden="true">+</span>New script</button> : null}
+            {gallery?.capabilities?.scripts ? <button hidden={showNativeApps} className="new-script" onClick={() => { setCreatingScript(true); setRemixing(false); setShowLinks(false); setShowMove(false); setMobileDetail(true); }}><span aria-hidden="true">+</span>New script</button> : null}
             {user ? <div className="account">
               <span className="account-name" title={user.email}>{user.name}</span>
               <button type="button" disabled={signingOut} onClick={() => void signOut()}>{signingOut ? "Signing out…" : "Sign out"}</button>
             </div> : null}
           </div>
         </header>
-        {showNativeApps ? <NativeAppsPanel workspace={gallery?.workspace ?? "default"} onClose={() => setShowNativeApps(false)} /> : null}
+        {showNativeApps && gallery ? <NativeAppsPanel workspace={gallery?.workspace ?? "default"} onClose={() => workerDestination(false)} /> : null}
 
         {galleryError && gallery ? <p role="alert" className="refresh-error error-message">Refresh failed: {galleryError}. Showing the last loaded files.</p> : null}
         {accountError ? <p role="alert" className="refresh-error error-message">{accountError}</p> : null}
 
-        <div className="gallery-layout">
+        <div className="gallery-layout" hidden={showNativeApps}>
           <aside ref={libraryPanel} className="library-panel" hidden={narrowLayout && mobileDetail} aria-label={gallery?.capabilities?.scripts ? "Artifacts and scripts" : "Artifacts"}>
             {!liveConnected ? <p className="connection-status" role="status">Reconnecting to live updates…</p> : null}
             <div className="library-search">
@@ -730,35 +769,43 @@ function App() {
             </div>
           </aside>
 
-          <div className="artifact-detail" hidden={narrowLayout && !mobileDetail}>
-            <button className="back-library" type="button" onClick={() => setMobileDetail(false)} aria-label="Back to library"><span aria-hidden="true">←&nbsp;</span> Library</button>
+          <Tabs.Root value={activeTab} onValueChange={value => setTab(value as DetailTab)} className="artifact-detail" hidden={narrowLayout && !mobileDetail}>
             <div className="detail-header">
+              <button className="back-library" type="button" onClick={() => setMobileDetail(false)} aria-label="Back to library"><span aria-hidden="true">←</span></button>
               <div className="detail-title">
                 <h1 ref={detailHeading} tabIndex={-1}>{creatingScript ? "New script" : selectedArtifact?.name ?? "Your artifacts"}</h1>
-                {!creatingScript && selectedArtifact && gallery?.capabilities?.links ? <p className="deployment-status" role="status">
-                  {liveRevisionLabel(selectedArtifact)}
-                  {drafts.get(`${selectedArtifact.key}:working`)?.dirty ? " · Unsaved changes" : selectedArtifact.live && (drafts.get(`${selectedArtifact.key}:working`)?.content.revision_token ?? selectedArtifact.draftRevision) !== selectedArtifact.live.revision_token ? " · Saved draft; live revision unchanged" : ""}
-                </p> : null}
               </div>
-            {!creatingScript && selectedArtifact && resolvedVersion ? <div className="detail-toolbar">
-              <div className="view-control" role="group" aria-label={selectedArtifact.kind === "script" ? "Script view" : "Artifact view"}>
+            {!creatingScript && selectedArtifact && resolvedVersion ? <>
+              <Tabs.List className="view-control" activateOnFocus aria-label={selectedArtifact.kind === "script" ? "Script view" : "Artifact view"}>
                 {(selectedArtifact.kind === "script"
-                  ? [["source", "Source"], ["requests", "Requests"], ["activity", "Activity"], ["secrets", "Secrets"]] as const
-                  : [["preview", "Preview"], ["source", "Source"], ...(gallery?.capabilities?.links ? [["activity", "Activity"], ["secrets", "Secrets"]] as const : [])] as const
-                ).map(([value, label]) => <button key={value} type="button" aria-pressed={activeTab === value} aria-controls="artifact-panel" onClick={() => setTab(value)}>{label}</button>)}
-              </div>
-              <label className="revision-control"><Select className="version-select" aria-label="Version" value={resolvedVersion} onChange={event => setSelectedVersion(event.target.value)}>
-                {selectedArtifact.working ? <option value={WORKING_VERSION}>Working copy</option> : null}
-                {sortedVersions.map(version => <option key={version.id} value={version.id}>Revision {version.revision} · {formatDate(version.createdAt)}</option>)}
-              </Select></label>
-            </div> : null}
+                  ? [["source", "Source"], ["requests", "Requests"]] as const
+                  : [["preview", "Preview"], ["source", "Source"]] as const
+                ).map(([value, label]) => <Tabs.Tab key={value} value={value}>{label}</Tabs.Tab>)}
+              </Tabs.List>
+            </> : null}
               {!creatingScript && selectedArtifact && resolvedVersion ? <div className="detail-actions">
                 <button className="primary-action" type="button" aria-expanded={showLinks} aria-controls="link-settings-panel" onClick={() => setShowLinks(value => !value)}>Share</button>
-                {gallery?.capabilities?.moves && gallery.libraryScope ? <button type="button" aria-expanded={showMove} aria-controls="library-move-panel" onClick={() => { setShowMove(value => !value); setShowLinks(false); setRemixing(false); }}>Move</button> : null}
-                <button type="button" onClick={() => setRemixing(value => !value)} aria-expanded={remixing}>Remix</button>
-                <a className="download-link desktop-download" href={exportUrl} download onClick={downloadSource} title="Download source, supporting files, and dependencies; unsaved edits are not included">Download</a>
-                <details className="mobile-more"><summary aria-label="More actions">More</summary><a className="download-link" href={exportUrl} download onClick={downloadSource}>Download</a></details>
                 {selectedArtifact.kind !== "script" && selectedArtifact.url ? <a className="download-link open-link" href={selectedArtifact.url} target="_blank" rel="noopener noreferrer">Open<span aria-hidden="true">↗</span></a> : null}
+                <Menu.Root>
+                  <Menu.Trigger className="more-actions" aria-label="More actions"><span aria-hidden="true">⋮</span></Menu.Trigger>
+                  <Menu.Portal><Menu.Positioner sideOffset={6} align="end"><Menu.Popup className="action-menu">
+                    {gallery?.capabilities?.links ? <>
+                      <Menu.Item onClick={() => { setTab("schedule"); setShowLinks(false); setShowMove(false); setRemixing(false); }}>Schedule</Menu.Item>
+                      <Menu.Item onClick={() => { setTab("settings"); setShowLinks(false); setShowMove(false); setRemixing(false); }}>Settings</Menu.Item>
+                    </> : null}
+                    <Menu.SubmenuRoot>
+                      <Menu.SubmenuTrigger>Versions <span aria-hidden="true">›</span></Menu.SubmenuTrigger>
+                      <Menu.Portal><Menu.Positioner sideOffset={4}><Menu.Popup className="action-menu">
+                        {selectedArtifact.working ? <Menu.Item onClick={() => setSelectedVersion(WORKING_VERSION)}>Working copy</Menu.Item> : null}
+                        {sortedVersions.map(version => <Menu.Item key={version.id} onClick={() => setSelectedVersion(version.id)}>Revision {version.revision} · {formatDate(version.createdAt)}</Menu.Item>)}
+                      </Menu.Popup></Menu.Positioner></Menu.Portal>
+                    </Menu.SubmenuRoot>
+                    {gallery?.capabilities?.moves && gallery.libraryScope ? <Menu.Item onClick={() => { setShowMove(true); setShowLinks(false); setRemixing(false); }}>Move</Menu.Item> : null}
+                    <Menu.Item onClick={() => { setRemixing(true); setShowMove(false); setShowLinks(false); }}>Remix</Menu.Item>
+                    {selectedArtifact.kind !== "script" && selectedArtifact.url ? <Menu.Item className="mobile-open" render={<a href={selectedArtifact.url} target="_blank" rel="noopener noreferrer" />}>Open</Menu.Item> : null}
+                    <Menu.Item render={<a href={exportUrl} download onClick={downloadSource} />}>Download</Menu.Item>
+                  </Menu.Popup></Menu.Positioner></Menu.Portal>
+                </Menu.Root>
               </div> : null}
             </div>
             {showImport && gallery ? <div className="detail-disclosure"><ProjectImportPanel workspace={gallery.workspace} hosted={!!gallery.capabilities?.links} onCancel={() => setShowImport(false)} onSaved={async (name, kind) => { createdRemix.current = { name, kind, workspace: gallery.workspace }; await loadGallery(); setSelectedVersion("working"); setTab("source"); setQuery(""); setKindFilter("all"); }} /></div> : null}
@@ -767,7 +814,7 @@ function App() {
             {showMove && !creatingScript && selectedArtifact && gallery?.libraryScope && gallery.capabilities?.moves ? <div id="library-move-panel" className="detail-disclosure"><MovePanel key={selectedArtifact.key} artifact={selectedArtifact} library={gallery.libraryScope} onCancel={() => setShowMove(false)} /></div> : null}
             {remixing && !creatingScript && selectedArtifact && resolvedVersion ? <div className="detail-disclosure"><RemixPanel key={selectedArtifact.key + resolvedVersion} artifact={selectedArtifact} version={resolvedVersion} onCancel={() => setRemixing(false)} onSaved={async name => { createdRemix.current = {name, workspace:selectedArtifact.workspace, kind:selectedArtifact.kind ?? "artifact"}; await loadGallery(); setSelectedVersion("working"); setQuery(""); setKindFilter("all"); setRemixing(false); }} /></div> : null}
             {!creatingScript && selectedArtifact && resolvedVersion ? <div id="link-settings-panel" className="detail-disclosure" hidden={!showLinks}><LinkSettings key={selectedArtifact.key} artifact={selectedArtifact} localUrl={gallery?.capabilities?.links ? undefined : localShareUrl} onSaved={loadGallery} /></div> : null}
-            <section id="artifact-panel" className="artifact-stage" aria-label={selectedArtifact?.kind === "script" || creatingScript ? "Script editor" : activeTab === "preview" ? "Artifact preview" : activeTab === "activity" ? "Artifact activity" : activeTab === "secrets" ? "Artifact secrets" : "Artifact source"}>
+            <Tabs.Panel value={activeTab} id="artifact-panel" className="artifact-stage" aria-label={selectedArtifact?.kind === "script" || creatingScript ? "Script editor" : activeTab === "preview" ? "Artifact preview" : activeTab === "schedule" ? "Artifact schedule" : activeTab === "settings" ? "Artifact settings" : "Artifact source"}>
               {creatingScript ? <ScriptPanel key="new-script" workspace={gallery?.workspace ?? "default"} onCancel={() => setCreatingScript(false)} onSaved={async name => { createdScriptName.current = name; await loadGallery(); setCreatingScript(false); setSelectedVersion("working"); setTab("source"); setQuery(""); setKindFilter("all"); }} />
                 : selectedArtifact?.kind === "script" ? <ScriptPanel key={`${selectedArtifact.key}:${resolvedVersion}`} artifact={selectedArtifact} workspace={selectedArtifact.workspace} version={resolvedVersion ?? undefined} view={activeTab as ScriptView} sourceUrl={resolvedVersion ? artifactUrl("/api/source", selectedArtifact, resolvedVersion) : undefined} onSaved={async () => { setSelectedVersion("working"); await loadGallery(); }} />
                 : !selectedArtifact && !loading && gallery?.capabilities?.links ? <AgentOnboarding workspace={gallery.workspace} />
@@ -784,11 +831,11 @@ function App() {
                       : source.status === "error" ? <p role="alert" className="state-message error-message">{source.error}</p>
                       : <p className="state-message" role="status">Loading source…</p>}
                   </div> : null}
-                  {gallery?.capabilities?.links ? <div hidden={activeTab !== "secrets"}><SecretControls key={selectedArtifact.key + "secrets"} workspace={selectedArtifact.workspace} name={selectedArtifact.name} kind="artifact" /></div> : null}
-                  {gallery?.capabilities?.links ? <div id="execution-panel" className="artifact-execution" hidden={activeTab !== "activity"}><ExecutionControls key={selectedArtifact.key + "execution"} workspace={selectedArtifact.workspace} name={selectedArtifact.name} kind="artifact" /></div> : null}
+                  {gallery?.capabilities?.links ? <div className="settings-panel" hidden={activeTab !== "settings"}><h2 className="settings-title">Secrets</h2><SecretControls key={selectedArtifact.key + "secrets"} workspace={selectedArtifact.workspace} name={selectedArtifact.name} kind="artifact" /></div> : null}
+                  {gallery?.capabilities?.links ? <div id="execution-panel" className="artifact-execution" hidden={activeTab !== "schedule"}><ExecutionControls key={selectedArtifact.key + "execution"} workspace={selectedArtifact.workspace} name={selectedArtifact.name} kind="artifact" active={activeTab === "schedule"} /></div> : null}
                 </>}
-            </section>
-          </div>
+            </Tabs.Panel>
+          </Tabs.Root>
         </div>
       </main>
     </>
