@@ -12,6 +12,13 @@ let runtime: Miniflare;
 let runtimeOptions: ConstructorParameters<typeof Miniflare>[0];
 let client: Client;
 let origin: string;
+// Compilation pauses can outlive the local server's idle connections. Avoid
+// reusing those sockets in both direct requests and the MCP transport.
+const fetch = (input: string | URL | Request, init: RequestInit = {}) => {
+  const headers = new Headers(init.headers ?? (input instanceof Request ? input.headers : undefined));
+  headers.set("Connection", "close");
+  return globalThis.fetch(input, { ...init, headers });
+};
 const source = 'import { Button, H1, Stack, useArtifactState } from "sidequery/artifacts";\nexport default function Artifact() { const [n, setN] = useArtifactState("n", 0); return <Stack><H1>Hosted artifact</H1><Button onClick={() => setN(n+1)}>Count {n}</Button></Stack>; }\n';
 const counterClient = await readFile(new URL("../examples/counter.artifact.tsx", import.meta.url), "utf8");
 const counterServer = await readFile(new URL("../examples/counter.artifact.server.ts", import.meta.url), "utf8");
@@ -55,7 +62,7 @@ beforeAll(async () => {
   runtime = new Miniflare(runtimeOptions);
   origin = (await runtime.ready).origin;
   client = new Client({ name: "artifact-integration", version: "1" });
-  await client.connect(new StreamableHTTPClientTransport(new URL(`${origin}/mcp?workspace=test`)));
+  await client.connect(new StreamableHTTPClientTransport(new URL(`${origin}/mcp?workspace=test`), { fetch }));
 }, 30000);
 afterAll(async () => { await client?.close(); await runtime?.dispose(); });
 
@@ -209,7 +216,7 @@ test("native artifact SQLite works through MCP and the gallery, persists across 
   expect((await callCounter("GET", "other-counter")).value).toBe(0);
   const otherWorkspace = new Client({ name: "other-workspace", version: "1" });
   try {
-    await otherWorkspace.connect(new StreamableHTTPClientTransport(new URL(`${origin}/mcp?workspace=other`)));
+    await otherWorkspace.connect(new StreamableHTTPClientTransport(new URL(`${origin}/mcp?workspace=other`), { fetch }));
     expect((await otherWorkspace.callTool({ name: "artifact_write", arguments: { name: "counter", contents: counterClient, server: counterServer } })).isError).not.toBe(true);
     const isolated = await otherWorkspace.callTool({ name: "artifact_request", arguments: { name: "counter", request: { path: "/counter" } } });
     expect(isolated.isError).not.toBe(true);
@@ -231,13 +238,13 @@ test("native artifact SQLite works through MCP and the gallery, persists across 
   try {
     const page = await browser.newPage();
     await page.goto(`${origin}/?workspace=test`);
-    await page.getByRole("button", { name: "counter", exact: true }).click();
+    await page.getByRole("button", { name: "counter", exact: true }).and(page.getByTitle("test/counter", { exact: true })).click();
     const frame = page.frameLocator("iframe");
     await frame.getByText("Count: 2", { exact: true }).waitFor();
     await frame.getByRole("button", { name: "Increment" }).click();
     await frame.getByText("Count: 3", { exact: true }).waitFor();
     await page.reload();
-    await page.getByRole("button", { name: "counter", exact: true }).click();
+    await page.getByRole("button", { name: "counter", exact: true }).and(page.getByTitle("test/counter", { exact: true })).click();
     await page.frameLocator("iframe").getByText("Count: 3", { exact: true }).waitFor();
   } finally { await browser.close(); }
 }, 60000);
@@ -270,7 +277,12 @@ test("gallery renders interactive sandboxed previews and serves exact archived s
     await frame.getByRole("button", { name: "Count 1" }).waitFor();
     expect(await page.locator("iframe").getAttribute("sandbox")).toBe("allow-scripts");
     expect(errors).toEqual([]);
-    expect(pages).toEqual([0, 100]);
+    // Opening the live subscription reconciles the gallery again. Each refresh
+    // must still consume both pages, even when the item is already selected.
+    expect(pages.slice(0, 2)).toEqual([0, 100]);
+    for (let index = 0; index < pages.length; index++) {
+      expect(pages[index]).toBe(index % 2 === 0 ? 0 : 100);
+    }
   } finally { await browser.close(); }
 }, 60000);
 
@@ -291,13 +303,6 @@ test("all hosted surfaces fail closed off loopback, and mutations enforce origin
 });
 
 test("verified users have isolated private libraries and can collaborate in the team library", async () => {
-  // Compilation pauses can outlive the local server's idle connections. Avoid
-  // reusing those sockets in both direct requests and the MCP transport.
-  const fetch = (input: string | URL | Request, init: RequestInit = {}) => {
-    const headers = new Headers(init.headers ?? (input instanceof Request ? input.headers : undefined));
-    headers.set("Connection", "close");
-    return globalThis.fetch(input, { ...init, headers });
-  };
   const { generateKeyPair, exportJWK, SignJWT } = await import("jose");
   const { Response: RuntimeResponse } = await import("miniflare");
   const keys = await generateKeyPair("RS256", { extractable: true });

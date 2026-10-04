@@ -4,6 +4,10 @@ node_modules
 *.log
 .DS_Store
 .agents
+.celld
+.wrangler
+.dev.vars
+.dev.vars.*
 .env
 .env.*
 artifacts

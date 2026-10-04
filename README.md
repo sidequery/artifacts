@@ -54,6 +54,54 @@ Use `artifacts host install` to enable startup at login. See the
 
 ## Deploy
 
+### Docker
+
+The image at `ghcr.io/sidequery/artifacts:latest` supports Linux amd64 and arm64.
+It runs celld directly, with the application and native esbuild already included.
+Bun is used only during the build. The final distroless image has no Bun, Node,
+shell, package manager, or `node_modules` directory and runs as UID/GID 65532.
+
+```sh
+docker run -d --name artifacts --restart unless-stopped \
+  --stop-timeout 60 \
+  -p 127.0.0.1:4786:4786 \
+  -v artifacts-data:/app/.celld \
+  ghcr.io/sidequery/artifacts:latest
+```
+
+Open [localhost:4786](http://127.0.0.1:4786); the MCP endpoint is
+`http://127.0.0.1:4786/mcp`. The named volume preserves apps, databases, files,
+and schedules across container replacements. Stop the container before backing
+up the volume. Allow 60 seconds for graceful shutdown.
+
+The default command runs single-machine `celld dev` with authentication disabled,
+so the example publishes the port on loopback only. For network access, configure
+[authentication](docs/authentication.md#configure-celld) in a custom Wrangler
+config and mount it at `/app/wrangler.jsonc` (read-only), keeping the image's
+`main` and assets paths. Set `ENVIRONMENT` to `production`; environment variables
+passed with `docker -e` do not replace Wrangler `vars`. For bucket-backed nodes,
+follow the [celld deployment guide](docs/celld-deployment.md). Arguments after the
+image name are passed directly to celld; for example, `--help` lists commands.
+
+Build and test locally:
+
+```sh
+docker build -t artifacts:local .
+bun install --frozen-lockfile
+ARTIFACTS_DOCKER_IMAGE=artifacts:local bun test scripts/docker.integration.test.ts
+```
+
+CI builds and tests both image architectures on pushes and pull requests. Image
+publishing waits for the application, executable, and Docker checks to pass. Pushes
+to `main` publish `latest` and `sha-<full-commit>`; `v*` tags publish the matching
+tag and commit tag. Pin a commit tag or image digest for repeatable deployments.
+The package is public; CI checks anonymous access and fails if the
+image is private. When publishing under a different package name, a package
+administrator must set its visibility to **Public** in GitHub package settings
+after the first push.
+
+### Cloudflare and celld fleets
+
 Configure sign-in before using a network deployment. The
 [authentication guide](docs/authentication.md) covers provider setup, Cloudflare
 Access, MCP OAuth, and troubleshooting. The default local host needs no sign-in.
@@ -177,4 +225,5 @@ bun run test:cloudflare
 Browser tests require `bun x playwright install chromium`. Additional suites cover
 [MCP Apps and Herdr](docs/local-workspace.md#development-checks), celld
 (`bun run test:celld`), and package installation (`bun run test:package`).
-The root Dockerfile is an integration-test environment.
+`e2e/Dockerfile` is the Herdr integration-test environment; the root Dockerfile
+builds the standalone celld image.

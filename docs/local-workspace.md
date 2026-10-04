@@ -251,9 +251,9 @@ that the pane is owned by `herdr.artifacts`, and proves its server stops when th
 pane closes.
 
 GitHub Actions runs the typecheck and unit/service suite with Bun 1.4.0.
-The root Dockerfile is an integration-test environment, not a production image.
+`e2e/Dockerfile` is the Herdr integration-test environment. The root Dockerfile
+builds the standalone celld image.
 `bun run test:mcp-ui` exercises the real artifact in Chromium with an MCP Apps host.
 Install its browser first with `bun x playwright install chromium`. CI runs this
 browser suite, the unit/service suite, and a clean tarball install that exercises
 the installed CLI, gallery, compilation, and stdio MCP server.
-
