@@ -161,7 +161,7 @@ export class CloudArtifactService {
         const snapshot = await this.snapshot(args as { name?: string; version_id?: string; event_id?: string });
         const preview = await this.preview(snapshot);
         const { _meta, ...payload } = preview;
-        return { ...text(payload, !preview.ok), structuredContent: payload, ...(_meta ? { _meta } : {}) };
+        return { ...text(payload, !preview.ok), structuredContent: { ...payload, ...(name === "artifacts_preview" && _meta?.artifact ? { appPreview: _meta.artifact } : {}) }, ...(_meta ? { _meta } : {}) };
       }
       case "artifact_schedule":
       case "artifact_runs": {

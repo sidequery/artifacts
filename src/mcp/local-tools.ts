@@ -85,7 +85,7 @@ async function callTool(
   }
   if (name === "artifacts_preview") {
     if (args.workspace !== undefined && args.workspace !== service.artifactsDir) throw new Error("artifact is outside this workspace");
-    return previewResult(await artifactAppResult(service, args as { name?: string; version_id?: string }));
+    return previewResult(await artifactAppResult(service, args as { name?: string; version_id?: string; event_id?: string }), true);
   }
   const deliver = args.preview !== false && (appClients.get(service) ?? true);
   if (args.preview !== undefined && typeof args.preview !== "boolean") throw new Error("preview must be a boolean");
@@ -155,9 +155,9 @@ async function callTool(
   throw new Error(`unknown tool: ${name}`);
 }
 
-function previewResult(result: Awaited<ReturnType<typeof artifactAppResult>>) {
+function previewResult(result: Awaited<ReturnType<typeof artifactAppResult>>, forApp = false) {
   const { _meta, ...payload } = result;
-  return { ...text(`${result.check}\n\n${JSON.stringify(payload, null, 2)}`, !result.ok), structuredContent: payload, ...(_meta ? { _meta } : {}) };
+  return { ...text(`${result.check}\n\n${JSON.stringify(payload, null, 2)}`, !result.ok), structuredContent: { ...payload, ...(forApp && _meta?.artifact ? { appPreview: _meta.artifact } : {}) }, ...(_meta ? { _meta } : {}) };
 }
 
 async function withPreview(service: ArtifactService, result: { ok: boolean; check: string; [key: string]: unknown }, selection: { name: string }, deliver = true) {

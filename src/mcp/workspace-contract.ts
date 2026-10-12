@@ -48,7 +48,7 @@ export const ARTIFACTS_WORKSPACE_TOOLS = [
   {
     name: "artifacts_preview", description: "Open an accessible React artifact revision in the working view. Does not change source or live data.",
     annotations: readOnly, _meta: { ui },
-    inputSchema: { type: "object", properties: { name: { type: "string", minLength: 1 }, workspace: { type: "string", minLength: 1 }, version_id: { type: "string", minLength: 1 } }, oneOf: [{ required: ["name"] }, { required: ["version_id"] }], additionalProperties: false },
+    inputSchema: { type: "object", properties: { name: { type: "string", minLength: 1 }, workspace: { type: "string", minLength: 1 }, version_id: { type: "string", minLength: 1 }, event_id: { type: "string", minLength: 1 } }, oneOf: [{ required: ["name"] }, { required: ["version_id"] }], additionalProperties: false },
   },
   {
     name: "artifacts_mentions", description: "Search accessible artifact and script projects for composer mentions.",
@@ -82,7 +82,7 @@ export function parseArtifactResourceUri(uri: string) {
 export function workspaceResult(payload: ArtifactWorkspacePayload) {
   return {
     content: [{ type: "text" as const, text: JSON.stringify({ workspace: payload.workspace, artifacts: payload.items, next_offset: payload.nextOffset }) }],
-    structuredContent: { workspace: payload.workspace, artifacts: payload.items, next_offset: payload.nextOffset },
+    structuredContent: { workspace: payload.workspace, artifacts: payload.items, next_offset: payload.nextOffset, appWorkspace: payload },
     _meta: { workspace: payload },
   };
 }

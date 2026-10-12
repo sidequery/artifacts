@@ -79,7 +79,12 @@ export class ManagedArtifactService {
     if (name === "artifacts_tool") return galleryAction(this, args);
     if (name === "artifacts_source") return gallerySource(this, args);
     if (["artifacts_library", "artifacts_working", "artifacts_search", "artifacts_mentions"].includes(name)) return workspaceTool(this, name, args);
-    if (name === "artifacts_preview") name = "artifact_open";
+    if (name === "artifacts_preview") {
+      // Hosts may strip _meta before the MCP App sees it; mirror the preview payload.
+      const opened = await this.callTool("artifact_open", args);
+      const artifact = opened._meta?.artifact;
+      return artifact ? { ...opened, structuredContent: { ...opened.structuredContent, appPreview: artifact } } : opened;
+    }
     if (name.startsWith("app_")) return this.nativeTool(name, args);
     if (["artifact_guide", "script_guide", "plugins_list", "plugin_guide", "artifact_plugin_call"].includes(name)) return this.physical({ libraryKey: this.libraryKey, workspace: this.workspace }).callTool(name, args);
     const kind = name.startsWith("script_") ? "script" : name === "artifact_link" ? args.kind as "artifact" | "script" : "artifact";

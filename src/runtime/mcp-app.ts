@@ -208,6 +208,9 @@ function clear() {
   updateDisplay();
 }
 
+type CompactSelection = { versionId?: string; eventId?: string; workspace?: string };
+type CompactToolResult = { artifact?: CompactSelection; preview?: { artifact?: CompactSelection }; appPreview?: ArtifactAppPayload; appWorkspace?: ArtifactWorkspacePayload };
+
 async function openSelection(selection: ArtifactSelection) {
   if (fileEditor?.hasUnsavedChanges()) throw new Error("Save or discard the file draft before opening another view.");
   if (!host.capabilities().serverTools) throw new Error("Browsing artifacts is unavailable in this host.");
@@ -368,12 +371,20 @@ app.ontoolresult = result => {
   if (result.structuredContent?.file && !result.isError) return;
   ++opening;
   if (result.isError) { status.textContent = result.content?.filter(item => item.type === "text").map(item => item.text).join("\n") || "Artifact could not be rendered."; return; }
-  const artifact = result._meta?.artifact as ArtifactAppPayload | undefined;
+  // Some hosts strip private _meta before forwarding results; fall back to the
+  // structuredContent mirrors, or reopen a compact selection through the server.
+  const compact = result.structuredContent as CompactToolResult | undefined;
+  const artifact = (result._meta?.artifact ?? compact?.appPreview) as ArtifactAppPayload | undefined;
   if (artifact?.js) {
     if (workspaceView) { workspaceView.refresh(); return; }
     renderArtifact(artifact); return;
   }
-  const workspace = result._meta?.workspace as ArtifactWorkspacePayload | undefined;
+  const selected = compact?.artifact ?? compact?.preview?.artifact;
+  if (selected?.versionId && host.capabilities().serverTools) {
+    void openSelection({ workspace: selected.workspace, version_id: selected.versionId, event_id: selected.eventId }).catch(error => { status.textContent = String(error); });
+    return;
+  }
+  const workspace = (result._meta?.workspace ?? compact?.appWorkspace) as ArtifactWorkspacePayload | undefined;
   if (workspace) {
     if (workspaceView && lastWorkspace?.view === workspace.view) workspaceView.refresh();
     else showWorkspace(workspace);
