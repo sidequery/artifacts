@@ -304,7 +304,12 @@ export class CelldFleetOperator {
       `${prefix}/deploy/current.json`,
     );
     if (!pointer) throw new Error("celld candidate pointer is missing");
-    const keys = await this.store.keys(`${prefix}/deploy/`);
+    // celld stores asset bodies outside deploy/. Copy them before the index
+    // and manifest so the published pointer only names complete deployments.
+    const keys = [
+      ...(await this.store.keys(`${prefix}/deploy-blobs/`)),
+      ...(await this.store.keys(`${prefix}/deploy/`)),
+    ];
     for (const key of keys) {
       const target = key.slice(prefix.length + 1);
       if (
