@@ -165,6 +165,33 @@ celldTest("gallery subscriptions deliver MCP writes on celld and reconnect after
   } finally { reconnected.close(); }
 }, 120_000);
 
+celldTest("gallery HTTP events deliver changes on celld without a public WebSocket upgrade", async () => {
+  const abort = new AbortController();
+  const response = await fetch(`${baseUrl}/api/gallery/events`, { signal: abort.signal });
+  expect(response.status).toBe(200);
+  expect(response.headers.get("content-type")).toBe("text/event-stream");
+  const reader = response.body!.pipeThrough(new TextDecoderStream()).getReader();
+  async function receive(value: string) {
+    let received = "";
+    while (!received.includes(`data: ${value}\n\n`)) {
+      const chunk = await reader.read();
+      if (chunk.done) throw new Error("Live event stream ended");
+      received += chunk.value;
+    }
+  }
+  try {
+    await receive("ready");
+    const changed = receive("changed");
+    await withClient(async client => {
+      const result = await client.callTool({ name: "script_write", arguments: { name: "http-live-gallery", contents: 'export default { fetch() { return new Response("hello"); } };' } });
+      expect(result.isError, JSON.stringify(result.content)).not.toBe(true);
+    });
+    await changed;
+    const denied = await fetch(`${baseUrl}/api/gallery/events`, { headers: { Origin: "https://untrusted.example" } });
+    expect(denied.status).toBe(403);
+  } finally { abort.abort(); await reader.cancel().catch(() => {}); }
+}, 30_000);
+
 celldTest("runs native artifact SQLite and KV across code update and celld restart", async () => {
   await withClient(async client => {
     await write(client, serverV1);

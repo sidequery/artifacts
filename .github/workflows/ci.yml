@@ -41,6 +41,13 @@ jobs:
       - run: CELLD_PACKAGE_INTEGRATION=1 bun run test:package:prebuilt
       - run: bun run test:celld
       - run: NATIVE_WORKER_CELLD=1 bun test scripts/native-worker cloudflare/native-worker.test.ts --timeout 180000
+      - name: Test native Worker apps on a two-node celld fleet
+        run: |
+          docker run --rm -d --name artifacts-fleet-test-s3 -p 127.0.0.1:5117:9000 \
+            -e MINIO_ROOT_USER=artifacts-fixture -e MINIO_ROOT_PASSWORD=artifacts-fixture-secret \
+            cgr.dev/chainguard/minio:latest server /data --address :9000
+          trap 'docker stop artifacts-fleet-test-s3' EXIT
+          NATIVE_WORKER_FLEET=1 bun test scripts/native-worker/fleet.test.ts --timeout 240000
 
   executable:
     strategy:
@@ -97,11 +104,31 @@ jobs:
         env:
           ARTIFACTS_DOCKER_IMAGE: artifacts:test
         run: bun test scripts/docker.integration.test.ts --timeout 240000
+      - name: Build fleet publisher
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: fleet-operator
+          platforms: ${{ matrix.platform }}
+          load: true
+          tags: artifacts:fleet-test
+          cache-from: type=gha,scope=docker-${{ matrix.arch }}
+      - name: Test authenticated host release command
+        env:
+          FLEET_OPERATOR_DOCKER_IMAGE: artifacts:fleet-test
+        run: bun test scripts/native-worker/fleet-image.test.ts --timeout 30000
 
   docker-publish:
     needs: [check, executable, docker-test]
     if: github.repository == 'sidequery/artifacts' && github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        include:
+          - target: runtime
+            prefix: ""
+          - target: fleet-operator
+            prefix: fleet-
     timeout-minutes: 30
     permissions:
       contents: read
@@ -121,6 +148,7 @@ jobs:
         id: metadata
         with:
           images: ghcr.io/sidequery/artifacts
+          flavor: prefix=${{ matrix.prefix }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,format=long
@@ -128,6 +156,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
+          target: ${{ matrix.target }}
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.metadata.outputs.tags }}
@@ -137,7 +166,7 @@ jobs:
             type=gha,scope=docker-arm64
       - name: Verify anonymous access
         env:
-          IMAGE: ghcr.io/sidequery/artifacts:sha-${{ github.sha }}
+          IMAGE: ghcr.io/sidequery/artifacts:${{ matrix.prefix }}sha-${{ github.sha }}
         run: |
           mkdir -p "$RUNNER_TEMP/public-docker"
           docker --config "$RUNNER_TEMP/public-docker" manifest inspect "$IMAGE" > /dev/null || {

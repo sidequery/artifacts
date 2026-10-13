@@ -68,6 +68,12 @@ Set controller variables `NATIVE_CELLD_OPERATOR_URL` and `NATIVE_CELLD_TRUSTED_A
 
 This provider uses pinned celld 0.6.1 and accepts trusted applications only. celld does not offer hostile multitenant isolation. Each app uses one supervised loopback process and a stable persistent store. The operator stages changes, stops the old runtime, restarts against retained storage and checks celld runtime readiness without invoking the app handler. Updates can cause brief downtime. Failed startup reinstalls previous code/configuration while retaining current data. The operator rejects WebSocket upgrades with `501`.
 
+### celld-fleet
+
+Use the [fleet publisher](native-worker-fleet.md) for an existing bucket-backed celld deployment. It keeps Artifacts as the fleet's default Worker and adds native apps as named service-binding components. Apps use native DO, KV, R2, D1 and queue bindings in the same fleet. Their resource identities survive source updates, host releases and node restarts. Native cron delivery is coordinated by the host and dispatched into each app's own isolate and environment.
+
+Configure `NATIVE_CELLD_FLEET_OPERATOR_URL`, `NATIVE_CELLD_FLEET_OPERATOR_TOKEN` and `NATIVE_CELLD_TRUSTED_APPS=true`. The authenticated publisher must have fleet bucket access and discover the serving nodes. Host releases must go through the same publisher; a plain `celld deploy` of the host would remove its native app service graph. The publisher's endpoint may include a path prefix, uses HTTPS or loopback HTTP, and is fixed for an existing app. Native app requests pass through private library admission and native service bindings. They receive only their declared app bindings, variables and secrets.
+
 ## Recovery and restoration
 
 The controller journals desired code, complete reserved resource identities, provider IDs and DO migration plans before external mutations. Each app has a serialized mutation stream. Resource creation reconciles deterministic names after ambiguous responses; it never blindly allocates a second resource or deletes storage as compensation. Automatic controller retries are bounded to three attempts; `app_reconcile` starts a fresh attempt against the same desired revision. An operator restart also reconciles its persisted desired app state.
@@ -76,7 +82,7 @@ The controller journals desired code, complete reserved resource identities, pro
 
 Code restoration does not restore data or undo DO lifecycle migrations. There is no managed D1 SQL migration runner: schema changes belong to application code and must remain compatible with retained data and restored revisions. Queue/cron changes and Worker publication are not a single provider transaction; `recovery-required` explicitly means the observed deployment may be partial. Native event side effects can occur while publication is incomplete and are not replayed or rolled back by the controller. Queue handlers must tolerate retries.
 
-Providers cannot change on an existing app. Destructive storage deletion, fleet bucket publication, cross-provider data transfer, app log collection, workflows and other undeclared bindings/events are outside this delivery.
+Providers cannot change on an existing app. Destructive storage deletion, cross-provider data transfer, app log collection, workflows and other undeclared bindings/events are outside this delivery.
 
 ## Validation
 

@@ -87,6 +87,9 @@ export function NativeAppEditor({ workspace, appName, providers, onNavigate, onS
     if (!hidden) heading.current?.focus({ preventScroll: true });
   }, [hidden, appName]);
   useEffect(() => {
+    if (creating && providers.length && !providers.includes(provider)) setProvider(providers[0]!);
+  }, [creating, providers, provider]);
+  useEffect(() => {
     if (!dirty) return;
     const listener = (event: BeforeUnloadEvent) => {
       event.preventDefault();

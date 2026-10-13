@@ -20,9 +20,12 @@ import type { PluginRequest } from "../src/plugins/types";
 import galleryBridge from "../dist/cloudflare/gallery-request.json";
 
 import { ArtifactLinks } from "./links";
+import { galleryEvents } from "./gallery-events";
 import { ScriptLibrary } from "./scripts";
 import { ScriptBackend } from "./script-backend";
 import { NativeApps, type NativeEnvironment } from "./native-worker/controller";
+import { createHash, timingSafeEqual } from "node:crypto";
+import { FLEET_PUBLICATION_VAR } from "./native-worker/fleet-contract";
 import { artifactRoute } from "./artifact-routes";
 import * as toolValidators from "../dist/cloudflare/tool-validators.js";
 export { ArtifactLibrary, ArtifactBackend, ArtifactFiles, ArtifactLinks, ScriptLibrary, ScriptBackend, NativeApps };
@@ -39,10 +42,17 @@ export type Env = AuthEnvironment & BetterAuthEnvironment & NativeEnvironment & 
   ASSETS: Fetcher;
   DEFAULT_WORKSPACE?: string;
   ARTIFACTS_PUBLIC_ORIGIN?: string;
+  ARTIFACTS_NATIVE_FLEET_PUBLICATION?: string;
 };
 
 const app = new Hono<{ Bindings: Env; Variables: { service: ManagedArtifactService; libraryScope: "private" | "team"; user: ArtifactUser | null } }>();
 app.get("/health", c => c.json({ ok: true, runtime: navigator.userAgent }));
+app.get("/api/native-fleet/ready", c => {
+  const expected = c.env.NATIVE_CELLD_FLEET_OPERATOR_TOKEN;
+  const supplied = c.req.header("Authorization")?.replace(/^Bearer /, "") ?? "";
+  if (!expected || !timingSafeEqual(createHash("sha256").update(expected).digest(), createHash("sha256").update(supplied).digest())) return c.json({ error: "Unauthorized" }, 401);
+  return c.json({ publication: c.env[FLEET_PUBLICATION_VAR] });
+});
 app.get("/sign-in", c => {
   if (c.env.AUTH_MODE !== "better-auth") return c.redirect("/");
   c.header("Cache-Control", "no-store");
@@ -138,6 +148,7 @@ app.get("/api/gallery/subscribe", c => {
   if (c.req.header("Upgrade")?.toLowerCase() !== "websocket") return c.text("WebSocket required", 426);
   return c.get("service").subscribeGallery(c.req.query("all") === "1");
 });
+app.get("/api/gallery/events", c => galleryEvents(c.req.raw, () => c.get("service").subscribeGallery(c.req.query("all") === "1")));
 app.post("/api/library/move", async c => {
   let input: { kind: "artifact" | "script"; name: string; library: "private" | "team" };
   try { input = JSON.parse(await readRequestText(c.req.raw, 8192)); }

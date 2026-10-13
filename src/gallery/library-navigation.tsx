@@ -19,7 +19,6 @@ export function LibraryNavigation({ gallery, artifacts, query, onQueryChange, ki
   const workers = !!onSelectWorker;
   const libraryItems = [...(gallery?.artifacts ?? []), ...(workers ? gallery?.workerApps ?? [] : [])];
   return <aside ref={panelRef} className="library-panel" hidden={hidden} aria-label={workers ? "Artifacts library" : gallery?.capabilities?.scripts ? "Artifacts and scripts" : "Artifacts"}>
-    {!connected ? <p className="connection-status" role="status">Reconnecting to live updates…</p> : null}
     <div className="library-search">
       <input ref={input} className="search-input" type="search"
         aria-label={workers ? "Search library" : gallery?.capabilities?.scripts ? "Search artifacts and scripts" : "Search artifacts"}
@@ -50,6 +49,7 @@ export function LibraryNavigation({ gallery, artifacts, query, onQueryChange, ki
         </button>} />}
     </div>
     {query || kindFilter !== "all" ? <div className="library-count">{artifacts.length} of {libraryItems.length} items</div> : null}
+    <p className="connection-status" role="status" data-connected={connected}>{connected ? "" : "Reconnecting to live updates…"}</p>
     {footer ? <div className="library-footer">{footer}</div> : null}
   </aside>;
 }

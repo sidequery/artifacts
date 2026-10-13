@@ -96,7 +96,7 @@ export function ExecutionControls({ workspace, name, kind = "script", active = t
           {duplicates ? <p>Repeated headers are preserved until you edit this field.</p> : null}
           {method !== "GET" && method !== "HEAD" ? <label>Body <textarea aria-label="Schedule body" value={body} onChange={event => setBody(event.target.value)} /></label> : null}
           </details>
-          <button disabled={!loaded || busy}>Save schedule</button>
+          <button className="primary-action" disabled={!loaded || busy}>Save schedule</button>
         </fieldset>
       </form>
       <p>Runs the latest validated revision. Missed occurrences are skipped. Failed or interrupted runs require an explicit retry.</p>
@@ -105,7 +105,7 @@ export function ExecutionControls({ workspace, name, kind = "script", active = t
       <button disabled={busy} onClick={() => void perform(loadRuns)}>Refresh runs</button>
       {runsLoaded && !runs.length ? <p>No runs recorded yet.</p> : null}
       <p>HTTP-handler outcomes; background tasks and streamed response completion are separate. Latest 100 of up to 1,000 retained runs.</p>
-      <table><thead><tr><th>Started (UTC)</th><th>Trigger</th><th>Status</th><th>HTTP</th><th>Duration</th><th>Revision</th>{kind === "script" ? <th>Logs</th> : null}</tr></thead><tbody>{runs.map(run => <tr key={run.id}><td>{displayTime(run.started_at)}</td><td>{run.trigger}</td><td>{run.status}</td><td>{run.http_status ?? "—"}</td><td>{run.duration_ms === null ? "—" : `${run.duration_ms} ms`}</td><td title={run.revision}>{run.revision.slice(0, 12)}</td>{kind === "script" ? <td><button disabled={busy} onClick={() => void perform(async () => setLogs(JSON.stringify(await galleryTool(workspace, "script_logs", { name, run_id: run.id }), null, 2)))}>View logs</button></td> : null}</tr>)}</tbody></table>
+      <div className="run-table"><table><thead><tr><th>Started (UTC)</th><th>Trigger</th><th>Status</th><th>HTTP</th><th>Duration</th><th>Revision</th>{kind === "script" ? <th>Logs</th> : null}</tr></thead><tbody>{runs.map(run => <tr key={run.id}><td>{displayTime(run.started_at)}</td><td>{run.trigger}</td><td>{run.status}</td><td>{run.http_status ?? "—"}</td><td>{run.duration_ms === null ? "—" : `${run.duration_ms} ms`}</td><td title={run.revision}>{run.revision.slice(0, 12)}</td>{kind === "script" ? <td><button disabled={busy} onClick={() => void perform(async () => setLogs(JSON.stringify(await galleryTool(workspace, "script_logs", { name, run_id: run.id }), null, 2)))}>View logs</button></td> : null}</tr>)}</tbody></table></div>
       {logs ? <pre aria-label="Run logs">{logs}</pre> : null}
     </section>
   </>;
