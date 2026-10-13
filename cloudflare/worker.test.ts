@@ -8,6 +8,7 @@ import { chromium } from "playwright";
 import { ARTIFACTS_APP_URI } from "../src/mcp/app-contract";
 import { ROUTING_ARTIFACT } from "../src/test/routing";
 import { openGallerySubscription } from "../src/test/gallery-subscription";
+import { VIEWPORT_ARTIFACT, checkArtifactLayout } from "../src/test/artifact-layout";
 
 let runtime: Miniflare;
 let runtimeOptions: ConstructorParameters<typeof Miniflare>[0];
@@ -635,6 +636,23 @@ test("standalone artifact APIs preserve HTTP semantics and never fall back to th
   expect((await fetch(`${origin}/pages-only/projects/42`, { method: "POST" })).status).toBe(405);
   for (const path of ["/_artifact", "/_artifact/unknown", "/_artifact/request/extra", "/_artifact/plugins/extra"]) expect((await fetch(`${origin}/pages-only${path}`)).status).toBe(404);
 }, 60000);
+
+test("hosted standalone artifacts and gallery previews fill the viewport without host padding", async () => {
+  const name = "viewport-presentation";
+  const created = await client.callTool({ name: "artifact_write", arguments: { name, slug: name, access: "public", contents: VIEWPORT_ARTIFACT, preview: false } });
+  expect(created.isError).not.toBe(true);
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    for (const viewport of [{ width: 1440, height: 960 }, { width: 390, height: 844 }]) {
+      await page.setViewportSize(viewport);
+      expect((await page.goto(`${origin}/${name}`))!.status()).toBe(200);
+      await checkArtifactLayout(page.frameLocator("iframe"));
+      expect((await page.goto(`${origin}/gallery/preview?workspace=test&name=${name}`))!.status()).toBe(200);
+      await checkArtifactLayout(page);
+    }
+  } finally { await browser.close(); }
+}, 60_000);
 
 test("standalone nested artifact pages restore browser routes on direct load and refresh", async () => {
   expect((await client.callTool({ name: "artifact_write", arguments: { name: "linked-routes", slug: "linked-routes", access: "public", contents: ROUTING_ARTIFACT } })).isError).not.toBe(true);
