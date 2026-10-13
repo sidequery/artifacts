@@ -1,8 +1,9 @@
 import { ARTIFACTS_APP_META } from "./app-contract";
 import { PROJECT_ARCHIVE_SCHEMA } from "../project-archive-contract";
 import { applyToolVisibility } from "./host-contract";
+import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
-export const MCP_TOOLS = [
+export const MCP_TOOLS: Tool[] = [
   {
     name: "artifact_export",
     description: "Export a complete versioned project archive: client, server, helper modules and exact dependency snapshot. Select name or version_id. Never includes UI state, database/files, secrets or URL policy.",
@@ -19,7 +20,7 @@ export const MCP_TOOLS = [
     name: "artifact_guide",
     description: "Read the Sidequery Artifacts SDK contract: exports, host APIs, component conventions, restrictions, and validation behavior. Call before creating an artifact if you have not read it in this conversation.",
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    inputSchema: { type: "object", properties: { topic: { type: "string", enum: ["browser", "backend", "files", "plugins", "all"], default: "browser", description: "Read only the SDK topic needed for this task." } }, additionalProperties: false },
   },
   {
     name: "artifact_read",
@@ -124,7 +125,7 @@ export const MCP_TOOLS = [
       additionalProperties: false,
     },
   },
-] as const;
+];
 
 for (const tool of MCP_TOOLS) {
   if (["artifact_write", "artifact_edit", "artifact_restore", "artifact_remix", "artifact_import"].includes(tool.name)) {

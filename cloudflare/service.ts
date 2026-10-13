@@ -85,8 +85,8 @@ export class CloudArtifactService {
         return { ...text({ result }), structuredContent: { result } };
       }
       case "artifact_guide": {
-        const guide = artifactGuideResult();
-        if (this.hosted) guide.content.push({ type: "text", text: HOSTED_SCRIPT_GUIDE });
+        const guide = artifactGuideResult(args.topic as Parameters<typeof artifactGuideResult>[0]);
+        if (this.hosted && args.topic === "all") guide.content.push({ type: "text", text: HOSTED_SCRIPT_GUIDE });
         return guide;
       }
       case "artifact_list": {

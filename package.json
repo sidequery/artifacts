@@ -75,6 +75,8 @@
     "src/mcp/app.ts",
     "src/mcp/guide.ts",
     "src/mcp/local-tools.ts",
+    "src/mcp/discovery.ts",
+    "src/mcp/validation.ts",
     "src/mcp/protocol.ts",
     "src/mcp/stdio.ts",
     "src/mcp/tools.ts",
@@ -168,6 +170,7 @@
     "build:cloudflare-compiler": "wrangler deploy --config cloudflare/wrangler.compiler.jsonc --dry-run --outdir ../dist/worker",
     "typecheck:cloudflare": "tsc -p cloudflare/tsconfig.json --noEmit && tsc -p examples/runner-status/tsconfig.worker.json --noEmit",
     "test:cloudflare": "bun run build:cloudflare-compiler && bun run build:cloudflare && bun test cloudflare --timeout 60000",
+    "test:mcp-discovery": "ARTIFACTS_PLUGINS_CONFIG=cloudflare/mcp-discovery-plugin.ts bun run build:cloudflare && MCP_DISCOVERY_INTEGRATION=1 NATIVE_WORKER_CELLD=1 bun test cloudflare/mcp-discovery.test.ts --timeout 180000",
     "test:celld": "bun run build:cloudflare && bun run prepare:celld && CELLD_INTEGRATION=1 CELLD_AUTH_INTEGRATION=1 CELLD_BACKEND_INTEGRATION=1 CELLD_SCHEDULING_INTEGRATION=1 bun test cloudflare/backend.test.ts cloudflare/celld.test.ts cloudflare/auth-flow.test.ts cloudflare/scheduling-celld.test.ts cloudflare/runtime-plugins-celld.test.ts --timeout 180000",
     "deploy:cloudflare": "wrangler deploy",
     "seed:cloudflare": "bun run scripts/seed-cloudflare.ts",
@@ -176,6 +179,7 @@
     "build:executable": "bun run scripts/build-executable.ts"
   },
   "dependencies": {
+    "ajv": "8.20.0",
     "@aws-sdk/client-s3": "3.1150.0",
     "@base-ui/react": "^1.8.0",
     "@better-auth/oauth-provider": "1.7.3",
@@ -207,7 +211,6 @@
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@types/bun": "^1.3.14",
     "@types/semver": "7.7.1",
-    "ajv": "8.20.0",
     "hono": "4.13.7",
     "jose": "6.2.12",
     "miniflare": "5.20260903.0-alpha",

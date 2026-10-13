@@ -48,6 +48,8 @@ jobs:
             cgr.dev/chainguard/minio:latest server /data --address :9000
           trap 'docker stop artifacts-fleet-test-s3' EXIT
           NATIVE_WORKER_FLEET=1 bun test scripts/native-worker/fleet.test.ts --timeout 240000
+      - name: Test the nine-tool MCP connection and inline previews
+        run: bun run test:mcp-discovery
 
   executable:
     strategy:

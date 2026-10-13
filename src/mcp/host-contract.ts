@@ -1,4 +1,6 @@
 /** Host UI support is negotiated independently from server authentication. */
+import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import { compactToolSurface } from "./discovery";
 export const ARTIFACTS_DISPLAY_MODES = ["inline", "fullscreen"] as const;
 
 const sharedTools = new Set([
@@ -21,14 +23,15 @@ export function clientSupportsApps(capabilities: unknown): boolean {
   return Array.isArray(mimeTypes) && mimeTypes.includes("text/html;profile=mcp-app");
 }
 
-/** Text clients keep every model tool and its ordinary annotations/schema. */
-export function toolsForClient<T extends { name: string; _meta?: Record<string, unknown> }>(tools: readonly T[], apps: boolean): readonly T[] {
-  if (apps) return tools;
-  return tools.filter(tool => {
+/** Compact discovery is the same for every client; Apps retain their UI tools. */
+export function toolsForClient(tools: readonly Tool[], apps: boolean): Tool[] {
+  const surface = compactToolSurface(tools);
+  if (apps) return surface;
+  return surface.filter(tool => {
     const visibility = (tool._meta?.ui as { visibility?: string[] } | undefined)?.visibility;
     return !visibility || visibility.includes("model");
   }).map(tool => {
     const { _meta, ...rest } = tool;
-    return rest as T;
+    return rest;
   });
 }

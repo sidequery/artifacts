@@ -125,7 +125,8 @@ test("official HTTP MCP client lists contracts, writes, edits, restores and retr
   expect(guide.isError).not.toBe(true);
   const guideText = (guide.content as { text: string }[])[0]!.text;
   expect(guideText).toContain("sidequery/artifacts");
-  expect(tools.find(tool => tool.name === "script_guide")?.annotations?.readOnlyHint).toBe(true);
+  const discoveredScript = payload(await client.callTool({ name: "artifacts_discover", arguments: { operation: "script_guide", include_docs: false } }));
+  expect(discoveredScript.annotations.readOnlyHint).toBe(true);
   const scriptGuide = await client.callTool({ name: "script_guide", arguments: {} });
   expect(scriptGuide.isError).not.toBe(true);
   expect((scriptGuide.content as { text: string }[])[0]!.text).toContain("Third-party dependencies");
@@ -139,7 +140,7 @@ test("official HTTP MCP client lists contracts, writes, edits, restores and retr
   version = artifact.versionId;
   const resource = await client.readResource({ uri: ARTIFACTS_APP_URI });
   expect(resource.contents[0]!.mimeType).toContain("text/html");
-  for (const uri of ["ui://artifacts/viewer.html", "ui://artifacts/v4/viewer.html", "ui://artifacts/v5/viewer.html"]) {
+  for (const uri of ["ui://artifacts/viewer.html", "ui://artifacts/v4/viewer.html", "ui://artifacts/v5/viewer.html", "ui://artifacts/v6/viewer.html"]) {
     const legacy = await client.readResource({ uri });
     expect(legacy.contents[0]).toEqual({ ...resource.contents[0], uri });
   }
@@ -162,9 +163,10 @@ test("official HTTP MCP client lists contracts, writes, edits, restores and retr
 }, 60000);
 
 test("plugin HTTP and MCP routes expose catalog hints and validate requests", async () => {
-  const tools = (await client.listTools()).tools;
-  for (const name of ["plugins_list", "plugin_guide"]) expect(tools.find(tool => tool.name === name)?.annotations?.readOnlyHint).toBe(true);
-  expect(tools.find(tool => tool.name === "artifact_plugin_call")?.annotations?.readOnlyHint).toBe(false);
+  for (const operation of ["plugins_list", "plugin_guide", "artifact_plugin_call"]) {
+    const discovered = payload(await client.callTool({ name: "artifacts_discover", arguments: { operation, include_docs: false } }));
+    expect(discovered.annotations.readOnlyHint).toBe(operation !== "artifact_plugin_call");
+  }
   const list = await client.callTool({ name: "plugins_list", arguments: {} });
   expect(list.isError).not.toBe(true);
   expect(Array.isArray((list.structuredContent as { plugins: unknown[] }).plugins)).toBe(true);

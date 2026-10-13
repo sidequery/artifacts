@@ -1,5 +1,6 @@
 import { ARTIFACTS_APP_URI } from "./app-contract";
 import type { GalleryData } from "../gallery/types";
+import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 export type ArtifactWorkspaceItem = {
   name: string;
@@ -19,10 +20,10 @@ export type ArtifactWorkspacePayload = {
 
 const ui = { resourceUri: ARTIFACTS_APP_URI, visibility: ["app"] };
 const readOnly = { readOnlyHint: true, destructiveHint: false, openWorldHint: false };
-const emptySchema = { type: "object", properties: {}, additionalProperties: false };
+const emptySchema = { type: "object" as const, properties: {}, additionalProperties: false };
 
 /** Entrypoints never mutate the library and accept the host's empty arguments. */
-export const ARTIFACTS_WORKSPACE_TOOLS = [
+export const ARTIFACTS_WORKSPACE_TOOLS: Tool[] = [
   {
     name: "artifacts_library", title: "Artifacts", description: "Browse accessible artifacts, scripts and their saved versions.",
     annotations: readOnly,

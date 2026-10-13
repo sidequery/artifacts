@@ -106,7 +106,7 @@ test("library previews resolve legacy names and preserve their sidecar state", a
   }
 });
 
-test("official MCP client can initialize, discover UI, create and show over standard stdio", async () => {
+test("official stdio MCP client discovers operations, validates dispatch and preserves history previews", async () => {
   const dir = tempDir();
   const client = new Client({ name: "artifact-test", version: "1" }, { capabilities: { extensions: { "io.modelcontextprotocol/ui": { mimeTypes: [ARTIFACTS_APP_MIME] } } } });
   const transport = new StdioClientTransport({
@@ -118,16 +118,24 @@ test("official MCP client can initialize, discover UI, create and show over stan
     await client.connect(transport);
     expect(client.getServerCapabilities()?.resources).toBeDefined();
     const tools = await client.listTools();
-    for (const name of ["artifact_write", "artifact_open", "artifact_edit", "artifact_restore"]) {
+    for (const name of ["artifact_write", "artifact_open", "artifact_edit", "artifacts_execute"]) {
       expect(tools.tools.find(tool => tool.name === name)?._meta).toMatchObject({ ui: { resourceUri: ARTIFACTS_APP_URI } });
     }
     expect(tools.tools.find(tool => tool.name === "artifact_list")?._meta).toMatchObject({ ui: { visibility: ["model", "app"] } });
+    const model = tools.tools.filter(tool => (tool._meta?.ui as { visibility: string[] }).visibility.includes("model"));
+    expect(model).toHaveLength(9);
+    const payload = (result: Awaited<ReturnType<Client["callTool"]>>) => result.structuredContent ?? JSON.parse((result.content as { text: string }[])[0]!.text);
+    const catalog = payload(await client.callTool({ name: "artifacts_discover", arguments: { limit: 50 } }));
+    expect(catalog.total).toBe(14);
+    expect(catalog.operations.some((item: { operation: string }) => item.operation === "artifact_restore")).toBe(true);
+    const restore = payload(await client.callTool({ name: "artifacts_discover", arguments: { operation: "artifact_restore", include_docs: false } }));
+    expect(restore).toMatchObject({ dispatch: "artifacts_execute", inputSchema: { required: ["version_id"] } });
     const resources = await client.listResources();
     expect(resources.resources[0]?.mimeType).toBe(ARTIFACTS_APP_MIME);
     const resource = await client.readResource({ uri: ARTIFACTS_APP_URI });
     expect(resource.contents[0]?.mimeType).toBe(ARTIFACTS_APP_MIME);
     expect(resource.contents[0]).toHaveProperty("text");
-    for (const uri of ["ui://artifacts/viewer.html", ...[1, 2, 3, 4, 5].map(version => `ui://artifacts/v${version}/viewer.html`)]) {
+    for (const uri of ["ui://artifacts/viewer.html", ...[1, 2, 3, 4, 5, 6].map(version => `ui://artifacts/v${version}/viewer.html`)]) {
       const legacy = await client.readResource({ uri });
       expect(legacy.contents[0]).toEqual({ ...resource.contents[0], uri });
     }
@@ -137,7 +145,30 @@ test("official MCP client can initialize, discover UI, create and show over stan
     const shown = await client.callTool({ name: "artifact_open", arguments: { name: "overview" } });
     expect(shown.isError).toBe(false);
     expect(shown._meta).toHaveProperty("artifact");
+    const versionId = (created._meta!.artifact as { versionId: string }).versionId;
+    const query = (operation: string, args: Record<string, unknown>) => client.callTool({ name: "artifacts_query", arguments: { operation, arguments: args } });
+    const execute = (operation: string, args: Record<string, unknown>) => client.callTool({ name: "artifacts_execute", arguments: { operation, arguments: args } });
+    expect(payload(await query("artifact_version", { version_id: versionId })).source).toBe(VALID_ARTIFACT);
+    expect(payload(await query("artifact_history", { name: "overview" })).versions.length).toBeGreaterThan(0);
+    const read = payload(await query("artifact_read", { name: "overview" }));
+    await expect(query("artifact_write", { name: "overview", contents: "must not write" })).rejects.toThrow("Use artifacts_execute");
+    await expect(execute("artifact_restore", {})).rejects.toThrow("Invalid arguments");
+    await expect(execute("artifact_read", { name: "overview", owner: "other" })).rejects.toThrow("Invalid arguments");
+    for (const operation of ["artifacts_execute", "artifacts_preview"]) {
+      await expect(execute(operation, {})).rejects.toThrow("Unknown operation");
+    }
+    expect(readFileSync(join(dir, "overview.artifact.tsx"), "utf8")).toBe(VALID_ARTIFACT);
+    const edited = await execute("artifact_edit", { name: "overview", expected_hash: read.source_hash,
+      edits: [{ old_text: "Embedded sample data.", new_text: "Dispatched change." }], preview: false });
+    expect(edited.isError).toBe(false);
+    expect(edited._meta).toBeUndefined();
+    await expect(execute("artifact_edit", { name: "overview", expected_hash: read.source_hash,
+      edits: [{ old_text: "Dispatched change.", new_text: "Stale edit." }] })).rejects.toThrow("changed");
+    const restored = await execute("artifact_restore", { version_id: versionId });
+    expect(restored.isError).toBe(false);
+    expect((restored._meta!.artifact as { js: string }).js).toContain("Embedded sample data.");
+    expect(readFileSync(join(dir, "overview.artifact.tsx"), "utf8")).toBe(VALID_ARTIFACT);
     await expect(client.readResource({ uri: "ui://artifacts/missing" })).rejects.toThrow("unknown resource");
     await expect(client.readResource({ uri: "ui://artifacts/v999/viewer.html" })).rejects.toThrow("unknown resource");
   } finally { await client.close(); }
-});
+}, 30_000);

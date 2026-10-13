@@ -6,6 +6,7 @@ import { ARTIFACTS_SETTINGS_TOOLS } from "../src/mcp/settings-contract";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { MCP_TOOLS } from "../src/mcp/tools";
 import { PROJECT_ARCHIVE_SCHEMA } from "../src/project-archive-contract";
+import { DISCOVERY_TOOLS } from "../src/mcp/discovery";
 
 // Share the local tool contract. A hosted service cannot open a terminal pane.
 export const CLOUD_MCP_TOOLS: Tool[] = JSON.parse(JSON.stringify(MCP_TOOLS));
@@ -173,3 +174,4 @@ for (const tool of CLOUD_MCP_TOOLS) {
 applyToolVisibility(CLOUD_MCP_TOOLS);
 CLOUD_MCP_TOOLS.push(galleryToolDefinition(CLOUD_MCP_TOOLS));
 CLOUD_MCP_TOOLS.push(...ARTIFACTS_SETTINGS_TOOLS);
+CLOUD_MCP_TOOLS.push(...DISCOVERY_TOOLS);

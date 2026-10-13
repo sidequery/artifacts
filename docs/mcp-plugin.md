@@ -42,9 +42,31 @@ The server builds on MCP Apps and advertises optional OpenAI extensions. Actual 
 
 Tool visibility distinguishes model calls from app calls; it does not replace server authorization. Host context and file resource identifiers are untrusted input. UI selection, attachments, and cached state cannot expand library, owner, or team access.
 
+## Model tools and operation discovery
+
+Every connection advertises the same nine model tools: `artifact_guide`, `artifact_list`, `artifact_read`, `artifact_write`, `artifact_edit`, `artifact_open`, `artifacts_discover`, `artifacts_query`, and `artifacts_execute`. Hosted connections retain all 48 artifact, script, file, schedule, secret, plugin and native Worker operations. Local file connections expose their supported subset. MCP Apps also receive the existing app-only gallery and host-integration tools.
+
+Call `artifacts_discover` with `query` to search concise operation summaries, with neither selector to browse a paginated catalog, or with `operation` to retrieve its original JSON Schema, annotations, dispatch recommendation and relevant guide. Set `include_docs: false` after reading that guide. Discovery does not execute authored code, unlock tools or change `tools/list`; no connection or configuration switch is required.
+
+For example, inspect a script operation:
+
+```json
+{"operation":"script_write"}
+```
+
+Then call `artifacts_execute` with the discovered operation and its arguments:
+
+```json
+{"operation":"script_write","arguments":{"name":"hello","contents":"export default { fetch() { return new Response('Hello'); } };"}}
+```
+
+`artifacts_query` accepts the same envelope but enforces read-only behavior. Schedule inspection, secret-name listing and file list/download are permitted; schedule changes, secret values, uploads/deletes, backend HTTP requests, script runs and plugin calls require `artifacts_execute`. An HTTP GET to authored code still executes it. Unknown and app-only operations, recursive dispatch and arguments outside the original schema are rejected.
+
+Each dispatched call enters the original authorization and validation path and returns its original result, including inline previews, diagnostics and optimistic conflicts. Existing direct operation calls remain accepted for compatibility. Host tool grants for advanced actions apply to the shared `artifacts_execute` tool; operation discovery and UI visibility do not grant access or bypass owner/team checks.
+
 ## Authoring and verification
 
-The author skill reads `artifact_guide`, guards source edits using `source_hash`/`expected_hash`, suppresses intermediate previews with `preview: false` when supported, and deliberately calls `artifact_open` when the result is ready. Validation diagnostics may accompany an applied edit; they are not a rollback guarantee. Compatible preview refreshes should preserve view state.
+The author skill reads `artifact_guide`, guards source edits using `source_hash`/`expected_hash`, suppresses intermediate previews with `preview: false` when supported, and deliberately calls `artifact_open` when the result is ready. Specialized operations and guides are discovered as needed; the browser guide is the default, with backend, files and plugins topics available explicitly. Validation diagnostics may accompany an applied edit; they are not a rollback guarantee. Compatible preview refreshes should preserve view state.
 
 Setup verifies connection using tool discovery, `artifact_guide`, and `artifact_list`. It does not create example artifacts or alter the user's library. Host file editing requires its own advertised resource and write capabilities; it is separate from hosted artifact file storage described in [files](files.md).
 

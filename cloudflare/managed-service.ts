@@ -13,6 +13,10 @@ import { galleryAction, gallerySource } from "./gallery-tools";
 import { ARTIFACTS_SETTINGS_TOOLS, settingsTool } from "../src/mcp/settings-contract";
 import { parseProjectArchive } from "../src/project-archive";
 import { ownershipName } from "./ownership";
+import { callDiscoveryTool, isDiscoveryTool } from "../src/mcp/discovery";
+import { validateToolArguments } from "../src/mcp/validation";
+import { CLOUD_MCP_TOOLS } from "./tool-contract";
+import * as toolValidators from "../dist/cloudflare/tool-validators.js";
 
 const text = (value: unknown): CallToolResult => ({ content: [{ type: "text", text: JSON.stringify(value, null, 2) }] });
 type Selection = { workspace?: string; name?: string; version_id?: string; event_id?: string };
@@ -75,6 +79,14 @@ export class ManagedArtifactService {
   }
 
   async callTool(name: string, args: Record<string, unknown>): Promise<CallToolResult> {
+    if (isDiscoveryTool(name)) {
+      return callDiscoveryTool(CLOUD_MCP_TOOLS, name, args, async (operation, input) => {
+        validateToolArguments(toolValidators, operation, input);
+        // Re-enter management admission, not the physical storage service: moved
+        // revisions and native apps still resolve the authenticated owner here.
+        return this.callTool(operation, input);
+      });
+    }
     if (ARTIFACTS_SETTINGS_TOOLS.some(tool => tool.name === name)) return settingsTool(this, name, args);
     if (name === "artifacts_tool") return galleryAction(this, args);
     if (name === "artifacts_source") return gallerySource(this, args);
