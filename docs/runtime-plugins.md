@@ -79,6 +79,76 @@ Inputs and outputs are JSON, limited to 256 KiB. Inputs are validated against `i
 
 Server-side plugin functions follow deployment upgrades. Browser libraries and the Artifacts SDK are included in the compiled revision saved on a successful edit; reopening that revision reuses its bundle across restarts and upgrades. A subsequent edit or explicit compilation of the working artifact uses the current build configuration. Keep server APIs compatible with saved browser bundles. This foundation does not manage provider OAuth, install packages at runtime, add artifact permission manifests or implement routing.
 
+## Publish a plugin without rebuilding
+
+A plugin that only provides server functions can also be published into a running
+deployment. A published plugin needs no rebuild or redeploy of Artifacts: replacing its
+file replaces the plugin. Add an R2 binding named `PLUGINS` to the deployment's
+Wrangler configuration:
+
+```json
+"r2_buckets": [
+  { "binding": "FILES", "bucket_name": "canvas-files" },
+  { "binding": "PLUGINS", "bucket_name": "artifacts-plugins" }
+]
+```
+
+Write the plugin as one module whose default export is `definePlugin(...)`. It takes
+the same fields as an entry in `artifacts.plugins.ts`, except `browser` and `types`:
+
+```ts
+import { definePlugin } from "@sidequery/artifacts/plugins";
+
+export default definePlugin({
+  name: "warehouse",
+  description: "Read-only warehouse queries",
+  secrets: ["PLUGIN_WAREHOUSE_TOKEN"],
+  operations: {
+    query: {
+      description: "Run a read-only SQL query",
+      readOnly: true,
+      inputSchema: { type: "object", properties: { sql: { type: "string", minLength: 1 } }, required: ["sql"], additionalProperties: false },
+      async handler(input: { sql: string }, { secrets, signal }) {
+        // Call the warehouse with secrets.PLUGIN_WAREHOUSE_TOKEN.
+      },
+    },
+  },
+});
+```
+
+Bundle it from a checkout of this repository, then upload the result to
+`plugins/<name>.json` in that bucket:
+
+```sh
+bun run scripts/bundle-plugin.ts warehouse.plugin.ts --out warehouse.json
+# celld: writes the fleet bucket directly; no node needs to be running.
+celld r2 put artifacts-plugins plugins/warehouse.json --path warehouse.json --content-type application/json --bucket s3://<fleet-bucket>
+# Cloudflare
+bun x wrangler r2 object put artifacts-plugins/plugins/warehouse.json --file warehouse.json --remote
+```
+
+The bundle is one file: the handlers, their dependencies, and the input/output
+validators. Each node uses a new or replaced file within about five seconds. Delete
+the object to remove the plugin.
+
+A published plugin works like a build-time plugin. It appears in `plugins_list` and
+is called with `artifact_plugin_call` or `pluginCall`. It has the same schemas,
+`authorize`, 30 second limit, 256 KiB limit and generic errors. It differs in these
+ways:
+
+- **Isolation.** It runs in its own isolate. Its environment contains only the secrets
+  it declares, read from deployment variables with the same names. Other variables,
+  bindings and storage are unavailable to it.
+- **Secrets.** It can declare only variables named `PLUGIN_*`. Write access to the
+  bucket therefore never exposes the deployment's own credentials. Adding a secret
+  still means changing the deployment's variables.
+- **Server only.** Browser libraries still require a deployment build. Artifacts call
+  published plugins with `pluginCall` directly.
+- **Names.** A build-time plugin with the same name takes precedence.
+
+Anyone who can write `plugins/` in that bucket can run code with the `PLUGIN_*` secrets
+it declares. Give that write access only to your release pipeline.
+
 ## Complete example
 
 The [runner-status example](../examples/runner-status/README.md) adapts an existing GitHub Actions microapp into a private routed artifact and a read-only MCP operation. It includes a shared hosted collector, explicit caller authorization, persisted snapshots, setup instructions and credential-free tests.

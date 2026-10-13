@@ -28,7 +28,7 @@ import { workspaceTool } from "./workspace-tools";
 import { galleryAction, gallerySource } from "./gallery-tools";
 import { ARTIFACTS_SETTINGS_TOOLS, settingsTool } from "../src/mcp/settings-contract";
 
-import { dispatchPlugin, pluginCatalog, PLUGIN_GUIDE, type PluginInvocationContext } from "./plugins";
+import { dispatchPlugin, pluginCatalogFor, PLUGIN_GUIDE, type PluginInvocationContext } from "./plugins";
 import type { PluginRequest } from "../src/plugins/types";
 
 type Snapshot = {
@@ -75,7 +75,10 @@ export class CloudArtifactService {
         const result = await this.fileRequest(args as { name?: string; version_id?: string }, args.request as ArtifactFileRequest);
         return { ...text({ result }), structuredContent: { result } };
       }
-      case "plugins_list": return { ...text({ plugins: pluginCatalog }), structuredContent: { plugins: pluginCatalog } };
+      case "plugins_list": {
+        const plugins = await pluginCatalogFor(this.plugins?.env ?? {});
+        return { ...text({ plugins }), structuredContent: { plugins } };
+      }
       case "plugin_guide": return text(PLUGIN_GUIDE);
       case "artifact_plugin_call": {
         const result = await this.pluginCall(args as PluginRequest);
