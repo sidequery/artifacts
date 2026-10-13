@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { readFile, readdir } from "node:fs/promises";
+import { cp, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Miniflare } from "miniflare";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -69,6 +70,17 @@ test("the bundle is one self-describing record with schemas and no browser modul
   expect(record.module).not.toContain("warehouse-test-token");
   expect(() => parseRuntimePlugin(record, "other-name")).toThrow("does not match");
   expect(() => parseRuntimePlugin({ ...record, hash: "x" })).toThrow("hash");
+});
+
+test("bundles are reproducible from any directory and carry no build-machine paths", async () => {
+  const elsewhere = await mkdtemp(join(tmpdir(), "plugin-source-"));
+  try {
+    await cp(fixture, join(elsewhere, "warehouse.plugin.ts"));
+    const copy = await bundleRuntimePlugin(join(elsewhere, "warehouse.plugin.ts"));
+    expect(copy.hash).toBe(record.hash);
+    expect(copy.module).toBe(record.module);
+  } finally { await rm(elsewhere, { recursive: true, force: true }); }
+  for (const leaked of [tmpdir(), "artifacts-plugin-", import.meta.dir]) expect(record.module).not.toContain(leaked);
 });
 
 test("published plugins are listed beside build-time ones; corrupt records are left out", async () => {
