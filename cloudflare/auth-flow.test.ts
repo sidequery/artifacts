@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import { Miniflare } from "miniflare";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -19,6 +20,7 @@ let browser: Browser;
 let origin: string;
 const clients: Client[] = [];
 const authSecret = "auth-flow-test-only-secret-with-at-least-32-characters";
+const serviceToken = "auth-flow-test-only-service-token-with-enough-entropy";
 const counterClient = await readFile(new URL("../examples/counter.artifact.tsx", import.meta.url), "utf8");
 const counterServer = await readFile(new URL("../examples/counter.artifact.server.ts", import.meta.url), "utf8");
 
@@ -40,6 +42,7 @@ beforeAll(async () => {
     BETTER_AUTH_SECRET: authSecret,
     BETTER_AUTH_ALLOWED_DOMAINS: "example.test",
     BETTER_AUTH_TRUSTED_IP_HEADER: "x-artifact-test-ip",
+    ARTIFACTS_SERVICE_TOKENS: JSON.stringify({ "integration-bot": createHash("sha256").update(serviceToken).digest("hex") }),
     BETTER_AUTH_OIDC_PROVIDERS: JSON.stringify([{ providerId: "company", discoveryUrl: `${fixture.origin}/.well-known/openid-configuration`, clientId: "artifact-test", clientSecret: "fixture-only-not-real-secret", scopes: ["openid", "profile", "email"], pkce: true }]),
   };
   if (process.env.CELLD_AUTH_INTEGRATION === "1") {
@@ -498,3 +501,43 @@ test("ownership transfer preserves live resources and revokes former library acc
     expect((await bobContext.request.post(`${origin}/api/library/move?workspace=test`, { data: { kind: "script", name: script, library: "private", privateKey: "alice" } })).status()).toBe(400);
   } finally { await aliceContext.close(); await bobContext.close(); }
 }, 180000);
+
+test("a service token manages the team library over MCP and confers nothing outside it", async () => {
+  const bearer = { Authorization: `Bearer ${serviceToken}` };
+  const service = new Client({ name: "service-token", version: "1" });
+  clients.push(service);
+  await service.connect(new StreamableHTTPClientTransport(new URL(`${origin}/mcp?workspace=test&library=team`), { requestInit: { headers: bearer } }));
+  const written = await service.callTool({ name: "artifact_write", arguments: { name: "service-report", contents: counterClient, server: counterServer } });
+  expect(written.isError, JSON.stringify(written.content)).not.toBe(true);
+  const linked = await service.callTool({ name: "artifact_link", arguments: { kind: "artifact", name: "service-report", slug: "service-report" } });
+  expect(linked.isError, JSON.stringify(linked.content)).not.toBe(true);
+
+  // The service account has no personal library to fall back to.
+  for (const query of ["workspace=test", "workspace=test&library=private"]) {
+    const response = await fetch(`${origin}/mcp?${query}`, { headers: bearer });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "Service tokens manage the team library; add library=team to the MCP URL" });
+  }
+  // Management, gallery and private URLs still require a signed-in person.
+  for (const path of ["/api/gallery?workspace=test&library=team", "/api/session", "/service-report"]) {
+    expect((await fetch(origin + path, { headers: bearer })).status).toBe(401);
+  }
+  expect((await fetch(`${origin}/api/tools?workspace=test&library=team`, { method: "POST", headers: { ...bearer, "Content-Type": "application/json" }, body: JSON.stringify({ name: "artifact_list", arguments: {} }) })).status).toBe(401);
+  const wrong = await fetch(`${origin}/mcp?workspace=test&library=team`, { headers: { Authorization: `Bearer ${serviceToken}-wrong` } });
+  expect(wrong.status).toBe(401);
+  expect(wrong.headers.get("www-authenticate")).toContain("resource_metadata=");
+
+  // A signed-in teammate finds the work in the team library and opens its private URL.
+  const context = await newBrowserContext();
+  try {
+    const page = await context.newPage();
+    await page.goto(`${origin}/?workspace=test`);
+    await login(page, "Bob");
+    await page.waitForURL(`${origin}/?workspace=test`);
+    const team = await (await context.request.get(`${origin}/api/gallery?workspace=test&library=team`)).json();
+    expect(team.artifacts.find((item: any) => item.name === "service-report")).toMatchObject({ url: `${origin}/service-report`, access: "private" });
+    const personal = await (await context.request.get(`${origin}/api/gallery?workspace=test`)).json();
+    expect(personal.artifacts.some((item: any) => item.name === "service-report")).toBe(false);
+    expect((await context.request.get(`${origin}/service-report`)).status()).toBe(200);
+  } finally { await context.close(); }
+}, 120000);

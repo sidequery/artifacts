@@ -8,6 +8,7 @@ import { ManagedArtifactService } from "./managed-service";
 // the MCP SDK constructs its top-level schemas (Zod 4.5.4).
 import { authenticateBetterAuth, getArtifactAuth, ArtifactAuthConfigurationError, type BetterAuthEnvironment, type ArtifactUser } from "./better-auth";
 import { handleCloudMcp } from "./mcp";
+import { servicePrincipal, SERVICE_TOKEN_AUTHORITY, type ServiceTokenEnvironment } from "./service-tokens";
 import { readRequestText, readToolBody } from "./http";
 import { projectArchive } from "../src/project-archive";
 import { ArtifactBackend } from "./backend";
@@ -31,7 +32,7 @@ import * as toolValidators from "../dist/cloudflare/tool-validators.js";
 export { ArtifactLibrary, ArtifactBackend, ArtifactFiles, ArtifactLinks, ScriptLibrary, ScriptBackend, NativeApps };
 // Deployed Durable Object exports retain their storage identities.
 export { ArtifactLibrary as CanvasLibrary, ArtifactBackend as CanvasBackend, ArtifactFiles as CanvasFiles };
-export type Env = AuthEnvironment & BetterAuthEnvironment & NativeEnvironment & {
+export type Env = AuthEnvironment & BetterAuthEnvironment & ServiceTokenEnvironment & NativeEnvironment & {
   NATIVE_APPS?: DurableObjectNamespace<NativeApps>;
   LIBRARIES: DurableObjectNamespace<ArtifactLibrary>;
   BACKENDS: DurableObjectNamespace<ArtifactBackend>;
@@ -96,19 +97,27 @@ app.use("*", async (c, next) => {
   const origin = c.req.header("Origin");
   if (origin && origin !== url.origin) return c.json({ error: "Origin is not allowed" }, 403);
   if (c.env.AUTH_MODE && !["access", "better-auth"].includes(c.env.AUTH_MODE)) return c.json({ error: "AUTH_MODE must be access or better-auth" }, 503);
-  const user = c.env.AUTH_MODE === "better-auth" ? await authenticateBetterAuth(c.req.raw, c.env) : null;
+  // Service tokens authenticate MCP management only, like OAuth access tokens;
+  // private URLs and browser routes still require a signed-in person.
+  const serviceAccount = c.env.AUTH_MODE === "better-auth" && url.pathname === "/mcp" ? servicePrincipal(c.req.header("Authorization"), c.env) : null;
+  const user = c.env.AUTH_MODE === "better-auth" && !serviceAccount ? await authenticateBetterAuth(c.req.raw, c.env) : null;
   if (user instanceof Response) return user;
-  const identity = user ? { subject: user.id, authority: "better-auth" } : await authenticate(c.req.raw, c.env);
+  const identity = serviceAccount ? { subject: serviceAccount.name, authority: SERVICE_TOKEN_AUTHORITY }
+    : user ? { subject: user.id, authority: "better-auth" } : await authenticate(c.req.raw, c.env);
   if (identity instanceof Response) return identity;
   c.set("user", user);
   const workspace = (url.searchParams.get("workspace") ?? c.env.DEFAULT_WORKSPACE ?? "default").trim();
   if (!workspace || workspace.includes("\0") || new TextEncoder().encode(workspace).byteLength > 4096) return c.json({ error: "Invalid workspace" }, 400);
   const libraryScope = url.searchParams.get("library") ?? "private";
   if (libraryScope !== "private" && libraryScope !== "team") return c.json({ error: "Library must be private or team" }, 400);
+  // Nobody can open a service account's personal library, so it has none: it
+  // manages the team library, and a "private" move destination resolves there
+  // too rather than stranding an item out of every person's reach.
+  if (serviceAccount && libraryScope !== "team") return c.json({ error: "Service tokens manage the team library; add library=team to the MCP URL" }, 403);
   // The configured auth mode controls membership of this deployment's team. Private storage is
   // selected only from the verified subject, never a caller-supplied user ID.
-  const privateKey = user
-    ? JSON.stringify(["private", "better-auth", user.id])
+  const privateKey = serviceAccount ? "team"
+    : user ? JSON.stringify(["private", "better-auth", user.id])
     : JSON.stringify(["private", c.env.ACCESS_TEAM_DOMAIN ?? "local", identity.subject]);
   const libraryKey = libraryScope === "team" ? "team" : privateKey;
   c.set("libraryScope", libraryScope);
