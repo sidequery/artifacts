@@ -28,6 +28,7 @@ credentials. The default local host needs no sign-in.
 | What you want to do | Start here |
 | --- | --- |
 | Sign in or connect your coding agent | [Connect to an existing deployment](#connect-to-an-existing-deployment) |
+| Connect a bot or scheduled job without a browser | [Service tokens for unattended clients](#service-tokens-for-unattended-clients) |
 | Understand personal, team, and public access | [Library and URL permissions](#library-and-url-permissions) |
 | Set up sign-in for your deployment | [Choose an authentication mode](#choose-an-authentication-mode) |
 | Fix a failed sign-in or connection | [Troubleshooting](#troubleshooting) |
@@ -53,6 +54,10 @@ approve access when prompted. Client registration is handled by the OAuth flow;
 you do not need to supply a client ID or secret for a supported public client.
 Check the connection by asking your agent to list artifacts and scripts without
 creating or changing anything.
+
+**Unattended clients:** a chat bot or scheduled job cannot complete a browser
+sign-in. An administrator can give it a
+[service token](#service-tokens-for-unattended-clients) for the team library instead.
 
 **Local host:** `artifacts host` serves `http://127.0.0.1:4786` and
 `http://127.0.0.1:4786/mcp` without sign-in in its default local configuration.
@@ -357,6 +362,57 @@ deployed bucket storage, and workerd's local D1 is a separate database. Use the
 [workerd local setup](#local-better-auth-development) for routine auth development;
 the celld auth integration fixture bootstraps its own temporary schema.
 
+## Service tokens for unattended clients
+
+A service token lets an unattended MCP client, such as a chat bot or a CI job,
+manage the team library without a person signing in. Service tokens are
+available in Better Auth mode. A service token:
+
+- **Authenticates `/mcp` only.** The gallery, management routes such as
+  `/api/tools`, and private app or script URLs still require a signed-in person.
+- **Manages the team library only.** The MCP URL must include `library=team`;
+  any other request returns 403. A service account has no personal library, so
+  moving an item to its private library keeps the item in the team library.
+- **Has an admitted team member's management rights there.** It can create, edit,
+  run and schedule apps and scripts, manage their secrets, and make links public.
+  Protect it accordingly.
+- **Calls deployment plugins as `{ subject: "<service name>", authority: "service-token" }`.**
+  Plugins that authorize by user must account for that authority.
+- **Does not expire.** Revoke it by removing its entry and redeploying.
+
+Generate a random token and its SHA-256 digest:
+
+```sh
+token="$(openssl rand -base64 32)"
+printf %s "$token" | shasum -a 256 | cut -d' ' -f1
+```
+
+Configure only the digest. `ARTIFACTS_SERVICE_TOKENS` is a JSON object mapping
+each service name (lowercase letters, digits and hyphens) to the lowercase hex
+SHA-256 digest of its token:
+
+```json
+{
+  "ARTIFACTS_SERVICE_TOKENS": "{\"slack-bot\":\"<sha256-of-the-token>\"}"
+}
+```
+
+Deployment variables are stored with the deployment record, which is why the
+variable holds digests rather than tokens. Give the token itself to the client
+through the client's own secret store. Use a long random token: a fast digest
+protects only a token that cannot be guessed. A malformed table makes `/mcp`
+return 503 rather than being ignored.
+
+The client sends the token as a bearer credential to the team-library MCP URL:
+
+```text
+https://artifacts.example.com/mcp?library=team&workspace=default
+Authorization: Bearer <token>
+```
+
+To rotate a token, add a second entry under a new name, move the client to the
+new token, then remove the old entry.
+
 ## Troubleshooting
 
 | Symptom | Check or next action |
@@ -370,6 +426,9 @@ the celld auth integration fixture bootstraps its own temporary schema.
 | Gallery works but MCP returns 401 | Complete the MCP client's OAuth flow. A browser session cookie is not an MCP bearer token. Reconnect if its attached session expired or was signed out. |
 | MCP returns 403 `insufficient_scope` | Request `artifacts` scope and the canonical `/mcp` resource, then authorize again. |
 | MCP token does not work on `/api/tools` or a private URL | These routes use browser sessions in Better Auth mode. Use `/mcp` for OAuth programmatic management. |
+| A service token returns 403 | Add `library=team` to the MCP URL. Service tokens cannot use a personal library. |
+| A service token returns 401 | Send `Authorization: Bearer <token>` to `/mcp`, and check the configured digest is the SHA-256 of that exact token with no trailing newline. |
+| `/mcp` returns 503 naming `ARTIFACTS_SERVICE_TOKENS` | Fix the table: a JSON object of lowercase service names to unique, lowercase hex SHA-256 digests. |
 | A public URL still prompts for Access sign-in | Add an Access bypass for that public path. The Artifacts link setting cannot override the edge. |
 | Management requests return 403 `Origin is not allowed` | Use the deployment's own origin. The management API rejects cross-origin browser requests. |
 | My personal library looks empty after changing auth mode | Private identities differ between Access and Better Auth; see the migration note below. |
@@ -402,14 +461,16 @@ your MCP client and complete the browser sign-in described above.
 | Surface | Better Auth mode | Cloudflare Access mode |
 | --- | --- | --- |
 | Gallery and management routes such as `/api/tools` | Browser session cookie from provider sign-in | Valid signed Access assertion forwarded by Cloudflare |
-| `/mcp` | OAuth access token issued by this deployment for its MCP resource | Managed OAuth token validated by Access, which forwards a signed assertion |
+| `/mcp` | OAuth access token issued by this deployment for its MCP resource, or a [service token](#service-tokens-for-unattended-clients) for the team library | Managed OAuth token validated by Access, which forwards a signed assertion |
 | Private app or script URL | Browser session, with the current owner's library permissions | Valid Access assertion, with the current owner's library permissions |
 | Public app or script URL | No Artifacts sign-in; the handler can require application credentials | No Artifacts sign-in; the Access edge policy must also permit the path |
 
-Artifacts does not currently issue personal API keys or support a client-credentials
-grant for unattended management. In Better Auth mode, sending an MCP access token
-to `/api/tools` does not authenticate that request: OAuth bearer authentication is
-implemented only on `/mcp`. Use the MCP OAuth flow for programmatic management.
+Artifacts does not issue personal API keys or support a client-credentials grant.
+Unattended clients use administrator-configured
+[service tokens](#service-tokens-for-unattended-clients) for the team library.
+In Better Auth mode, sending an MCP access token or service token to `/api/tools`
+does not authenticate that request: bearer authentication is implemented only on
+`/mcp`. Use the MCP OAuth flow for programmatic management.
 Provider access tokens and `BETTER_AUTH_SECRET` are not Artifacts API credentials.
 
 In Better Auth mode, a custom MCP client should request the `artifacts` scope and
