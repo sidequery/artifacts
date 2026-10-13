@@ -15,6 +15,13 @@ import { localWorkspace, localMentions, localResource, localSource } from "./loc
 import { ARTIFACTS_FILE_TOOL, artifactFileResult } from "./file-contract";
 import { clientSupportsApps, toolsForClient } from "./host-contract";
 import { ARTIFACTS_SETTINGS_CAPABILITY, ARTIFACTS_SETTINGS_TOOLS, settingsTool } from "./settings-contract";
+import { callDiscoveryTool, DISCOVERY_TOOLS, isDiscoveryTool } from "./discovery";
+import { validateToolArguments } from "./validation";
+import Ajv from "ajv";
+
+const LOCAL_MCP_TOOLS = [...MCP_TOOLS, ...ARTIFACTS_WORKSPACE_TOOLS, ARTIFACTS_FILE_TOOL, ...ARTIFACTS_SETTINGS_TOOLS, ...DISCOVERY_TOOLS];
+const ajv = new Ajv({ allErrors: true, strict: false });
+const validators = Object.fromEntries(LOCAL_MCP_TOOLS.map(tool => [tool.name, ajv.compile(tool.inputSchema)]));
 
 const appClients = new WeakMap<ArtifactService, boolean>();
 
@@ -40,7 +47,7 @@ export async function handleMcpRequest(
       return ok(request.id, {});
     }
     if (request.method === "tools/list") {
-      return ok(request.id, { tools: toolsForClient([...MCP_TOOLS, ...ARTIFACTS_WORKSPACE_TOOLS, ARTIFACTS_FILE_TOOL, ...ARTIFACTS_SETTINGS_TOOLS], appClients.get(service) ?? true) });
+      return ok(request.id, { tools: toolsForClient(LOCAL_MCP_TOOLS, appClients.get(service) ?? true) });
     }
     if (request.method === "resources/list") return ok(request.id, { resources: [ARTIFACTS_RESOURCE] });
     if (request.method === "resources/templates/list") return ok(request.id, { resourceTemplates: [] });
@@ -53,6 +60,7 @@ export async function handleMcpRequest(
     if (request.method === "tools/call") {
       const params = (request.params ?? {}) as { name?: string; arguments?: Record<string, unknown> };
       const apps = appClients.get(service) ?? true;
+      if (isDiscoveryTool(params.name ?? "")) validateToolArguments(validators, params.name!, params.arguments ?? {});
       if (!apps && [...ARTIFACTS_WORKSPACE_TOOLS, ARTIFACTS_FILE_TOOL].some(tool => tool.name === params.name)) throw new Error("MCP Apps support is required for this tool");
       const result = await callTool(service, params.name ?? "", params.arguments ?? {});
       if (!apps) { const { _meta, ...textResult } = result; return ok(request.id, textResult); }
@@ -69,6 +77,12 @@ async function callTool(
   name: string,
   args: Record<string, unknown>,
 ): Promise<CallToolResult> {
+  if (isDiscoveryTool(name)) {
+    return callDiscoveryTool(LOCAL_MCP_TOOLS, name, args, async (operation, input) => {
+      validateToolArguments(validators, operation, input);
+      return callTool(service, operation, input);
+    });
+  }
   if (name === "artifacts_file") return artifactFileResult(args);
   if (ARTIFACTS_SETTINGS_TOOLS.some(tool => tool.name === name)) return settingsTool({ workspace: service.artifactsDir, async gallery() { return localWorkspace(service, "library").gallery!; } }, name, args);
   if (name === "artifacts_source") {
@@ -89,7 +103,7 @@ async function callTool(
   }
   const deliver = args.preview !== false && (appClients.get(service) ?? true);
   if (args.preview !== undefined && typeof args.preview !== "boolean") throw new Error("preview must be a boolean");
-  if (name === "artifact_guide") return artifactGuideResult();
+  if (name === "artifact_guide") return artifactGuideResult(args.topic as Parameters<typeof artifactGuideResult>[0]);
   if (name === "artifact_export") return text(JSON.stringify(service.exportProject({ name: args.name as string | undefined, version_id: args.version_id as string | undefined })));
   if (name === "artifact_import") {
     const archive = parseProjectArchive(args.archive, "artifact");

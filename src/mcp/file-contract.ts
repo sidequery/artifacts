@@ -1,8 +1,9 @@
 import { OpenAIFileEntrypointInputSchema } from "@openai/mcp-extensions/server";
 import { ARTIFACTS_APP_URI } from "./app-contract";
+import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 /** Open only our owned format; ordinary TSX remains with the host's normal viewer. */
-export const ARTIFACTS_FILE_TOOL = {
+export const ARTIFACTS_FILE_TOOL: Tool = {
   name: "artifacts_file",
   title: "Artifact source editor",
   description: "View or explicitly edit an owned .artifact.tsx file using host-managed resource access. Opening a file does not execute, import, or publish its source.",

@@ -3,10 +3,11 @@ import { Hono } from "hono";
 import type { DurableObjectNamespace, Fetcher } from "@cloudflare/workers-types";
 import { ArtifactLibrary } from "./library";
 import { authenticate, type AuthEnvironment } from "./auth";
-import { ManagedArtifactService } from "./managed-service";
 // esbuild 0.28.1 must initialize Better Auth's shared Zod module before
-// the MCP SDK constructs its top-level schemas (Zod 4.5.4).
+// the MCP SDK constructs its top-level schemas, including through managed
+// dispatch's tool registry (Zod 4.5.4).
 import { authenticateBetterAuth, getArtifactAuth, ArtifactAuthConfigurationError, type BetterAuthEnvironment, type ArtifactUser } from "./better-auth";
+import { ManagedArtifactService } from "./managed-service";
 import { handleCloudMcp } from "./mcp";
 import { servicePrincipal, SERVICE_TOKEN_AUTHORITY, type ServiceTokenEnvironment } from "./service-tokens";
 import { readRequestText, readToolBody } from "./http";

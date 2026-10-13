@@ -226,6 +226,12 @@ try {
   if (result.isError || !JSON.stringify(result.content).includes("Package smoke")) throw new Error("installed MCP read failed");
   const opened = await client.callTool({ name: "artifact_open", arguments: { name: "package-smoke" } });
   if (opened.isError || !opened._meta?.artifact) throw new Error("installed MCP preview failed");
+  const discovered = await client.callTool({ name: "artifacts_discover", arguments: { operation: "artifact_restore", include_docs: false } });
+  if (discovered.structuredContent?.dispatch !== "artifacts_execute") throw new Error("installed MCP discovery failed");
+  const history = await client.callTool({ name: "artifacts_query", arguments: { operation: "artifact_history", arguments: { name: "package-smoke" } } });
+  if (history.isError || !JSON.parse(history.content[0].text).versions.length) throw new Error("installed MCP query failed");
+  const restored = await client.callTool({ name: "artifacts_execute", arguments: { operation: "artifact_restore", arguments: { version_id: opened._meta.artifact.versionId } } });
+  if (restored.isError || !restored._meta?.artifact) throw new Error("installed MCP dispatched preview failed");
 } finally { await client.close(); }
 `);
     await run([process.execPath, "run", mcpSmoke], clientDirectory, isolatedEnv);

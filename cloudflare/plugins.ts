@@ -9,7 +9,7 @@ export { createPluginDispatcher, PluginError, PLUGIN_JSON_LIMIT, type PluginInvo
 export const PLUGIN_GUIDE = `Deployment plugins provide installed browser modules and authenticated server functions. Call plugins_list to discover operation names, schemas, and read-only hints. Call artifact_plugin_call with {plugin, operation, input}, or use pluginCall from sidequery/artifacts in a hosted artifact. Calls run as the authenticated deployment user, independently of artifact, version, workspace, or library selectors. Plugins may restrict users and must check row-level access in their handlers. Public standalone artifacts cannot call plugins. Provider credentials stay on the server. Artifact backends and scripts do not receive this bridge.`;
 export const pluginCatalog = catalog;
 
-const installedNames = new Set(installed.map(plugin => plugin.name));
+const installedNames = new Set<string>(installed.map(plugin => plugin.name));
 const dispatchInstalled = createPluginDispatcher(installed, { input: validatePluginInput, output: validatePluginOutput });
 
 /** Build-time plugins take precedence; a published plugin cannot shadow one. */

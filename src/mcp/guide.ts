@@ -13,7 +13,7 @@ export const LEGACY_GUIDE_EXPORTS = [
   "canvasPaletteDark", "canvasPaletteLight", "canvasTypography",
 ];
 
-export function artifactGuide() {
+function fullArtifactGuide() {
   return `# Sidequery Artifacts SDK contract
 
 Read this guide before your first artifact_write in the conversation. Reuse it for subsequent creates and edits; read it again when unsure about the SDK.
@@ -88,6 +88,21 @@ artifact_write creates or replaces the full source and then validates it. artifa
 `;
 }
 
-export function artifactGuideResult() {
-  return { content: [{ type: "text" as const, text: artifactGuide() }], isError: false };
+export type ArtifactGuideTopic = "browser" | "backend" | "files" | "plugins" | "all";
+
+export function artifactGuide(topic: ArtifactGuideTopic = "browser") {
+  const sections = fullArtifactGuide().split(/(?=^## )/m);
+  const specialized = ["## Hosted servers and SQLite", "## Persistent files", "## Deployment plugins"];
+  const heading = { backend: specialized[0]!, files: specialized[1]!, plugins: specialized[2]! };
+  let selected = sections;
+  if (topic === "browser") selected = sections.filter(section => !specialized.some(title => section.startsWith(title)));
+  else if (topic !== "all") {
+    if (!Object.hasOwn(heading, topic)) throw new Error("Unknown artifact guide topic");
+    selected = sections.filter(section => section.startsWith(heading[topic]));
+  }
+  return selected.join("") + "\nAdvanced names in this guide are catalog operations: inspect them with artifacts_discover({operation: name}), then use artifacts_query({operation, arguments}) for reads or artifacts_execute({operation, arguments}) for actions. All capabilities stay in this connection. Read artifact_guide with topic backend, files, plugins or all when needed.\n";
+}
+
+export function artifactGuideResult(topic?: ArtifactGuideTopic) {
+  return { content: [{ type: "text" as const, text: artifactGuide(topic) }], isError: false };
 }

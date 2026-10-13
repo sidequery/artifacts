@@ -391,7 +391,14 @@ app.ontoolresult = result => {
     return;
   }
   // Diagnostics-only mutations deliberately leave the working view mounted.
-  workspaceView?.refresh();
+  if (workspaceView) workspaceView.refresh();
+  else if (!hasArtifact && !fileEditor) {
+    // Shared execution can finish without an artifact preview, as with scripts
+    // and deployments. A fresh view must show the result instead of waiting.
+    status.textContent = result.content?.filter(item => item.type === "text").map(item => item.text).join("\n")
+      || (result.structuredContent ? JSON.stringify(result.structuredContent, null, 2) : "Operation completed.");
+    reportSize();
+  }
 };
 app.ontoolinput = async ({ arguments: args }) => {
   const file = args?.file as { resourceUri?: string; name?: string } | undefined;

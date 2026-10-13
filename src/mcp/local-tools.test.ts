@@ -46,9 +46,10 @@ test("MCP initialize and tools/list", async () => {
   expect(tools).toContain("artifact_read");
   expect(tools).toContain("artifact_edit");
   expect(tools).toContain("artifact_open");
-  expect(tools).toContain("artifact_history");
-  expect(tools).toContain("artifact_version");
-  expect(tools).toContain("artifact_restore");
+  expect(tools.sort()).toEqual([
+    "artifact_edit", "artifact_guide", "artifact_list", "artifact_open", "artifact_read", "artifact_write",
+    "artifacts_discover", "artifacts_execute", "artifacts_query",
+  ]);
 });
 
 test("MCP guide is read-only", async () => {

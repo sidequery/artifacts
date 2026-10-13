@@ -115,8 +115,18 @@ For the local host, use `http://127.0.0.1:4786/mcp`. Remote clients use the
 configured deployment's sign-in flow. Optional `workspace` and `library` query
 parameters select a workspace or the team library.
 
-Ask your agent to read `artifact_guide` for React apps or `script_guide` for
-TypeScript scripts before authoring. For example:
+The connection advertises nine model tools: `artifact_guide`, `artifact_list`,
+`artifact_read`, `artifact_write`, `artifact_edit`, `artifact_open`,
+`artifacts_discover`, `artifacts_query`, and `artifacts_execute`. All 48 hosted
+operations remain available through that same connection. Use `artifacts_discover`
+to find an operation and retrieve its exact argument schema and relevant guide;
+call it through `artifacts_query` for reads or `artifacts_execute` for actions.
+Local file connections expose their supported artifact operations through the
+same interface. No configuration switch is needed.
+
+Ask your agent to read `artifact_guide` before authoring React apps. For scripts,
+inspect `script_write` through `artifacts_discover`, which also returns the script
+guide. For example:
 
 > Build a team lunch poll with a React UI and a SQLite backend.
 
