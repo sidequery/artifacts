@@ -151,7 +151,7 @@ jobs:
           flavor: prefix=${{ matrix.prefix }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
-            type=sha,format=long
+            type=sha,format=long,prefix=${{ matrix.prefix }}sha-
             type=ref,event=tag
       - uses: docker/build-push-action@v6
         with:
