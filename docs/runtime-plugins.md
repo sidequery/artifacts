@@ -128,7 +128,10 @@ bun x wrangler r2 object put artifacts-plugins/plugins/warehouse.json --file war
 ```
 
 The bundle is one file: the handlers, their dependencies, and the input/output
-validators. Each node uses a new or replaced file within about five seconds. Delete
+validators. It is reproducible: the same plugin source and Artifacts checkout produce
+the same bytes on any machine, so a deployment repository can commit the bundle and
+check it against its source in CI. The plugin may live in another repository; its
+`@sidequery/artifacts/plugins` import resolves to the checkout used for bundling. Each node uses a new or replaced file within about five seconds. Delete
 the object to remove the plugin.
 
 A published plugin works like a build-time plugin. It appears in `plugins_list` and

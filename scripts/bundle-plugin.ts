@@ -8,6 +8,19 @@ import { pluginInfo, pluginValidatorModule, validatePlugins } from "./prepare-pl
 import { parseRuntimePlugin, runtimePluginKey, type RuntimePluginRecord } from "../src/plugins/runtime";
 
 const root = resolve(import.meta.dir, "..");
+const resolution = {
+  // Validators import Ajv's runtime helpers; plugins may import the typed helper without installing the package.
+  nodePaths: [join(root, "node_modules")],
+  alias: { "@sidequery/artifacts/plugins": join(root, "src/plugins/config.ts") },
+};
+
+/** Reads the plugin definition from a bundle of its module, so a plugin kept in
+ * another repository needs no install and the metadata comes from the code that ships. */
+async function loadPlugin(entryPath: string, work: string): Promise<unknown> {
+  const outfile = join(work, "definition.mjs");
+  await build({ entryPoints: [entryPath], bundle: true, outfile, format: "esm", platform: "node", target: "es2022", logLevel: "silent", ...resolution });
+  return (await import(pathToFileURL(outfile).href)).default;
+}
 
 /**
  * Builds the self-contained record a deployment loads from `plugins/<name>.json`
@@ -19,12 +32,12 @@ const root = resolve(import.meta.dir, "..");
  */
 export async function bundleRuntimePlugin(entry: string): Promise<RuntimePluginRecord> {
   const entryPath = resolve(entry);
-  const [plugin] = validatePlugins([(await import(pathToFileURL(entryPath).href)).default]);
-  if (plugin!.browser || plugin!.types) throw new Error(`${plugin!.name}: published plugins provide server operations only; browser modules need a deployment build`);
-  if (!Object.keys(plugin!.operations ?? {}).length) throw new Error(`${plugin!.name} has no server operations`);
-  const info = pluginInfo(plugin!);
   const work = await mkdtemp(join(tmpdir(), "artifacts-plugin-"));
   try {
+    const [plugin] = validatePlugins([await loadPlugin(entryPath, work)]);
+    if (plugin!.browser || plugin!.types) throw new Error(`${plugin!.name}: published plugins provide server operations only; browser modules need a deployment build`);
+    if (!Object.keys(plugin!.operations ?? {}).length) throw new Error(`${plugin!.name} has no server operations`);
+    const info = pluginInfo(plugin!);
     await writeFile(join(work, "validators.js"), pluginValidatorModule([info]));
     await writeFile(join(work, "entry.js"), [
       `import plugin from ${JSON.stringify(entryPath)};`,
@@ -34,11 +47,12 @@ export async function bundleRuntimePlugin(entry: string): Promise<RuntimePluginR
     ].join("\n"));
     const bundle = await build({
       entryPoints: [join(work, "entry.js")], bundle: true, write: false, format: "esm", target: "es2022",
-      platform: "browser", conditions: ["workerd", "worker", "browser"], external: ["node:*", "cloudflare:*"],
-      // Validators import Ajv's runtime helpers; plugins may import the typed helper without installing the package.
-      nodePaths: [join(root, "node_modules")],
-      alias: { "@sidequery/artifacts/plugins": join(root, "src/plugins/config.ts") },
+      platform: "browser", conditions: ["workerd", "worker", "browser"], external: ["node:*", "cloudflare:*"], ...resolution,
       define: { "process.env.NODE_ENV": '"production"' }, legalComments: "none", logLevel: "silent",
+      // Minified output carries no module path comments, so the same source and
+      // lockfile produce the same bytes on any machine and from any directory, and
+      // a deployment repo can check a committed bundle against its source.
+      minify: true,
     });
     if (bundle.outputFiles.length !== 1) throw new Error(`${plugin!.name} must bundle into one module`);
     const module = bundle.outputFiles[0]!.text;
