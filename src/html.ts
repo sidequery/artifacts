@@ -34,7 +34,7 @@ export function artifactHtml(opts: {
         color: #f0f0f0;
         font-family: ui-sans-serif, system-ui, sans-serif;
       }
-      #root { padding: 24px; box-sizing: border-box; }
+      #root { box-sizing: border-box; }
     </style>
   </head>
   <body>
