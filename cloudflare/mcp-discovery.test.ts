@@ -253,7 +253,9 @@ integrationTest("query and nested schema guards reject side effects without chan
 });
 
 integrationTest("dispatch preserves authenticated ownership, revision access and plugin authorization", async () => {
-  expect((await fetch(`${origin}/mcp`, { method: "POST", body: "{}" })).status).toBe(401);
+  // Authentication rejects before reading the body; do not pool that socket
+  // with the authenticated MCP clients used for the following access probes.
+  expect((await fetch(`${origin}/mcp`, { method: "POST", headers: { Connection: "close" }, body: "{}" })).status).toBe(401);
   for (const [name, operation, argumentsValue] of [
     ["artifacts_query", "artifact_version", { version_id: privateVersion }],
     ["artifacts_query", "artifact_files", { version_id: privateVersion, request: { operation: "list" } }],
