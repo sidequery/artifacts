@@ -33,3 +33,8 @@ export type ArtifactPlugin = {
 export function definePlugins<const T extends readonly ArtifactPlugin[]>(plugins: T): T {
   return plugins;
 }
+
+/** One plugin per module, for publishing at runtime with scripts/bundle-plugin.ts. */
+export function definePlugin<const T extends ArtifactPlugin>(plugin: T): T {
+  return plugin;
+}

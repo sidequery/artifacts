@@ -40,21 +40,18 @@ export function validatePlugins(value: unknown): readonly ArtifactPlugin[] {
   return value as ArtifactPlugin[];
 }
 
-export async function preparePlugins(root: string, output: string, selectedConfig = process.env.ARTIFACTS_PLUGINS_CONFIG ?? process.env.CANVAS_PLUGINS_CONFIG) {
-  const defaultConfig = existsSync(resolve(root, "artifacts.plugins.ts")) ? "artifacts.plugins.ts"
-    : existsSync(resolve(root, "canvas.plugins.ts")) ? "canvas.plugins.ts" : "artifacts.plugins.ts";
-  const configPath = resolve(root, selectedConfig ?? defaultConfig);
-  if (selectedConfig && !existsSync(configPath)) throw new Error("ARTIFACTS_PLUGINS_CONFIG does not exist");
-  const configured = existsSync(configPath);
-  const plugins = validatePlugins(configured ? (await import(pathToFileURL(configPath).href)).default : []);
-  const browser = await prepareBrowserPlugins(plugins, configured ? dirname(configPath) : root);
-  const catalog: PluginInfo[] = plugins.map(plugin => ({
+export function pluginInfo(plugin: ArtifactPlugin): PluginInfo {
+  return {
     name: plugin.name, description: plugin.description, browser: Boolean(plugin.browser),
     operations: Object.entries(plugin.operations ?? {}).map(([name, operation]) => ({
       name, description: operation.description, inputSchema: operation.inputSchema,
       ...(operation.outputSchema ? { outputSchema: operation.outputSchema } : {}), readOnly: operation.readOnly === true,
     })),
-  }));
+  };
+}
+
+/** Standalone Ajv validators as an ES module, so no schema is compiled at request time. */
+export function pluginValidatorModule(catalog: readonly PluginInfo[]): string {
   const ajv = new Ajv({ allErrors: true, strict: false, code: { source: true, esm: true } });
   const exports: Record<string, string> = {};
   const inputs: string[] = [], outputs: string[] = [];
@@ -69,9 +66,21 @@ export async function preparePlugins(root: string, output: string, selectedConfi
       outputs.push(`${key}:${outputName}`);
     } else outputs.push(`${key}:()=>true`);
   }
-  const validation = standaloneCode(ajv, exports) + `\nconst inputs={${inputs.join(",")}},outputs={${outputs.join(",")}};\n`
+  return standaloneCode(ajv, exports) + `\nconst inputs={${inputs.join(",")}},outputs={${outputs.join(",")}};\n`
     + 'export function validatePluginInput(plugin,operation,input){const key=plugin+"\\0"+operation;return Object.hasOwn(inputs,key)&&inputs[key](input);}\n'
     + 'export function validatePluginOutput(plugin,operation,output){const key=plugin+"\\0"+operation;return Object.hasOwn(outputs,key)&&outputs[key](output);}\n';
+}
+
+export async function preparePlugins(root: string, output: string, selectedConfig = process.env.ARTIFACTS_PLUGINS_CONFIG ?? process.env.CANVAS_PLUGINS_CONFIG) {
+  const defaultConfig = existsSync(resolve(root, "artifacts.plugins.ts")) ? "artifacts.plugins.ts"
+    : existsSync(resolve(root, "canvas.plugins.ts")) ? "canvas.plugins.ts" : "artifacts.plugins.ts";
+  const configPath = resolve(root, selectedConfig ?? defaultConfig);
+  if (selectedConfig && !existsSync(configPath)) throw new Error("ARTIFACTS_PLUGINS_CONFIG does not exist");
+  const configured = existsSync(configPath);
+  const plugins = validatePlugins(configured ? (await import(pathToFileURL(configPath).href)).default : []);
+  const browser = await prepareBrowserPlugins(plugins, configured ? dirname(configPath) : root);
+  const catalog = plugins.map(pluginInfo);
+  const validation = pluginValidatorModule(catalog);
   await mkdir(output, { recursive: true });
   let configImport = relative(output, configPath).replaceAll("\\", "/");
   if (!configImport.startsWith(".") && !isAbsolute(configImport)) configImport = `./${configImport}`;

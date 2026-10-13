@@ -16,7 +16,7 @@ type RuntimeOptions = {
   bindings: Record<string, string>;
 };
 
-type RunningCelld = {
+export type RunningCelld = {
   process: ReturnType<typeof Bun.spawn>;
   logs: () => string;
   drained: Promise<void>;
@@ -83,7 +83,7 @@ async function capture(stream: ReadableStream<Uint8Array> | number | undefined, 
   }
 }
 
-function spawnCelld(binary: string, esbuild: string, project: string, port: number): RunningCelld {
+export function spawnCelld(binary: string, esbuild: string, project: string, port: number): RunningCelld {
   let output = "";
   const process = Bun.spawn({
     cmd: [binary, "dev", project, "--host", "127.0.0.1", "--port", String(port), "--no-watch", "--logs"],
@@ -97,7 +97,7 @@ function spawnCelld(binary: string, esbuild: string, project: string, port: numb
   return { process, logs: () => output, drained };
 }
 
-async function waitForReady(runtime: RunningCelld, url: string) {
+export async function waitForReady(runtime: RunningCelld, url: string) {
   const deadline = Date.now() + START_TIMEOUT_MS;
   let lastResponse = "no HTTP response";
   while (Date.now() < deadline) {
@@ -117,7 +117,7 @@ async function waitForReady(runtime: RunningCelld, url: string) {
   throw new Error(`celld did not become ready within ${START_TIMEOUT_MS}ms (${lastResponse}):\n${runtime.logs()}`);
 }
 
-async function stopCelld(runtime: RunningCelld | undefined) {
+export async function stopCelld(runtime: RunningCelld | undefined) {
   if (!runtime) return;
   if (runtime.process.exitCode === null) runtime.process.kill("SIGINT");
   const stopped = await Promise.race([
