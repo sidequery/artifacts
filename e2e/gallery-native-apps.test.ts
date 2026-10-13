@@ -377,6 +377,33 @@ test("Worker gallery deploys drafts, manages revisions/secrets and preserves edi
   }
 }, 30000);
 
+test("a newly configured fleet provider enables Worker creation without reloading the page", async () => {
+  const build = await Bun.build({ entrypoints: [new URL("../src/gallery/client.tsx", import.meta.url).pathname], target: "browser" });
+  if (!build.success) throw new Error(build.logs.join("\n"));
+  const js = await build.outputs[0]!.text();
+  let configured = false;
+  const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch(request) {
+    const path = new URL(request.url).pathname;
+    if (path === "/gallery.js") return new Response(js, { headers: { "content-type": "text/javascript" } });
+    if (path === "/api/session") return Response.json({});
+    if (path === "/api/gallery") return Response.json({ workspace: "default", artifacts: [], workerApps: [], nativeAppProviders: configured ? ["celld-fleet"] : [], capabilities: { nativeApps: true, subscriptions: true, subscriptionTransport: "events" } });
+    if (path === "/api/gallery/events") return new Response(new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode("data: ready\n\n")); } }), { headers: { "content-type": "text/event-stream" } });
+    return new Response(galleryHtml(), { headers: { "content-type": "text/html" } });
+  } });
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.goto(`${server.url.href}?view=workers`);
+    await page.getByRole("heading", { name: "Worker apps are unavailable" }).waitFor();
+    configured = true;
+    await page.evaluate(() => window.dispatchEvent(new Event("online")));
+    await page.getByLabel("Worker app name").fill("fleet-app");
+    await page.getByRole("button", { name: "Continue to editor", exact: true }).click();
+    await page.getByRole("textbox", { name: "worker.ts", exact: true }).waitFor();
+    expect(await page.getByRole("button", { name: "Save and deploy Worker", exact: true }).isEnabled()).toBe(true);
+  } finally { await browser.close(); server.stop(true); }
+}, 30_000);
+
 test("Worker provider empty state has documentation and no creation editor", async () => {
   const build = await Bun.build({
     entrypoints: [new URL("../src/gallery/client.tsx", import.meta.url).pathname],

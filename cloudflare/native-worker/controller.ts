@@ -6,22 +6,26 @@ import { artifactApiResponse } from "../artifact-api";
 import { appScope, parseManifest, planResources, type AppManifest, type ResourceLedger } from "./manifest";
 import { CloudflareNativeProvider, type CloudflareProviderState } from "./cloudflare";
 import type { NativeDeployment, NativeRevision, ProviderResult } from "./types";
+import { fleetBinding, fleetScheduleBinding } from "./fleet-contract";
 
 export type NativeEnvironment = {
   NATIVE_CF_ACCOUNT_ID?: string; NATIVE_CF_API_TOKEN?: string;
   NATIVE_CELLD_OPERATOR_URL?: string; NATIVE_CELLD_OPERATOR_TOKEN?: string; NATIVE_CELLD_TRUSTED_APPS?: string;
+  NATIVE_CELLD_FLEET_OPERATOR_URL?: string; NATIVE_CELLD_FLEET_OPERATOR_TOKEN?: string;
+  [binding: `ARTIFACTS_APP_${string}`]: Fetcher | undefined;
 };
 type Selection = { owner: string; workspace: string; name: string };
 type Draft = { source: string; manifest: AppManifest; project: ArtifactProject };
 type ProviderState = CloudflareProviderState & { operatorOrigin?: string };
-type Row = Selection & { id: string; provider: "cloudflare" | "celld-local"; desired: string | null; active: string | null;
+type Row = Selection & { id: string; provider: "cloudflare" | "celld-local" | "celld-fleet"; desired: string | null; active: string | null;
   status: string; stage: string; resources: string; provider_state: string; secrets: string; endpoint: string | null;
   draft: string; operation: string; attempts: number; error: string | null; updated_at: string };
 const bytes = (value: string) => new TextEncoder().encode(value).byteLength;
 
 export function nativeProviders(env: NativeEnvironment) {
   return [env.NATIVE_CF_ACCOUNT_ID && env.NATIVE_CF_API_TOKEN ? "cloudflare" : null,
-    env.NATIVE_CELLD_OPERATOR_URL && env.NATIVE_CELLD_OPERATOR_TOKEN && env.NATIVE_CELLD_TRUSTED_APPS === "true" ? "celld-local" : null].filter((value): value is "cloudflare" | "celld-local" => value !== null);
+    env.NATIVE_CELLD_FLEET_OPERATOR_URL && env.NATIVE_CELLD_FLEET_OPERATOR_TOKEN && env.NATIVE_CELLD_TRUSTED_APPS === "true" ? "celld-fleet" : null,
+    env.NATIVE_CELLD_OPERATOR_URL && env.NATIVE_CELLD_OPERATOR_TOKEN && env.NATIVE_CELLD_TRUSTED_APPS === "true" ? "celld-local" : null].filter((value): value is Row["provider"] => value !== null);
 }
 function selection(input: Selection): Selection {
   for (const key of ["owner", "workspace", "name"] as const) {
@@ -47,6 +51,8 @@ export class NativeApps extends DurableObject<NativeEnvironment> {
       unique(owner,workspace,name))`);
     this.sql.exec(`create table if not exists native_revisions (
       app text not null, id text not null, snapshot text not null, created_at text not null, primary key(app,id))`);
+    this.sql.exec(`create table if not exists native_cron_runs (
+      app text not null, cron text not null, scheduled_time integer not null, primary key(app,cron,scheduled_time))`);
     // A restarted controller resumes persisted intent. Alarms never create a new logical deployment.
     ctx.blockConcurrencyWhile(async () => {
       if (this.sql.exec("select id from native_apps where status='deploying'").toArray().length) await ctx.storage.setAlarm(Date.now() + 1000);
@@ -107,7 +113,7 @@ export class NativeApps extends DurableObject<NativeEnvironment> {
       this.sql.exec("insert into native_apps(id,owner,workspace,name,provider,status,stage,provider_state,draft,operation,updated_at) values(?,?,?,?,?,'draft','draft',?,?,?,?)",
         id, input.owner, input.workspace, input.name, provider,
         JSON.stringify({ ids: {}, migrations: {}, gatewayToken: Array.from(randomBytes(32), byte => byte.toString(16).padStart(2, "0")).join(""),
-          ...(provider === "cloudflare" ? { accountId: this.env.NATIVE_CF_ACCOUNT_ID } : { operatorOrigin: this.operatorUrl().origin }),
+          ...(provider === "cloudflare" ? { accountId: this.env.NATIVE_CF_ACCOUNT_ID } : { operatorOrigin: this.operatorUrl(provider === "celld-fleet").href }),
         } satisfies ProviderState),
         JSON.stringify({ source: input.source, manifest, project: emptyProject() }), crypto.randomUUID(), new Date().toISOString());
       row = this.row(input);
@@ -203,9 +209,19 @@ export class NativeApps extends DurableObject<NativeEnvironment> {
         result = await new CloudflareNativeProvider(this.env).reconcile(deployment, state, async (stage, providerState) => {
           this.sql.exec("update native_apps set stage=?,provider_state=?,updated_at=? where id=?", stage, JSON.stringify(providerState), new Date().toISOString(), id);
         });
+      } else if (row.provider === "celld-fleet") {
+        const endpoint = this.operatorUrl(true);
+        if (state.operatorOrigin !== endpoint.href) throw new Error("App fleet operator changed; restore its configured operator before reconciling");
+        this.sql.exec("update native_apps set stage='fleet-publication' where id=?", id);
+        const response = await fetch(new URL("deploy", endpoint), { method: "POST", headers: { Authorization: `Bearer ${this.env.NATIVE_CELLD_FLEET_OPERATOR_TOKEN}`, "Content-Type": "application/json" }, body: JSON.stringify(deployment), signal: AbortSignal.timeout(120_000), redirect: "manual" });
+        if (!response.ok) throw new Error(`celld fleet publication failed (${response.status})`);
+        result = await response.json() as ProviderResult;
+        if (result.revision !== revision.id) throw new Error("celld fleet operator returned an invalid revision");
+        // Native service bindings carry requests; no provider URL is trusted.
+        result.endpoint = `https://native-app.internal/${id}/`;
       } else {
         const endpoint = this.operatorUrl();
-        if (state.operatorOrigin !== endpoint.origin) throw new Error("App operator origin changed; restore its configured operator before reconciling");
+        if (state.operatorOrigin !== endpoint.origin && state.operatorOrigin !== endpoint.href) throw new Error("App operator origin changed; restore its configured operator before reconciling");
         this.sql.exec("update native_apps set stage='operator-reconcile' where id=?", id);
         const response = await fetch(new URL("deploy", endpoint), { method: "POST", headers: { Authorization: `Bearer ${this.env.NATIVE_CELLD_OPERATOR_TOKEN}`, "Content-Type": "application/json" }, body: JSON.stringify(deployment), signal: AbortSignal.timeout(120_000), redirect: "manual" });
         if (!response.ok) throw new Error(`celld operator deployment failed (${response.status})`);
@@ -222,12 +238,33 @@ export class NativeApps extends DurableObject<NativeEnvironment> {
       return { ok: false, ...this.summary(this.byId(id)) };
     }
   }
-  private operatorUrl() {
-    if (!nativeProviders(this.env).includes("celld-local")) throw new Error("Trusted celld native provider is not configured");
-    const endpoint = new URL(this.env.NATIVE_CELLD_OPERATOR_URL!);
-    if (endpoint.username || endpoint.password || endpoint.search || endpoint.hash || endpoint.pathname !== "/"
-      || endpoint.protocol !== "https:" && !(endpoint.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(endpoint.hostname))) throw new Error("Operator URL must be HTTPS or loopback HTTP, without a path or credentials");
+  private operatorUrl(fleet = false) {
+    if (!nativeProviders(this.env).includes(fleet ? "celld-fleet" : "celld-local")) throw new Error("Trusted celld native provider is not configured");
+    const endpoint = new URL(fleet ? this.env.NATIVE_CELLD_FLEET_OPERATOR_URL! : this.env.NATIVE_CELLD_OPERATOR_URL!);
+    const validPath = endpoint.pathname === "/" || fleet && /^\/[a-z0-9/-]+\/$/.test(endpoint.pathname);
+    const loopbackHttp = endpoint.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(endpoint.hostname);
+    if (endpoint.username || endpoint.password || endpoint.search || endpoint.hash || !validPath || !(endpoint.protocol === "https:" || loopbackHttp)) throw new Error("Operator URL must be HTTPS or loopback HTTP, without credentials or a query");
     return endpoint;
+  }
+  async fireCron(event: { cron: string; scheduledTime: number }) {
+    if (typeof event.cron !== "string" || !Number.isSafeInteger(event.scheduledTime)) throw new Error("Invalid cron event");
+    let failed = false;
+    const apps = this.sql.exec<Row>("select * from native_apps where provider='celld-fleet' and status='active' and active is not null").toArray();
+    for (const app of apps) {
+      if (!this.revision(app.id, app.active!).manifest.triggers.crons.includes(event.cron)) continue;
+      await this.serial(app.id, async () => {
+        if (this.sql.exec("select 1 from native_cron_runs where app=? and cron=? and scheduled_time=?", app.id, event.cron, event.scheduledTime).toArray().length) return;
+        const scheduler = this.env[fleetScheduleBinding(app.id)] as unknown as { runScheduled(event: { cron: string; scheduledTime: number }): Promise<{ outcome: string; noRetry: boolean }> } | undefined;
+        try {
+          if (!scheduler) throw new Error("Fleet app scheduler unavailable");
+          const result = await scheduler.runScheduled(event);
+          if (result.outcome !== "ok" && !result.noRetry) { failed = true; return; }
+          this.sql.exec("insert or ignore into native_cron_runs values(?,?,?)", app.id, event.cron, event.scheduledTime);
+          this.sql.exec("delete from native_cron_runs where app=? and scheduled_time<?", app.id, event.scheduledTime - 7 * 86_400_000);
+        } catch { failed = true; }
+      });
+    }
+    return { failed };
   }
   async alarm() {
     const rows = this.sql.exec<Row>("select * from native_apps where status='deploying' or (status='recovery-required' and attempts<3)").toArray();
@@ -248,11 +285,17 @@ export class NativeApps extends DurableObject<NativeEnvironment> {
     const target = new URL(request.url), endpoint = new URL(row.endpoint);
     endpoint.pathname = endpoint.pathname.replace(/\/$/, "") + target.pathname;
     endpoint.search = target.search;
-    headers.set("x-artifacts-target-url", request.url);
-    if (row.provider === "cloudflare") {
-      headers.set("x-artifacts-gateway-token", (JSON.parse(row.provider_state) as CloudflareProviderState).gatewayToken);
-    } else headers.set("authorization", `Bearer ${this.env.NATIVE_CELLD_OPERATOR_TOKEN}`);
-    const response = await fetch(endpoint, { method: request.method, headers, body: request.body, redirect: "manual" });
+    let response: Response;
+    if (row.provider === "celld-fleet") {
+      const worker = this.env[fleetBinding(row.id)];
+      if (!worker) return new Response("Fleet app deployment is not available on this node yet", { status: 503 });
+      response = await worker.fetch(new Request(request.url, { method: request.method, headers, body: request.body, redirect: "manual" }));
+    } else {
+      headers.set("x-artifacts-target-url", request.url);
+      if (row.provider === "cloudflare") headers.set("x-artifacts-gateway-token", (JSON.parse(row.provider_state) as CloudflareProviderState).gatewayToken);
+      else headers.set("authorization", `Bearer ${this.env.NATIVE_CELLD_OPERATOR_TOKEN}`);
+      response = await fetch(endpoint, { method: request.method, headers, body: request.body, redirect: "manual" });
+    }
     if (response.status === 101) {
       const output = new Headers(response.headers); output.delete("set-cookie");
       return new Response(null, { status: 101, headers: output, webSocket: response.webSocket });

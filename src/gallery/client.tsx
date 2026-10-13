@@ -17,7 +17,7 @@ import { DraftProvider, confirmLeavingDrafts, useDrafts } from "./drafts";
 import { ProjectImportPanel } from "./project-transfer";
 import { NativeAppEditor, type NativeAppEditorHandle } from "./native-apps";
 import { galleryStyles } from "./styles";
-import { subscribeGallery } from "./subscription";
+import { subscribeGallery, subscribeGalleryEvents } from "./subscription";
 
 type Scope = "current" | "all";
 type DetailTab = "preview" | "source" | "schedule" | "requests" | "settings";
@@ -144,6 +144,7 @@ function App() {
   const [accountError, setAccountError] = useState("");
   const createdRemix = useRef<{name:string;workspace:string;kind:string} | null>(null);
   const galleryController = useRef<AbortController | null>(null);
+  const galleryLoaded = useRef(false);
   const galleryRequest = useRef(0);
   const sourceRequest = useRef(0);
   const previewFrame = useRef<HTMLIFrameElement>(null);
@@ -166,8 +167,8 @@ function App() {
     const controller = new AbortController();
     galleryController.current = controller;
     const request = ++galleryRequest.current;
-    setLoading(true);
-    setGalleryError("");
+    // Background reconciliation must keep the loaded library and editors mounted.
+    setLoading(!galleryLoaded.current);
 
     try {
       let offset = 0;
@@ -195,6 +196,8 @@ function App() {
         offset = page.nextOffset;
       } while (!controller.signal.aborted);
       if (request !== galleryRequest.current) return;
+      galleryLoaded.current = true;
+      setGalleryError("");
 
       setGallery(previous => {
         const existing = new Map(previous?.artifacts.map(item => [item.key, item]));
@@ -227,10 +230,14 @@ function App() {
   useEffect(() => {
     if (!gallery?.capabilities?.subscriptions) return;
     const url = new URL(galleryUrl(scope), window.location.href);
+    if (gallery.capabilities.subscriptionTransport === "events") {
+      url.pathname = "/api/gallery/events";
+      return subscribeGalleryEvents(url.href, () => void loadGallery(), setLiveConnected);
+    }
     url.pathname = "/api/gallery/subscribe";
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
     return subscribeGallery(url.href, () => void loadGallery(), setLiveConnected);
-  }, [gallery?.capabilities?.subscriptions, scope, loadGallery]);
+  }, [gallery?.capabilities?.subscriptions, gallery?.capabilities?.subscriptionTransport, scope, loadGallery]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -621,7 +628,7 @@ function App() {
               {creatingKind === "artifact" ? <ArtifactSourcePanel key="new-artifact" workspace={gallery?.workspace ?? "default"} hosted={!!gallery?.capabilities?.links} onCancel={() => setCreatingKind(null)} onSaved={name => createdItem(name, "artifact")} />
                 : creatingKind === "script" ? <ScriptPanel key="new-script" workspace={gallery?.workspace ?? "default"} onCancel={() => setCreatingKind(null)} onSaved={name => createdItem(name, "script")} />
                 : selectedArtifact?.kind === "script" ? <ScriptPanel key={`${selectedArtifact.key}:${resolvedVersion}`} artifact={selectedArtifact} workspace={selectedArtifact.workspace} version={resolvedVersion ?? undefined} view={activeTab as ScriptView} sourceUrl={resolvedVersion ? artifactUrl("/api/source", selectedArtifact, resolvedVersion) : undefined} onSaved={async () => { setSelectedVersion("working"); await loadGallery(); }} />
-                : !selectedArtifact && !loading && gallery?.capabilities?.links ? <AgentOnboarding workspace={gallery.workspace} />
+                : !selectedArtifact && gallery?.capabilities?.links ? <AgentOnboarding workspace={gallery.workspace} onCreate={() => startCreating("artifact")} />
                 : !selectedArtifact ? <div className="empty-detail"><h2>{loading ? "Loading your library…" : "Your library"}</h2><p>{loading ? "Your saved artifacts will appear shortly." : "Select an artifact or script to open it."}</p></div>
                 : !resolvedVersion ? <div className="empty-detail"><h2>No readable version</h2><p>This artifact has no saved source available to preview.</p></div>
                 : <>
@@ -635,7 +642,7 @@ function App() {
                       : source.status === "error" ? <p role="alert" className="state-message error-message">{source.error}</p>
                       : <p className="state-message" role="status">Loading source…</p>}
                   </div> : null}
-                  {gallery?.capabilities?.links ? <div className="settings-panel" hidden={activeTab !== "settings"}><h2 className="settings-title">Secrets</h2><SecretControls key={selectedArtifact.key + "secrets"} workspace={selectedArtifact.workspace} name={selectedArtifact.name} kind="artifact" /></div> : null}
+                  {gallery?.capabilities?.links ? <div className="settings-panel" hidden={activeTab !== "settings"}><h2 className="settings-title">Secrets</h2><SecretControls key={selectedArtifact.key + "secrets"} workspace={selectedArtifact.workspace} name={selectedArtifact.name} kind="artifact" active={activeTab === "settings"} /></div> : null}
                   {gallery?.capabilities?.links ? <div id="execution-panel" className="artifact-execution" hidden={activeTab !== "schedule"}><ExecutionControls key={selectedArtifact.key + "execution"} workspace={selectedArtifact.workspace} name={selectedArtifact.name} kind="artifact" active={activeTab === "schedule"} /></div> : null}
                 </>}
             </Tabs.Panel>

@@ -19,14 +19,23 @@ test("empty hosted library supplies copyable deployment MCP URL and starter prom
     await page.goto(new URL("?library=team", server.url).href);
     const url = await page.getByLabel("Deployment MCP URL").inputValue();
     expect(url).toBe(new URL("/mcp?workspace=my-project&library=team", server.url).href);
+    const before = await page.locator(".agent-onboarding").boundingBox();
     await page.getByRole("button", { name: "Copy MCP URL", exact: true }).click();
     await page.getByText("MCP URL copied", { exact: true }).waitFor();
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(url);
-    const prompt = await page.getByLabel("Starter prompt").inputValue();
+    const prompt = await page.getByLabel("Starter prompt", { exact: true }).inputValue();
     expect(prompt).toContain("artifact_guide");
     expect(prompt).toContain("private access");
     await page.getByRole("button", { name: "Copy starter prompt", exact: true }).click();
     await page.getByText("Starter prompt copied", { exact: true }).waitFor();
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(prompt);
+    expect(await page.locator(".agent-onboarding").boundingBox()).toEqual(before);
+    if (process.env.GALLERY_SCREENSHOT_DIR) {
+      await page.screenshot({ path: `${process.env.GALLERY_SCREENSHOT_DIR}/onboarding-light.png` });
+      await page.getByRole("button", { name: "Switch to dark theme", exact: true }).click();
+      await page.screenshot({ path: `${process.env.GALLERY_SCREENSHOT_DIR}/onboarding-dark.png` });
+    }
+    await page.getByRole("button", { name: "New artifact", exact: true }).click();
+    await page.getByRole("textbox", { name: "Artifact name", exact: true }).waitFor();
   } finally { await browser.close(); server.stop(true); }
 }, 30000);

@@ -117,7 +117,7 @@ export default function Artifact() {
   );
 }
 `;
-export function AgentOnboarding({ workspace }: { workspace: string }) {
+export function AgentOnboarding({ workspace, onCreate }: { workspace: string; onCreate: () => void }) {
   const [status, setStatus] = useState("");
   const url = new URL("/mcp", window.location.origin);
   url.searchParams.set("workspace", workspace);
@@ -130,14 +130,23 @@ export function AgentOnboarding({ workspace }: { workspace: string }) {
   }
   return <div className="agent-onboarding">
     <h2>Create your first artifact</h2>
-    <p>Choose New artifact from the + menu beside Artifacts, or connect your agent using the MCP URL below.</p>
-    <details open><summary>Connect agent</summary>
-      <label>MCP URL<input aria-label="Deployment MCP URL" readOnly value={url.href} /></label>
-      <button type="button" onClick={() => void copy(url.href, "MCP URL")}>Copy MCP URL</button>
-      <label>Starter prompt<textarea aria-label="Starter prompt" readOnly value={prompt} /></label>
-      <button type="button" onClick={() => void copy(prompt, "Starter prompt")}>Copy starter prompt</button>
-      <p role="status">{status}</p>
-    </details>
+    <p className="onboarding-intro">Build something here, or connect an agent to create it with you.</p>
+    <button className="primary-action" type="button" onClick={onCreate}>New artifact</button>
+    <section className="agent-connection" aria-labelledby="agent-connection-title">
+      <h3 id="agent-connection-title">Connect an agent</h3>
+      <p>Add this MCP server to your agent, then send the starter prompt.</p>
+      <label htmlFor="agent-mcp-url">MCP server URL</label>
+      <div className="onboarding-url-row">
+        <input id="agent-mcp-url" aria-label="Deployment MCP URL" readOnly value={url.href} onFocus={event => event.target.select()} />
+        <button type="button" aria-label="Copy MCP URL" onClick={() => void copy(url.href, "MCP URL")}>Copy</button>
+      </div>
+      <label htmlFor="agent-starter-prompt">Starter prompt</label>
+      <textarea id="agent-starter-prompt" aria-label="Starter prompt" readOnly value={prompt} onFocus={event => event.target.select()} />
+      <div className="onboarding-copy-row">
+        <button type="button" aria-label="Copy starter prompt" onClick={() => void copy(prompt, "Starter prompt")}>Copy prompt</button>
+        <span className="onboarding-feedback" role="status">{status}</span>
+      </div>
+    </section>
   </div>;
 }
 export function ScriptPanel({ artifact, workspace, version, sourceUrl, onSaved, onCancel, view = "source" }: { artifact?: GalleryArtifact; workspace: string; version?: string; sourceUrl?: string; onSaved: (name: string) => Promise<void>; onCancel?: () => void; view?: ScriptView }) {
@@ -237,7 +246,7 @@ export function ScriptPanel({ artifact, workspace, version, sourceUrl, onSaved, 
         <ExecutionControls key={`${workspace}/${name}`} workspace={workspace} name={name} active={view === "schedule"}/>
         <details><summary>Logs</summary><button disabled={busy} onClick={() => void perform(async () => setLogs(show(await galleryTool(workspace, "script_logs", { name }))))}>Load logs</button><pre aria-label="Script logs">{logs}</pre></details>
       </section>
-      <div className="settings-panel" hidden={view !== "settings"}><h2 className="settings-title">Secrets</h2><SecretControls key={`${workspace}/${name}secrets`} workspace={workspace} name={name} kind="script" /></div>
+      <div className="settings-panel" hidden={view !== "settings"}><h2 className="settings-title">Secrets</h2><SecretControls key={`${workspace}/${name}secrets`} workspace={workspace} name={name} kind="script" active={view === "settings"} /></div>
     </> : null}
   </div>;
 }
