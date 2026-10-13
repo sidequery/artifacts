@@ -227,8 +227,20 @@ test.skipIf(process.env.NATIVE_WORKER_FLEET !== "1")(
       await operator.start();
       operator.serve({ port: operatorPort });
       await operator.publishHost();
-      for (const node of nodes)
+      const galleryBundle = await readFile(
+        resolve(import.meta.dir, "../../dist/cloudflare/assets/gallery.js"),
+        "utf8",
+      );
+      for (const node of nodes) {
         expect((await fetch(`${node}/health`)).status, logs).toBe(200);
+        const gallery = await fetch(`${node}/`);
+        expect(gallery.status, logs).toBe(200);
+        expect(await gallery.text()).toContain('src="/gallery.js"');
+        const bundle = await fetch(`${node}/gallery.js`);
+        expect(bundle.status, logs).toBe(200);
+        expect(bundle.headers.get("content-type")).toContain("javascript");
+        expect(await bundle.text(), logs).toBe(galleryBundle);
+      }
       expect(
         (await store.json<FleetPointer>("deploy/current.json"))?.value
           .script_name,
