@@ -276,6 +276,32 @@ test("renders and replaces interactive artifacts through the MCP Apps bridge", a
   await page.close();
 }, 30_000);
 
+test("renders artifact previews when the host omits private metadata", async () => {
+  const meta = await resultFor(INTERACTIVE_ARTIFACT, "chosen", { count: 4 });
+  meta.artifact.workspace = "research";
+  const { page, app, errors } = await openHost();
+  await page.evaluate(meta => window.mcpHost!.sendResult({ content: [], structuredContent: { appPreview: meta.artifact } }), meta);
+  await app.getByText("Count: 4").waitFor();
+
+  await page.evaluate(meta => window.mcpHost!.setServerToolResult({ content: [], structuredContent: { appPreview: meta.artifact } }), meta);
+  await page.evaluate(meta => window.mcpHost!.sendResult({ content: [], structuredContent: { artifact: {
+    versionId: meta.artifact.versionId, eventId: meta.artifact.eventId, workspace: "research",
+  } } }), meta);
+  await page.waitForFunction(() => window.mcpHost!.serverToolCalls.length === 1);
+  expect(await page.evaluate(() => window.mcpHost!.serverToolCalls[0])).toMatchObject({ name: "artifacts_preview", arguments: {
+    version_id: meta.artifact.versionId, event_id: meta.artifact.eventId, workspace: "research",
+  } });
+  await app.getByText("Count: 4").waitFor();
+
+  await page.evaluate(meta => window.mcpHost!.sendResult({ content: [], structuredContent: { preview: { artifact: {
+    versionId: meta.artifact.versionId, workspace: "research",
+  } } } }), meta);
+  await page.waitForFunction(() => window.mcpHost!.serverToolCalls.length === 2);
+  await app.getByText("Count: 4").waitFor();
+  expect(errors).toEqual([]);
+  await page.close();
+}, 30_000);
+
 test("applies natural, capped, shrinking, narrow, and fixed inline sizes without feedback", async () => {
   const meta = await resultFor(RESIZABLE_ARTIFACT, "resizable");
   const { page, app, errors } = await openHost();

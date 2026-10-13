@@ -34,6 +34,9 @@ test("create, show, edit and restore deliver the actual artifact without opening
   const versionId = created._meta!.artifact!.versionId;
   const shown = await call("artifact_open", { name: "overview" });
   expect(shown._meta?.artifact?.versionId).toBe(versionId);
+  expect(shown.structuredContent).not.toHaveProperty("appPreview");
+  const appPreview = await call("artifacts_preview", { version_id: versionId });
+  expect(appPreview.structuredContent.appPreview.js).toContain("Embedded sample data.");
   const edited = await call("artifact_edit", { name: "overview", edits: [{ old_text: "Embedded sample data.", new_text: "Updated inline." }] });
   expect(edited._meta?.artifact?.js).toContain("Updated inline.");
   expect(edited.structuredContent.applied).toBe(true);

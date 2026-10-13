@@ -9,7 +9,7 @@ import { GalleryToolError, type GalleryTransport, type MutationResult } from "..
 import type { SourceSnapshot } from "../gallery/drafts";
 import { editableProject } from "../gallery/project-editor";
 
-export type ArtifactSelection = { name?: string; workspace?: string; version_id?: string; route?: string; kind?: "artifact" | "script"; tab?: "preview" | "source" };
+export type ArtifactSelection = { name?: string; workspace?: string; version_id?: string; event_id?: string; route?: string; kind?: "artifact" | "script"; tab?: "preview" | "source" };
 
 /** Deep links contain authenticated selectors, never file-transfer credentials. */
 export function parseArtifactDeepLink(value: string): ArtifactSelection | null {
@@ -31,7 +31,7 @@ export async function fetchArtifactPreview(app: App, selection: ArtifactSelectio
   const { route: _route, kind: _kind, tab: _tab, ...args } = selection;
   const result = await app.callServerTool({ name: "artifacts_preview", arguments: args });
   if (result.isError) throw new Error(result.content?.filter(item => item.type === "text").map(item => item.text).join("\n") || "Unable to open artifact");
-  const artifact = result._meta?.artifact as ArtifactAppPayload | undefined;
+  const artifact = (result._meta?.artifact ?? result.structuredContent?.appPreview) as ArtifactAppPayload | undefined;
   if (!artifact?.js) throw new Error("The server returned no artifact preview");
   return artifact;
 }
@@ -86,7 +86,7 @@ export function mountWorkspace(root: HTMLElement, app: App, initial: ArtifactWor
   const search = async (query: string, offset: number) => {
     const result = await app.callServerTool({ name: "artifacts_search", arguments: { query, offset, view: "library" } });
     if (result.isError) resultValue(result);
-    const payload = result._meta?.workspace as ArtifactWorkspacePayload | undefined;
+    const payload = (result._meta?.workspace ?? result.structuredContent?.appWorkspace) as ArtifactWorkspacePayload | undefined;
     if (!payload) throw new Error("The server returned no library catalog");
     return workspaceGallery(payload);
   };

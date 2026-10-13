@@ -942,6 +942,7 @@ test("MCP workspace tools admit cross-workspace previews and resources while sup
 
     const library = await client.callTool({ name: "artifacts_library", arguments: {} });
     expect((library._meta as any).workspace.items).toContainEqual(expect.objectContaining({ name: "workspace-preview", workspace: "workspace-tools" }));
+    expect((library.structuredContent as any).appWorkspace.items).toContainEqual(expect.objectContaining({ name: "workspace-preview", workspace: "workspace-tools" }));
     const working = await client.callTool({ name: "artifacts_working", arguments: {} });
     expect((working._meta as any).workspace.items.some((item: any) => item.workspace === "workspace-tools")).toBe(true);
     const mentions = await client.callTool({ name: "artifacts_mentions", arguments: { query: "WORKSPACE-PREVIEW" } });
@@ -953,6 +954,7 @@ test("MCP workspace tools admit cross-workspace previews and resources while sup
     const opened = await client.callTool({ name: "artifacts_preview", arguments: { workspace: "workspace-tools", version_id: versionId } });
     expect(opened.isError).not.toBe(true);
     expect((opened._meta as any).artifact).toMatchObject({ workspace: "workspace-tools", versionId });
+    expect((opened.structuredContent as any).appPreview).toMatchObject({ workspace: "workspace-tools", versionId, js: expect.any(String) });
     const after = payload(await remote.callTool({ name: "artifact_version", arguments: { version_id: versionId } }));
     expect(after.events).toHaveLength(1);
   } finally { await remote.close(); await team.close(); }
