@@ -61,9 +61,10 @@ export async function runCelldServer(options: { port?: number; stateDir?: string
     const esbuild = esbuildRequire.resolve(`@esbuild/${process.platform}-${process.arch}/bin/esbuild`);
     child = Bun.spawn([executable, "dev", project, "--host", "127.0.0.1", "--port", String(port), "--no-watch", "--logs"], {
       cwd: project,
-      // Each idle eviction stores a new snapshot epoch. Retention lets celld delete
-      // superseded epochs; without it local storage grows with every wake.
-      env: { ...process.env, CELLD_ESBUILD: esbuild, CELLD_IDLE_EVICT_S: process.env.CELLD_IDLE_EVICT_S ?? "60",
+      // Each unload and restart of an object stores full copies of its database, so
+      // idle objects stay resident (celld still unloads them under memory pressure).
+      // Retention lets celld delete superseded copies.
+      env: { ...process.env, CELLD_ESBUILD: esbuild,
         CELLD_LTX_RETENTION_SECS: process.env.CELLD_LTX_RETENTION_SECS ?? "3600", RUST_LOG: process.env.RUST_LOG ?? "warn" },
       stdin: "ignore", stdout: "pipe", stderr: "pipe",
     });
