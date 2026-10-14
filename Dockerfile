@@ -32,7 +32,7 @@ COPY --from=build /src/dist/container/bin/ /usr/local/bin/
 COPY --from=build /src/dist/worker-app/ /app/dist/worker-app/
 COPY --from=build /src/dist/cloudflare/assets/ /app/dist/cloudflare/assets/
 COPY --from=build /src/dist/container/wrangler.jsonc /app/wrangler.jsonc
-ENV CELLD_ESBUILD=/usr/local/bin/esbuild CELLD_IDLE_EVICT_S=60
+ENV CELLD_ESBUILD=/usr/local/bin/esbuild CELLD_IDLE_EVICT_S=60 CELLD_LTX_RETENTION_SECS=3600
 WORKDIR /app
 USER 65532:65532
 VOLUME ["/app/.celld"]

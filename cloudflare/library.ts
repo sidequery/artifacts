@@ -150,6 +150,9 @@ export class ArtifactLibrary extends DurableObject<unknown> {
         }
       }
       this.sql.exec("create index if not exists serve_events_version on serve_events(version_id, served_at)");
+      // History lists read only these columns. Covering them keeps listings from
+      // reading each revision's source, which precedes them in the row.
+      this.sql.exec("create index if not exists versions_history on versions(artifact_id, revision, id, created_at, source_hash, runtime, reason, restored_from)");
     });
   }
 
@@ -415,6 +418,11 @@ export class ArtifactLibrary extends DurableObject<unknown> {
         version = this.capture(workspace, name, source, server_source, project, runtime, "served", null, false, input.compiled_id);
       }
       if (input.record_event === false) return { version, event: null };
+      // Hosted page views replay the latest event's state. An identical event adds
+      // no replay information, so reuse it instead of writing a row per view.
+      const latest = first(this.sql.exec<ServeEvent>("select * from serve_events where version_id = ? order by rowid desc limit 1", version.id));
+      if (latest && latest.mode === input.mode && latest.initial_state === initial_state && latest.runtime === runtime &&
+        latest.pane_id === (input.pane_id ?? null) && latest.session_id === (input.session_id ?? null)) return { version, event: latest };
       const event: ServeEvent = {
         id: uuid(), version_id: version.id, served_at: now(), pane_id: input.pane_id ?? null,
         session_id: input.session_id ?? null, mode: input.mode, initial_state, runtime,

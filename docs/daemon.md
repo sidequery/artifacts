@@ -132,6 +132,13 @@ credentials or other environment variables. The native server binds only to
 loopback. Its state is local application data and is not uploaded or backed up
 automatically.
 
+celld writes a new snapshot of a database each time the object wakes after
+60 idle seconds (`CELLD_IDLE_EVICT_S`). The host deletes snapshots that are
+older than one hour and no longer needed for recovery
+(`CELLD_LTX_RETENTION_SECS`, default `3600`). Deletion can take about ten minutes
+after the next write to that object. Set `CELLD_LTX_RETENTION_SECS=0` to keep every
+snapshot; storage then grows with each wake.
+
 For bucket-backed production nodes, TLS/authentication boundaries, health checks,
 and graceful rollout guidance, see [celld deployment](celld-deployment.md).
 
