@@ -527,13 +527,15 @@ test("a service token manages the team library over MCP and confers nothing outs
   expect(wrong.status).toBe(401);
   expect(wrong.headers.get("www-authenticate")).toContain("resource_metadata=");
 
-  // A signed-in teammate finds the work in the team library and opens its private URL.
+  // A signed-out teammate opening the shared private URL signs in and returns to it.
   const context = await newBrowserContext();
   try {
     const page = await context.newPage();
-    await page.goto(`${origin}/?workspace=test`);
+    await page.goto(`${origin}/service-report`);
+    expect(new URL(page.url()).pathname).toBe("/sign-in");
     await login(page, "Bob");
-    await page.waitForURL(`${origin}/?workspace=test`);
+    await page.waitForURL(`${origin}/service-report`);
+    await page.frameLocator("iframe").getByText("Count: 0", { exact: true }).waitFor();
     const team = await (await context.request.get(`${origin}/api/gallery?workspace=test&library=team`)).json();
     expect(team.artifacts.find((item: any) => item.name === "service-report")).toMatchObject({ url: `${origin}/service-report`, access: "private" });
     const personal = await (await context.request.get(`${origin}/api/gallery?workspace=test`)).json();
