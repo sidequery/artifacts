@@ -1,23 +1,23 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { cp, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { Miniflare } from "miniflare";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { bundleRuntimePlugin } from "../scripts/bundle-plugin";
-import { parseRuntimePlugin, type RuntimePluginRecord } from "../src/plugins/runtime";
 
-const fixture = join(import.meta.dir, "../e2e/runtime-plugin-fixture.ts");
+const fixture = await readFile(join(import.meta.dir, "../e2e/runtime-plugin-fixture.ts"), "utf8");
 let runtime: Miniflare;
 let client: Client;
 let origin: string;
-let record: RuntimePluginRecord;
-// Matches the host's per-isolate record cache.
+// Matches the host's per-isolate source cache.
 const CACHE_MS = 5_000;
 
-async function publish(key: string, body: string) {
-  await (await runtime.getR2Bucket("PLUGINS")).put(key, body);
+/** The fixture's source under another name, as a separate published plugin. */
+const variant = (name: string, replace: [string, string][] = []) =>
+  replace.reduce((source, [from, to]) => source.replaceAll(from, to), fixture.replace('name: "test-warehouse"', `name: "${name}"`));
+
+async function publish(name: string, source: string) {
+  await (await runtime.getR2Bucket("PLUGINS")).put(`plugins/${name}.ts`, source);
 }
 async function call(plugin: string, operation: string, input: unknown) {
   const result = await client.callTool({ name: "artifact_plugin_call", arguments: { plugin, operation, input } });
@@ -25,7 +25,6 @@ async function call(plugin: string, operation: string, input: unknown) {
 }
 
 beforeAll(async () => {
-  record = await bundleRuntimePlugin(fixture);
   const modulesRoot = join(import.meta.dir, "../dist/worker-app");
   const modules: Record<string, { type: "esm" | "wasm" | "text"; contents: string | Uint8Array<ArrayBuffer> }> = {};
   for (const name of await readdir(modulesRoot)) {
@@ -55,39 +54,26 @@ beforeAll(async () => {
     assets: { directory: join(import.meta.dir, "../dist/cloudflare/assets"), hasUserWorker: true, runWorkerFirst: true, htmlHandling: "none" },
   }, dev: {} }] });
   origin = (await runtime.ready).origin;
-  await publish("plugins/test-warehouse.json", JSON.stringify(record));
-  await publish("plugins/test-misconfigured.json", JSON.stringify({ ...record, name: "test-misconfigured", secrets: ["PLUGIN_MISSING"] }));
-  await publish("plugins/test-corrupt.json", "{ not json");
-  await publish("plugins/test-host-secret.json", JSON.stringify({ ...record, name: "test-host-secret", secrets: ["HOST_ONLY_SECRET"] }));
+  await publish("test-warehouse", fixture);
+  await publish("test-misconfigured", variant("test-misconfigured", [["PLUGIN_WAREHOUSE_TOKEN", "PLUGIN_MISSING"]]));
+  // A published plugin cannot ask for the host's own variables.
+  await publish("test-host-secret", variant("test-host-secret", [["PLUGIN_WAREHOUSE_TOKEN", "HOST_ONLY_SECRET"]]));
+  await publish("test-misnamed", fixture);
+  await publish("test-uncompilable", "export default definePlugin({ name: ");
+  await publish("test-external-import", `import { z } from "zod";\nexport const check = z.string();\n${variant("test-external-import")}`);
   client = new Client({ name: "runtime-plugin-test", version: "1" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`${origin}/mcp?workspace=test`)));
 }, 60000);
 afterAll(async () => { await client?.close(); await runtime?.dispose(); });
 
-test("the bundle is one self-describing record with schemas and no browser module", () => {
-  expect(record).toMatchObject({ format: 1, name: "test-warehouse", secrets: ["PLUGIN_WAREHOUSE_TOKEN"] });
-  expect(record.operations.map(operation => [operation.name, operation.readOnly])).toEqual([["query", true], ["restricted", false], ["broken", false]]);
-  expect(record.module).not.toContain("warehouse-test-token");
-  expect(() => parseRuntimePlugin(record, "other-name")).toThrow("does not match");
-  expect(() => parseRuntimePlugin({ ...record, hash: "x" })).toThrow("hash");
-});
-
-test("bundles are reproducible from any directory and carry no build-machine paths", async () => {
-  const elsewhere = await mkdtemp(join(tmpdir(), "plugin-source-"));
-  try {
-    await cp(fixture, join(elsewhere, "warehouse.plugin.ts"));
-    const copy = await bundleRuntimePlugin(join(elsewhere, "warehouse.plugin.ts"));
-    expect(copy.hash).toBe(record.hash);
-    expect(copy.module).toBe(record.module);
-  } finally { await rm(elsewhere, { recursive: true, force: true }); }
-  for (const leaked of [tmpdir(), "artifacts-plugin-", import.meta.dir]) expect(record.module).not.toContain(leaked);
-});
-
-test("published plugins are listed beside build-time ones; corrupt records are left out", async () => {
+test("published plugin sources are listed beside build-time plugins; invalid ones are left out", async () => {
   const result = await client.callTool({ name: "plugins_list", arguments: {} });
-  const plugins = (result.structuredContent as { plugins: { name: string; browser: boolean; operations: { name: string }[] }[] }).plugins;
+  const plugins = (result.structuredContent as { plugins: { name: string; browser: boolean; operations: { name: string; readOnly: boolean; inputSchema: object }[] }[] }).plugins;
   expect(plugins.map(plugin => plugin.name).sort()).toEqual(["test-misconfigured", "test-warehouse"]);
-  expect(plugins.find(plugin => plugin.name === "test-warehouse")).toMatchObject({ browser: false, operations: [{ name: "query" }, { name: "restricted" }, { name: "broken" }] });
+  const warehouse = plugins.find(plugin => plugin.name === "test-warehouse")!;
+  expect(warehouse.browser).toBe(false);
+  expect(warehouse.operations.map(operation => [operation.name, operation.readOnly])).toEqual([["query", true], ["restricted", false], ["malformed", false], ["broken", false]]);
+  expect(warehouse.operations[0]!.inputSchema).toMatchObject({ required: ["sql"] });
 });
 
 test("a call runs in the plugin's own isolate with the caller's identity and only its declared secrets", async () => {
@@ -103,18 +89,21 @@ test("a call runs in the plugin's own isolate with the caller's identity and onl
   expect((await http.json() as { result: { sql: string } }).result.sql).toBe("select 2");
 });
 
-test("schema, authorization and handler failures keep the build-time plugin semantics", async () => {
+test("schema, authorization, handler and configuration failures keep the build-time plugin semantics", async () => {
   const cases: [string, string, unknown, string, number][] = [
     ["test-warehouse", "query", {}, "Invalid plugin input", 400],
+    ["test-warehouse", "query", { sql: "select 1", extra: true }, "Invalid plugin input", 400],
     ["test-warehouse", "restricted", {}, "Plugin operation is not allowed", 403],
+    ["test-warehouse", "malformed", {}, "Plugin returned invalid output", 500],
     ["test-warehouse", "broken", {}, "Plugin operation failed", 500],
     ["test-warehouse", "missing", {}, "Plugin operation not found", 404],
     ["test-warehouse", "toString", {}, "Plugin operation not found", 404],
     ["not-published", "query", {}, "Plugin operation not found", 404],
     ["test-misconfigured", "query", { sql: "select 1" }, "Plugin configuration unavailable", 500],
-    ["test-corrupt", "query", { sql: "select 1" }, "Plugin configuration unavailable", 500],
-    // A published record cannot ask for the host's own variables.
     ["test-host-secret", "query", { sql: "select 1" }, "Plugin configuration unavailable", 500],
+    ["test-misnamed", "query", { sql: "select 1" }, "Plugin configuration unavailable", 500],
+    ["test-uncompilable", "query", { sql: "select 1" }, "Plugin configuration unavailable", 500],
+    ["test-external-import", "query", { sql: "select 1" }, "Plugin configuration unavailable", 500],
   ];
   for (const [plugin, operation, input, error, status] of cases) {
     const { result, payload } = await call(plugin, operation, input);
@@ -125,11 +114,8 @@ test("schema, authorization and handler failures keep the build-time plugin sema
   }
 });
 
-test("republishing the record replaces the running plugin without a host deploy", async () => {
-  const module = record.module.replace('"fixture-v1"', '"fixture-v2"');
-  expect(module).not.toBe(record.module);
-  const hash = new Bun.CryptoHasher("sha256").update(module).digest("hex");
-  await publish("plugins/test-warehouse.json", JSON.stringify({ ...record, module, hash }));
+test("republishing the source replaces the running plugin without a host deploy", async () => {
+  await publish("test-warehouse", fixture.replace('"fixture-v1"', '"fixture-v2"'));
   await Bun.sleep(CACHE_MS + 500);
   const { payload } = await call("test-warehouse", "query", { sql: "select 1" });
   expect(payload.result.version).toBe("fixture-v2");

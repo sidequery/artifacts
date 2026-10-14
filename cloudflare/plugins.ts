@@ -16,9 +16,9 @@ const dispatchInstalled = createPluginDispatcher(installed, { input: validatePlu
 export async function dispatchPlugin(request: PluginRequest, context?: PluginInvocationContext): Promise<unknown> {
   assertPluginRequest(request, context);
   if (installedNames.has(request.plugin)) return dispatchInstalled(request, context);
-  const record = await runtimePlugin(context.env as RuntimePluginEnvironment, request.plugin);
-  if (!record?.operations.some(operation => operation.name === request.operation)) throw new PluginError("Plugin operation not found", 404);
-  return callRuntimePlugin(record, request.operation, pluginJson(request.input), context.user, context);
+  const plugin = await runtimePlugin(context.env as RuntimePluginEnvironment, request.plugin);
+  if (!plugin?.description.operations.some(operation => operation.name === request.operation)) throw new PluginError("Plugin operation not found", 404);
+  return callRuntimePlugin(plugin, request.operation, pluginJson(request.input), context.user, context);
 }
 
 export async function pluginCatalogFor(env: object): Promise<PluginInfo[]> {

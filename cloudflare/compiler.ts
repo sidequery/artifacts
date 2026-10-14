@@ -4,6 +4,7 @@ import ts from "../dist/cloudflare/typescript.js";
 import files from "../dist/cloudflare/compiler-files.json";
 import browserPlugins from "../dist/cloudflare/plugin-browser.json";
 import browserRuntime from "../dist/cloudflare/browser-runtime.json";
+import pluginRuntime from "../dist/cloudflare/plugin-runtime.json";
 import { sandboxToDiagnostics, type Diagnostic } from "../src/diagnostics";
 import { scanArtifactSource } from "../src/sandbox";
 import type { AppManifest, ResourceLedger } from "./native-worker/manifest";
@@ -183,17 +184,24 @@ export async function compileArtifactServerSource(source: string, project = empt
 }
 
 async function queueCompile(source: string, server: boolean, script = false, project = emptyProject(), native?: { manifest: AppManifest; resources: ResourceLedger }) {
+  const release = await compileSlot();
+  if (!release) return { ok: false, diagnostics: [{ severity: "error" as const, message: "Compiler is busy; retry shortly", file: server ? serverPath : sourcePath }] };
+  try { return await (native ? compileNative(source, project, native.manifest, native.resources) : script ? compileScript(source, project) : server ? compileServer(source, project) : compileSource(source, project)); }
+  finally { release(); }
+}
+
+/** Waits for this build's turn and returns its release, or null when busy. */
+async function compileSlot(): Promise<(() => void) | null> {
   // esbuild WASM and semantic checking share the isolate's 128 MiB budget.
   // Serialize builds and bound retained request sources under load.
-  if (pendingCompilations >= 8) return { ok: false, diagnostics: [{ severity: "error" as const, message: "Compiler is busy; retry shortly", file: server ? serverPath : sourcePath }] };
+  if (pendingCompilations >= 8) return null;
   pendingCompilations++;
   const ticket = nextCompilation++;
   // celld 0.4.1 attributes native timers to the request driving a continuation.
   // Wait on this request's own timer instead of another request's promise, so
   // disconnecting a preview cannot cancel the next build's esbuild operations.
   while (ticket !== activeCompilation) await new Promise(resolve => setTimeout(resolve, 5));
-  try { return await (native ? compileNative(source, project, native.manifest, native.resources) : script ? compileScript(source, project) : server ? compileServer(source, project) : compileSource(source, project)); }
-  finally { activeCompilation++; pendingCompilations--; }
+  return () => { activeCompilation++; pendingCompilations--; };
 }
 
 export function compileNativeWorker(source: string, manifest: AppManifest, resources: ResourceLedger, project = emptyProject()) {
@@ -330,16 +338,41 @@ async function compileScript(source: string, project: ArtifactProject) {
     if (result.warnings?.length) throw new Error(result.warnings.join("\n"));
     const js = result.modules[result.mainModule];
     if (typeof js !== "string") throw new Error("Script compiler did not return JavaScript");
-    const tree = ts.createSourceFile("script.js", js, ts.ScriptTarget.ES2022, false, ts.ScriptKind.JS);
-    const checkImports = (node: ts.Node) => {
-      const specifier = ts.isImportDeclaration(node) || ts.isExportDeclaration(node) ? node.moduleSpecifier
-        : ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword ? node.arguments[0] : undefined;
-      if (specifier && (!ts.isStringLiteral(specifier) || !/^(node:|cloudflare:)/.test(specifier.text))) {
-        throw new Error("Script has an unresolved external import; use Workers runtime builtins or self-contained source");
-      }
-      ts.forEachChild(node, checkImports);
-    };
-    checkImports(tree);
+    assertBuiltinImports(js, "Script has an unresolved external import; use Workers runtime builtins or self-contained source");
     return {ok: true, js, diagnostics: [] as Diagnostic[]};
   } catch (error) { return {ok: false, diagnostics: [{severity: "error" as const, file: "script.ts", message: error instanceof Error ? error.message : String(error)}]}; }
+}
+
+function assertBuiltinImports(js: string, message: string) {
+  const tree = ts.createSourceFile("module.js", js, ts.ScriptTarget.ES2022, false, ts.ScriptKind.JS);
+  const checkImports = (node: ts.Node) => {
+    const specifier = ts.isImportDeclaration(node) || ts.isExportDeclaration(node) ? node.moduleSpecifier
+      : ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword ? node.arguments[0] : undefined;
+    if (specifier && (!ts.isStringLiteral(specifier) || !/^(node:|cloudflare:)/.test(specifier.text))) throw new Error(message);
+    ts.forEachChild(node, checkImports);
+  };
+  checkImports(tree);
+}
+
+const PLUGIN_ENTRY = 'import plugin from "./plugin.ts";\nimport { runtimePluginHandler } from "artifacts:plugin-runtime";\nexport default runtimePluginHandler(plugin);\n';
+const PLUGIN_HELPER = "export function definePlugin(plugin) { return plugin; }\nexport function definePlugins(plugins) { return plugins; }\n";
+
+/** Compiles a published plugin's single-file source with its isolate wrapper.
+ * It may import the typed `@sidequery/artifacts/plugins` helper and Workers
+ * builtins only. Shares the compile queue and isolate budget with artifacts. */
+export async function compilePluginSource(source: string): Promise<{ ok: true; js: string } | { ok: false; error: string }> {
+  const release = await compileSlot();
+  if (!release) return { ok: false, error: "Compiler is busy; retry shortly" };
+  try {
+    const result = await createWorker({
+      files: { "plugin.ts": source, "entry.ts": PLUGIN_ENTRY }, entryPoint: "entry.ts", target: "es2022", sourcemap: false,
+      virtualModules: { "@sidequery/artifacts/plugins": PLUGIN_HELPER, "artifacts:plugin-runtime": pluginRuntime.js },
+    });
+    if (result.warnings?.length) throw new Error(result.warnings.join("\n"));
+    const js = result.modules[result.mainModule];
+    if (typeof js !== "string") throw new Error("Plugin compiler did not return JavaScript");
+    assertBuiltinImports(js, "A published plugin is one self-contained file; it may import @sidequery/artifacts/plugins and Workers builtins only");
+    return { ok: true, js };
+  } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) }; }
+  finally { release(); }
 }

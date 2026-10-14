@@ -19,6 +19,7 @@ async function start(directory: string, identity: string) {
         export async function compileArtifactSource(source, project) { return compile(source, "client", project); }
         export async function compileArtifactServerSource(source, project) { return compile(source, "server", project); }
         export async function compileScriptSource() { throw new Error("Unexpected script compile"); }
+        export async function compilePluginSource() { throw new Error("Unexpected plugin compile"); }
         export function typecheckArtifactSource() { return []; }
         export function typecheckArtifactServerSource() { return []; }
       ` }));
