@@ -32,7 +32,7 @@ export function MovePanel({ artifact, library, onCancel }: {
   }}>
     <p>Move <strong>{artifact.name}</strong> to {target}?</p>
     <p className="muted">{destination === "team" ? "Everyone with team library access will be able to view and edit it, including its data and secrets." : "It will leave the team library. Only you will have personal library access."} Its history, data, secrets, schedules, and URL stay with it. Public links remain public.</p>
-    <div className="script-fields"><button type="submit" disabled={busy}>{busy ? "Moving…" : `Move to ${target}`}</button><button type="button" disabled={busy} onClick={onCancel}>Cancel</button></div>
+    <div className="script-fields"><button className="primary-action" type="submit" disabled={busy}>{busy ? "Moving…" : `Move to ${target}`}</button><button type="button" disabled={busy} onClick={onCancel}>Cancel</button></div>
     {error ? <p role="alert" className="error-message">{error}</p> : null}
   </form>;
 }

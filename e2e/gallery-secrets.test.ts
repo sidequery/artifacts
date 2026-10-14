@@ -54,6 +54,8 @@ test("gallery exposes server secret names and writes for artifacts and scripts w
       expect(calls.at(-1)).toEqual({ name: `${kind}_secrets`, arguments: { name, secrets: { TOKEN: "typed-fixture-value" } } });
       if (kind === "artifact" && process.env.GALLERY_SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.GALLERY_SCREENSHOT_DIR}/artifact-secrets.png`, fullPage: true });
       await page.getByRole("button", { name: "Remove secret", exact: true }).click();
+      expect(calls.at(-1)!.arguments).toEqual({ name, secrets: { TOKEN: "typed-fixture-value" } });
+      await page.getByRole("button", { name: "Remove", exact: true }).click();
       await page.getByText("Secret removed", { exact: true }).waitFor();
       expect(calls.at(-1)).toEqual({ name: `${kind}_secrets`, arguments: { name, secrets: { TOKEN: null } } });
     }

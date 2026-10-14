@@ -20,14 +20,16 @@ test("gallery imports a fresh complete project and exports its saved snapshot th
     await page.getByRole("menuitem", { name: "Import project", exact: true }).click();
     await page.getByLabel("Project archive", { exact: true }).setInputFiles({ name: "portable.artifact-project.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(archive)) });
     await page.waitForFunction(() => (document.querySelector('[aria-label="Imported project name"]') as HTMLInputElement)?.value === "portable-import");
-    expect(await page.getByText("Includes backend source", { exact: false }).innerText()).toContain("1 helper files");
-    await page.getByRole("button", { name: "Import as new project", exact: true }).click();
-    await page.getByRole("status").filter({ hasText: "Project imported." }).waitFor();
+    expect(await page.getByText("Includes backend source", { exact: false }).innerText()).toContain("1 helper file · 0 dependencies");
+    expect(await page.getByRole("heading", { level: 1 }).innerText()).toBe("Import project");
+    expect(await page.getByRole("tab").count()).toBe(0);
     await page.getByRole("button", { name: "Import as new project", exact: true }).hover();
     expect(await page.getByRole("button", { name: "Import as new project", exact: true }).evaluate(element => getComputedStyle(element).backgroundColor)).toBe("rgb(42, 39, 35)");
-    expect(await page.getByRole("heading", { level: 1 }).innerText()).toBe("portable-import");
     if (process.env.GALLERY_SCREENSHOT_DIR) { await mkdir(process.env.GALLERY_SCREENSHOT_DIR, { recursive: true }); await page.screenshot({ path: join(process.env.GALLERY_SCREENSHOT_DIR, "gallery-project-import.png"), fullPage: true }); }
-    await page.getByRole("button", { name: "Close import", exact: true }).click();
+    await page.getByRole("button", { name: "Import as new project", exact: true }).click();
+    await page.getByRole("status").filter({ hasText: "Project imported." }).waitFor();
+    expect(await page.getByRole("heading", { level: 1 }).innerText()).toBe("portable-import");
+    expect(await page.getByRole("button", { name: "Import as new project", exact: true }).count()).toBe(0);
     await page.getByRole("button", { name: "More actions", exact: true }).click();
     const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("menuitem", { name: "Download", exact: true }).click()]);
     expect(download.suggestedFilename()).toBe("portable-import.artifact-project.json");

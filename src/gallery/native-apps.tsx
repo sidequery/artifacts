@@ -3,6 +3,7 @@ import { GalleryToolError, galleryTool } from "./hosted";
 import { ProjectEditor, editableProject, emptyEditableProject, type EditableProject } from "./project-editor";
 import { SecretControls } from "./secrets";
 import { Select } from "./select";
+import { workerStatusTone } from "./library-navigation";
 import { Tabs } from "@base-ui/react/tabs";
 import type { AppManifest } from "../../cloudflare/native-worker/manifest";
 
@@ -208,6 +209,16 @@ export function NativeAppEditor({ workspace, appName, providers, onNavigate, onS
         .worker-workspace fieldset { min-width: 0; }
         .worker-workspace .script-fields > label { max-width: 100%; }
         .worker-workspace .detail-actions .open-link { display: inline-flex; }
+        .worker-workspace .worker-content > :is(.worker-summary, .detail-notice) { margin: 0; }
+        .worker-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 10px 16px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+        .worker-summary > span + span::before { content: "·"; margin-right: 8px; color: var(--subtle); }
+        .worker-summary .worker-state { display: inline-flex; align-items: center; gap: 6px; color: var(--text); font-weight: 500; }
+        .worker-workspace [role="tabpanel"]:not(.worker-source-panel) { max-width: 760px; }
+        .worker-workspace [role="tabpanel"] > h2 { margin: 0 0 6px; font-size: 14px; font-weight: 600; }
+        .worker-workspace [role="tabpanel"] > h3 { margin: 24px 0 6px; font-size: 13px; font-weight: 600; }
+        .worker-workspace .worker-content > h3 { font-size: 13px; font-weight: 600; }
+        .worker-workspace legend { padding: 0; margin-bottom: 8px; font-size: 12px; font-weight: 600; }
+        .worker-manifest { display: block; width: 100%; min-height: 240px; margin-top: 6px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); font: 12px/1.6 var(--font-mono); }
         @media (max-width: 1100px) {
           .worker-workspace .detail-header { flex-wrap: wrap; gap: 8px; }
           .worker-workspace .view-control { order: 3; width: 100%; }
@@ -224,12 +235,27 @@ export function NativeAppEditor({ workspace, appName, providers, onNavigate, onS
         {appUrl ? <div className="detail-actions"><a className="download-link open-link" aria-label="Open private app" href={appUrl} target="_blank" rel="noopener">Open<span aria-hidden="true">↗</span></a></div> : null}
       </header>
       <div className="worker-content">
+        {detail ? (
+          <p className="worker-summary" role="status">
+            {selected ? (
+              <span className="worker-state">
+                <span className="status-dot" data-tone={workerStatusTone(selected.status)} aria-hidden="true" />
+                {workerStatusLabel(selected.status)}
+              </span>
+            ) : (
+              <span className="worker-state">New draft</span>
+            )}
+            <span>{provider}</span>
+            {selected ? <span title={selected.revision_token}>Saved {selected.revision_token.slice(0, 12)}</span> : null}
+            {selected?.active_revision ? <span title={selected.active_revision}>Live {selected.active_revision.slice(0, 12)}</span> : null}
+          </p>
+        ) : null}
         {error ? (
           <p role="alert" className="error-message" style={{ whiteSpace: "pre-wrap" }}>
             {error}
           </p>
         ) : null}
-        {status ? <p role="status">{status}</p> : null}
+        {status ? <p role="status" className="detail-notice">{status}</p> : null}
         {appName && !selected && busy ? <p role="status">Loading Worker app…</p> : null}
         {selected && !providerAvailable ? (
           <p role="status">
@@ -312,19 +338,6 @@ export function NativeAppEditor({ workspace, appName, providers, onNavigate, onS
         ) : null}
         {detail ? (
           <>
-            <div className="script-fields">
-              <span>{provider}</span>
-              {selected ? (
-                <span role="status">
-                  Deployment: {selected.status.replaceAll("-", " ")}
-                  {` · saved ${selected.revision_token.slice(0, 12)}`}
-                  {selected.desired_revision ? ` · desired ${selected.desired_revision.slice(0, 12)}` : ""}
-                  {selected.active_revision ? ` · active ${selected.active_revision.slice(0, 12)}` : ""}
-                </span>
-              ) : (
-                <span>New draft</span>
-              )}
-            </div>
             {selected?.error ? <p role="alert">{selected.error}</p> : null}
             <form
               className="source-form"
@@ -420,8 +433,8 @@ export function NativeAppEditor({ workspace, appName, providers, onNavigate, onS
                 {selected ? (
                   <>
                     <p>
-                      Desired revision: {selected.desired_revision?.slice(0, 12) || "None"} · Active revision:{" "}
-                      {selected.active_revision?.slice(0, 12) || "None"}
+                      Desired revision <code>{selected.desired_revision?.slice(0, 12) || "none"}</code> · Active revision{" "}
+                      <code>{selected.active_revision?.slice(0, 12) || "none"}</code>
                     </p>
                     <button
                       type="button"
@@ -457,7 +470,7 @@ export function NativeAppEditor({ workspace, appName, providers, onNavigate, onS
                         >
                           {revisions.map((revision) => (
                             <option key={revision.id} value={revision.id}>
-                              {revision.id.slice(0, 12)} · {revision.created_at}
+                              {revision.id.slice(0, 12)} · {formatRevisionDate(revision.created_at)}
                             </option>
                           ))}
                         </Select>
@@ -542,7 +555,7 @@ export function NativeAppEditor({ workspace, appName, providers, onNavigate, onS
                         setManifest(event.target.value);
                         setDirty(true);
                       }}
-                      style={{ width: "100%", background: "var(--page)", border: "1px solid var(--line)", padding: 12 }}
+                      className="worker-manifest"
                     />
                   </label>
                 </details>
@@ -596,6 +609,14 @@ export function NativeAppEditor({ workspace, appName, providers, onNavigate, onS
 }
 
 const workerSections = ["source", "resources", "triggers", "deployments", "settings"] as const;
+function workerStatusLabel(status: string) {
+  const label = status.replaceAll("-", " ");
+  return label[0]!.toUpperCase() + label.slice(1);
+}
+function formatRevisionDate(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
+}
 type WorkerSection = (typeof workerSections)[number];
 function workerSection(): WorkerSection {
   const value = new URLSearchParams(window.location.search).get("appTab");

@@ -118,6 +118,7 @@ function App() {
   const [showLinks, setShowLinks] = useState(false);
   const [showMove, setShowMove] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [notice, setNotice] = useState("");
   const [sourceVisited, setSourceVisited] = useState<string | null>(null);
   const [mobileDetail, setMobileDetail] = useState(() => workerSelection() !== null);
   const [narrowLayout, setNarrowLayout] = useState(() => window.matchMedia("(max-width: 760px)").matches);
@@ -292,6 +293,8 @@ function App() {
   useEffect(() => {
     setSelectedVersion(resolvedVersion);
   }, [resolvedVersion]);
+  const viewingItem = !creatingKind && !showImport && !!selectedArtifact && !!resolvedVersion;
+  const viewedRevision = resolvedVersion !== WORKING_VERSION ? sortedVersions.find(version => version.id === resolvedVersion) : undefined;
 
   useEffect(() => {
     if (activeTab === "source" && selectedArtifact && resolvedVersion) setSourceVisited(`${selectedArtifact.key}:${resolvedVersion}`);
@@ -406,6 +409,8 @@ function App() {
     setShowLinks(false);
     setShowMove(false);
     setCreatingKind(null);
+    setShowImport(false);
+    setNotice("");
     setRemixing(false);
     setSelectedKey(artifact.key);
     setSelectedVersion(artifact.working ? WORKING_VERSION : [...artifact.versions].sort((a, b) => b.revision - a.revision)[0]?.id ?? null);
@@ -438,6 +443,7 @@ function App() {
     setCreatingKind(kind);
     setTab("source");
     setShowImport(false);
+    setNotice("");
     setRemixing(false);
     setShowLinks(false);
     setShowMove(false);
@@ -543,7 +549,7 @@ function App() {
                 <Menu.Item onClick={() => startCreating("artifact")}>New artifact</Menu.Item>
                 {gallery?.capabilities?.scripts ? <Menu.Item onClick={() => startCreating("script")}>New script</Menu.Item> : null}
                 {gallery?.capabilities?.nativeApps ? <Menu.Item onClick={() => selectWorker({ workspace: gallery.workspace, name: null })}>New Worker app</Menu.Item> : null}
-                <Menu.Item onClick={() => { if (!leaveWorker()) return; setShowImport(true); setCreatingKind(null); setMobileDetail(true); }}>Import project</Menu.Item>
+                <Menu.Item onClick={() => { if (!leaveWorker()) return; setShowImport(true); setCreatingKind(null); setShowLinks(false); setShowMove(false); setRemixing(false); setNotice(""); setMobileDetail(true); }}>Import project</Menu.Item>
               </Menu.Popup></Menu.Positioner></Menu.Portal>
             </Menu.Root>
           </div>
@@ -555,7 +561,7 @@ function App() {
               const url = new URL(window.location.href);
               url.searchParams.set("library", event.target.value);
               window.location.assign(url.href);
-            }}><option value="private">Personal library</option><option value="team">Team library</option></Select> : null}
+            }}><option value="private">{narrowLayout ? "Personal" : "Personal library"}</option><option value="team">{narrowLayout ? "Team" : "Team library"}</option></Select> : null}
             {user ? <div className="account">
               <span className="account-name" title={user.email}>{user.name}</span>
               <button type="button" disabled={signingOut} onClick={() => void signOut()}>{signingOut ? "Signing out…" : "Sign out"}</button>
@@ -569,7 +575,7 @@ function App() {
         <div className="gallery-layout">
           <LibraryNavigation gallery={gallery} artifacts={filteredArtifacts} query={query} onQueryChange={setQuery}
             kindFilter={kindFilter} onKindFilterChange={setKindFilter}
-            selectedKey={selectedWorker ? selectedWorkerKey : creatingKind ? null : selectedKey}
+            selectedKey={selectedWorker ? selectedWorkerKey : creatingKind || showImport ? null : selectedKey}
             onSelect={selectArtifact} onSelectWorker={gallery?.capabilities?.nativeApps ? selectWorker : undefined}
             isDirty={artifact => [...drafts.entries()].some(([key, draft]) => key.startsWith(artifact.key + ":") && draft.dirty)}
             loading={loading} error={galleryError} onRetry={() => void loadGallery()} connected={liveConnected}
@@ -583,18 +589,22 @@ function App() {
             <div className="detail-header">
               <button className="back-library" type="button" onClick={() => setMobileDetail(false)} aria-label="Back to library"><span aria-hidden="true">←</span></button>
               <div className="detail-title">
-                <h1 ref={detailHeading} tabIndex={-1}>{creatingKind ? `New ${creatingKind}` : selectedArtifact?.name ?? "Your artifacts"}</h1>
+                <h1 ref={detailHeading} tabIndex={-1}>{showImport ? "Import project" : creatingKind ? `New ${creatingKind}` : selectedArtifact?.name ?? "Your artifacts"}</h1>
+                {viewingItem && viewedRevision ? <span className="revision-chip" title={formatDate(viewedRevision.createdAt)}>Revision {viewedRevision.revision}
+                  {selectedArtifact.working ? <button type="button" aria-label="Return to working copy" title="Return to working copy" onClick={() => setSelectedVersion(WORKING_VERSION)}><span aria-hidden="true">×</span></button> : null}
+                </span> : null}
               </div>
-            {!creatingKind && selectedArtifact && resolvedVersion ? <>
+            {viewingItem ? <>
               <Tabs.List className="view-control" activateOnFocus aria-label={selectedArtifact.kind === "script" ? "Script view" : "Artifact view"}>
-                {(selectedArtifact.kind === "script"
-                  ? [["source", "Source"], ["requests", "Requests"]] as const
-                  : [["preview", "Preview"], ["source", "Source"]] as const
-                ).map(([value, label]) => <Tabs.Tab key={value} value={value}>{label}</Tabs.Tab>)}
+                {([
+                  ...(selectedArtifact.kind === "script" ? [["source", "Source"], ["requests", "Requests"]] : [["preview", "Preview"], ["source", "Source"]]),
+                  // Schedule and Settings open from More actions; while one is open it shows here so the header says where you are.
+                  ...(activeTab === "schedule" ? [["schedule", "Schedule"]] : activeTab === "settings" ? [["settings", "Settings"]] : []),
+                ] as [DetailTab, string][]).map(([value, label]) => <Tabs.Tab key={value} value={value}>{label}</Tabs.Tab>)}
               </Tabs.List>
             </> : null}
-              {!creatingKind && selectedArtifact && resolvedVersion ? <div className="detail-actions">
-                <button className="primary-action" type="button" aria-expanded={showLinks} aria-controls="link-settings-panel" onClick={() => setShowLinks(value => !value)}>Share</button>
+              {viewingItem ? <div className="detail-actions">
+                <button className="share-action" type="button" aria-expanded={showLinks} aria-controls="link-settings-panel" onClick={() => setShowLinks(value => !value)}>Share</button>
                 {selectedArtifact.kind !== "script" && selectedArtifact.url ? <a className="download-link open-link" href={selectedArtifact.url} target="_blank" rel="noopener noreferrer">Open<span aria-hidden="true">↗</span></a> : null}
                 <Menu.Root>
                   <Menu.Trigger className="more-actions" aria-label="More actions"><span aria-hidden="true">⋮</span></Menu.Trigger>
@@ -606,8 +616,10 @@ function App() {
                     <Menu.SubmenuRoot>
                       <Menu.SubmenuTrigger>Versions <span aria-hidden="true">›</span></Menu.SubmenuTrigger>
                       <Menu.Portal><Menu.Positioner sideOffset={4}><Menu.Popup className="action-menu">
-                        {selectedArtifact.working ? <Menu.Item onClick={() => setSelectedVersion(WORKING_VERSION)}>Working copy</Menu.Item> : null}
-                        {sortedVersions.map(version => <Menu.Item key={version.id} onClick={() => setSelectedVersion(version.id)}>Revision {version.revision} · {formatDate(version.createdAt)}</Menu.Item>)}
+                        <Menu.RadioGroup value={resolvedVersion} onValueChange={value => setSelectedVersion(value as string)}>
+                          {selectedArtifact.working ? <Menu.RadioItem value={WORKING_VERSION} closeOnClick>Working copy<Menu.RadioItemIndicator className="menu-check" aria-hidden="true" /></Menu.RadioItem> : null}
+                          {sortedVersions.map(version => <Menu.RadioItem key={version.id} value={version.id} closeOnClick>Revision {version.revision} · {formatDate(version.createdAt)}<Menu.RadioItemIndicator className="menu-check" aria-hidden="true" /></Menu.RadioItem>)}
+                        </Menu.RadioGroup>
                       </Menu.Popup></Menu.Positioner></Menu.Portal>
                     </Menu.SubmenuRoot>
                     {gallery?.capabilities?.moves && gallery.libraryScope ? <Menu.Item onClick={() => { setShowMove(true); setShowLinks(false); setRemixing(false); }}>Move</Menu.Item> : null}
@@ -618,14 +630,16 @@ function App() {
                 </Menu.Root>
               </div> : null}
             </div>
-            {showImport && gallery ? <div className="detail-disclosure"><ProjectImportPanel workspace={gallery.workspace} hosted={!!gallery.capabilities?.links} onCancel={() => setShowImport(false)} onSaved={async (name, kind) => { createdRemix.current = { name, kind, workspace: gallery.workspace }; await loadGallery(); setSelectedVersion("working"); setTab("source"); setQuery(""); setKindFilter("all"); }} /></div> : null}
-
-            {!creatingKind && selectedArtifact?.kind !== "script" && selectedArtifact && resolvedVersion !== "working" && gallery?.capabilities?.links ? <p className="live-data-note"><strong>Live data</strong> · Historical code uses the current database and files and can change them. Restore deploys this code while keeping current data.</p> : null}
-            {showMove && !creatingKind && selectedArtifact && gallery?.libraryScope && gallery.capabilities?.moves ? <div id="library-move-panel" className="detail-disclosure"><MovePanel key={selectedArtifact.key} artifact={selectedArtifact} library={gallery.libraryScope} onCancel={() => setShowMove(false)} /></div> : null}
-            {remixing && !creatingKind && selectedArtifact && resolvedVersion ? <div className="detail-disclosure"><RemixPanel key={selectedArtifact.key + resolvedVersion} artifact={selectedArtifact} version={resolvedVersion} onCancel={() => setRemixing(false)} onSaved={async name => { createdRemix.current = {name, workspace:selectedArtifact.workspace, kind:selectedArtifact.kind ?? "artifact"}; await loadGallery(); setSelectedVersion("working"); setQuery(""); setKindFilter("all"); setRemixing(false); }} /></div> : null}
-            {!creatingKind && selectedArtifact && resolvedVersion ? <div id="link-settings-panel" className="detail-disclosure" hidden={!showLinks}><LinkSettings key={selectedArtifact.key} artifact={selectedArtifact} localUrl={gallery?.capabilities?.links ? undefined : localShareUrl} onSaved={loadGallery} /></div> : null}
-            <Tabs.Panel value={activeTab} id="artifact-panel" className="artifact-stage" aria-label={creatingKind === "artifact" ? "Artifact source" : selectedArtifact?.kind === "script" || creatingKind === "script" ? "Script editor" : activeTab === "preview" ? "Artifact preview" : activeTab === "schedule" ? "Artifact schedule" : activeTab === "settings" ? "Artifact settings" : "Artifact source"}>
-              {creatingKind === "artifact" ? <ArtifactSourcePanel key="new-artifact" workspace={gallery?.workspace ?? "default"} hosted={!!gallery?.capabilities?.links} onCancel={() => setCreatingKind(null)} onSaved={name => createdItem(name, "artifact")} />
+            {notice ? <p className="detail-notice" role="status">{notice}</p> : null}
+            {viewingItem && selectedArtifact.kind !== "script" && resolvedVersion !== "working" && gallery?.capabilities?.links ? <p className="live-data-note"><strong>Live data</strong> · Historical code uses the current database and files and can change them. Restore deploys this code while keeping current data.</p> : null}
+            {viewingItem && showMove && gallery?.libraryScope && gallery.capabilities?.moves ? <div id="library-move-panel" className="detail-disclosure"><MovePanel key={selectedArtifact.key} artifact={selectedArtifact} library={gallery.libraryScope} onCancel={() => setShowMove(false)} /></div> : null}
+            {viewingItem && remixing ? <div className="detail-disclosure"><RemixPanel key={selectedArtifact.key + resolvedVersion} artifact={selectedArtifact} version={resolvedVersion} onCancel={() => setRemixing(false)} onSaved={async name => { createdRemix.current = {name, workspace:selectedArtifact.workspace, kind:selectedArtifact.kind ?? "artifact"}; await loadGallery(); setSelectedVersion("working"); setQuery(""); setKindFilter("all"); setRemixing(false); }} /></div> : null}
+            {viewingItem ? <div id="link-settings-panel" className="detail-disclosure" hidden={!showLinks}><LinkSettings key={selectedArtifact.key} artifact={selectedArtifact} localUrl={gallery?.capabilities?.links ? undefined : localShareUrl} onSaved={loadGallery} /></div> : null}
+            <Tabs.Panel value={activeTab} id="artifact-panel" className="artifact-stage" aria-label={showImport ? "Import project" : creatingKind === "artifact" ? "Artifact source" : selectedArtifact?.kind === "script" || creatingKind === "script" ? "Script editor" : activeTab === "preview" ? "Artifact preview" : activeTab === "schedule" ? "Artifact schedule" : activeTab === "settings" ? "Artifact settings" : "Artifact source"}>
+              {showImport && gallery ? <ProjectImportPanel workspace={gallery.workspace} hosted={!!gallery.capabilities?.links} onCancel={() => setShowImport(false)}
+                onSaved={async (name, kind) => { createdRemix.current = { name, kind, workspace: gallery.workspace }; await loadGallery(); setSelectedVersion("working"); setTab("source"); setQuery(""); setKindFilter("all"); }}
+                onImported={message => { setShowImport(false); setNotice(message); }} />
+                : creatingKind === "artifact" ? <ArtifactSourcePanel key="new-artifact" workspace={gallery?.workspace ?? "default"} hosted={!!gallery?.capabilities?.links} onCancel={() => setCreatingKind(null)} onSaved={name => createdItem(name, "artifact")} />
                 : creatingKind === "script" ? <ScriptPanel key="new-script" workspace={gallery?.workspace ?? "default"} onCancel={() => setCreatingKind(null)} onSaved={name => createdItem(name, "script")} />
                 : selectedArtifact?.kind === "script" ? <ScriptPanel key={`${selectedArtifact.key}:${resolvedVersion}`} artifact={selectedArtifact} workspace={selectedArtifact.workspace} version={resolvedVersion ?? undefined} view={activeTab as ScriptView} sourceUrl={resolvedVersion ? artifactUrl("/api/source", selectedArtifact, resolvedVersion) : undefined} onSaved={async () => { setSelectedVersion("working"); await loadGallery(); }} />
                 : !selectedArtifact && gallery?.capabilities?.links ? <AgentOnboarding workspace={gallery.workspace} onCreate={() => startCreating("artifact")} />

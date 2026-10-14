@@ -385,8 +385,8 @@ const workspaceStyles = `
   .mcp-gallery .artifact-detail { margin: 0; border: 0; border-radius: 0; background: transparent; }
   .mcp-gallery .detail-header { min-height: 48px; padding: 4px 12px; gap: 8px; background: transparent; }
   .mcp-gallery .detail-title h1 { font-size: 13px; letter-spacing: normal; }
-  .mcp-gallery .view-control { gap: 2px; }
-  .mcp-gallery .view-control button { height: 32px; border: 0; border-radius: 6px; font-size: 12px; }
+  .mcp-gallery .view-control { align-self: center; align-items: center; gap: 2px; margin-bottom: 0; }
+  .mcp-gallery .view-control button { height: 32px; min-height: 32px; padding: 5px 10px; border: 0; border-radius: 6px; font-size: 12px; }
   .mcp-gallery .view-control button[data-active] { background: var(--raised); }
   .mcp-gallery .workspace-library-toggle { width: 32px; padding: 0; flex-shrink: 0; color: var(--muted); }
   .library-toggle-icon { display: block; width: 16px; height: 14px; border: 1.5px solid currentColor; border-radius: 3px; position: relative; }

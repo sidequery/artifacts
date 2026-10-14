@@ -4,6 +4,10 @@ import type { GalleryArtifact, GalleryData, GalleryItem, GalleryWorker } from ".
 
 export type LibraryKindFilter = "all" | "artifact" | "script" | "worker";
 
+export function workerStatusTone(status: string): "success" | "warning" | "error" | undefined {
+  return status === "active" ? "success" : status === "deploying" ? "warning" : status === "recovery-required" ? "error" : undefined;
+}
+
 /** Shared navigation for the web gallery and the chat workspace. */
 export function LibraryNavigation({ gallery, artifacts, query, onQueryChange, kindFilter, onKindFilterChange,
   selectedKey, onSelect, onSelectWorker, isDirty, loading, error, onRetry, connected = true, panelRef, searchRef, hidden, footer,
@@ -41,11 +45,14 @@ export function LibraryNavigation({ gallery, artifacts, query, onQueryChange, ki
           title={`${artifact.workspace}/${artifact.name}`} aria-current={artifact.key === selectedKey ? "true" : undefined}
           onClick={() => artifact.kind === "worker" ? onSelectWorker?.(artifact) : onSelect(artifact)} onFocus={event => event.currentTarget.scrollIntoView({ block: "nearest" })}>
           <span className="file-icon" aria-hidden="true" />
-          <span className="artifact-row-copy"><span className="artifact-name">{artifact.name}</span>
-            {isDirty(artifact) ? <span className="workspace-name">Unsaved changes</span> : null}
-            {artifact.kind === "worker" ? <span className="workspace-name">{artifact.status.replaceAll("-", " ")}</span> : !artifact.working ? <span className="workspace-name">Archived</span> : null}
+          <span className="artifact-row-copy"><span className="artifact-name">{artifact.name}</span></span>
+          {/* Status stays on the row's single line so rows keep one height while editing. */}
+          <span className="row-meta">
+            {isDirty(artifact) ? <span className="unsaved-dot" title="Unsaved changes"><span className="sr-only">Unsaved changes</span></span> : null}
+            {artifact.kind === "worker" ? <span className="status-dot" data-tone={workerStatusTone(artifact.status)} title={artifact.status.replaceAll("-", " ")}><span className="sr-only">{artifact.status.replaceAll("-", " ")}</span></span>
+              : !artifact.working ? <span>Archived</span> : null}
+            {artifact.kind === "script" ? <span>Script</span> : artifact.kind === "worker" ? <span>Worker</span> : null}
           </span>
-          {artifact.kind === "script" ? <span className="row-kind">Script</span> : artifact.kind === "worker" ? <span className="row-kind">Worker</span> : null}
         </button>} />}
     </div>
     {query || kindFilter !== "all" ? <div className="library-count">{artifacts.length} of {libraryItems.length} items</div> : null}

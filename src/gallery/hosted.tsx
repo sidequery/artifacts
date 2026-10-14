@@ -69,7 +69,7 @@ export function LinkSettings({ artifact, onSaved, localUrl, openLink }: { artifa
     {localUrl ? <p className="link-note">This link works only on this Mac while the local server is running. Publish the artifact to a hosted library to share it with other people.</p> : <>
     <label>URL slug<input aria-label="URL slug" required value={slug} onChange={event => setSlug(event.target.value)} /></label>
     <label>Link access<Select aria-label="URL access" value={access} onChange={event => setAccess(event.target.value as typeof access)}><option value="private">Private</option><option value="public">Public</option></Select></label>
-    <button disabled={busy}>Save link</button>
+    <button className="primary-action" disabled={busy}>Save link</button>
     <p className="link-note">Private links use the library’s access. Public links allow anyone through the app’s access check; deployment authentication may still apply. This setting does not move the item between libraries.</p>
     </>}
     <span role="status">{status}</span>

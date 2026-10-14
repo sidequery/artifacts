@@ -144,7 +144,7 @@ export function mountArtifactFileEditor(root: HTMLElement, extensions: OpenAIExt
 
 const fileEditorStyles = `
 .mcp-file-editor { height: 100%; min-height: 300px; background: var(--panel); color: var(--text); }
-.mcp-file-editor .detail-header { flex-wrap: wrap; }
+.mcp-file-editor .detail-header { flex-wrap: wrap; padding-block: 6px; }
 .mcp-file-editor .file-status { margin: 8px 16px; color: var(--muted); }
 .mcp-file-editor .file-source { flex: 1; min-height: 0; overflow: auto; }
 .mcp-file-editor .source-code-editor { display: flex; flex-direction: column; height: 100%; min-height: 180px; min-width: 0; }
