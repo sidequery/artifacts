@@ -57,7 +57,9 @@ export function ExecutionControls({ workspace, name, kind = "script", active = t
     if (!active || loaded) return;
     void perform(async () => { await control("get"); await loadRuns(); });
   }, [active, workspace, name]);
-  const displayTime = (value: number | string) => new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(new Date(value)) + " (UTC)";
+  const utcTime = (value: number | string) => new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(new Date(value));
+  const displayTime = (value: number | string) => `${utcTime(value)} (UTC)`;
+  const runTone = (status: string) => status === "succeeded" ? "success" : status === "running" ? "warning" : "error";
   let preview = "";
   if (loaded) { try { preview = `Next run if saved now: ${displayTime(nextOccurrence(timing()))}`; } catch (error) { preview = error instanceof Error ? error.message : String(error); } }
   let frequency = "";
@@ -72,12 +74,14 @@ export function ExecutionControls({ workspace, name, kind = "script", active = t
     <section className="schedule-summary" aria-label="Schedule status">
       <h2>Schedule</h2>
       {!loaded ? <p role="status">{busy ? "Loading schedule…" : "Load current settings before editing."}</p> : <>
-        <p role="status"><strong>{schedule ? schedule.paused ? "Paused" : "Enabled" : "Not configured"}</strong></p>
+        <p role="status" className="schedule-state"><span className="status-dot" data-tone={schedule ? schedule.paused ? "warning" : "success" : undefined} aria-hidden="true" />{schedule ? schedule.paused ? "Paused" : "Enabled" : "Not configured"}</p>
         {schedule ? <p>{schedule.cron ? `${schedule.cron} · ${schedule.timezone ?? "UTC"}` : frequency} · {schedule.next_run_at === null ? "No next run" : `Next run: ${displayTime(schedule.next_run_at)}`}</p> : null}
         {runs[0] ? <p>Last result: {runs[0].status} · {displayTime(runs[0].started_at)}</p> : null}
       </>}
-      <button disabled={busy} onClick={() => void perform(() => control("get"))}>{loaded ? "Reload schedule" : "Load schedule"}</button>
-      {schedule ? <><button disabled={busy || !hasServer && schedule.paused} onClick={() => void perform(() => control(schedule.paused ? "resume" : "pause"))}>{schedule.paused ? "Resume schedule" : "Pause schedule"}</button><button disabled={busy || !hasServer} onClick={() => void perform(async () => { await control("run_now"); await loadRuns(); })}>Run schedule now</button></> : null}
+      <div className="button-row">
+        <button disabled={busy} onClick={() => void perform(() => control("get"))}>{loaded ? "Reload schedule" : "Load schedule"}</button>
+        {schedule ? <><button disabled={busy || !hasServer && schedule.paused} onClick={() => void perform(() => control(schedule.paused ? "resume" : "pause"))}>{schedule.paused ? "Resume schedule" : "Pause schedule"}</button><button disabled={busy || !hasServer} onClick={() => void perform(async () => { await control("run_now"); await loadRuns(); })}>Run schedule now</button></> : null}
+      </div>
     </section>
     {loaded && !hasServer ? <p role="status">This artifact has no validated server. Add and deploy a server handler in Source to schedule requests.</p> : <details className="schedule-form" open><summary>{schedule ? "Edit schedule" : "Create schedule"}</summary>
       <form onSubmit={event => { event.preventDefault(); if (loaded && !busy) void perform(() => control("set")); }}>
@@ -104,8 +108,8 @@ export function ExecutionControls({ workspace, name, kind = "script", active = t
     <section className="run-history" aria-label="Run history"><h2>Recent runs</h2>
       <button disabled={busy} onClick={() => void perform(loadRuns)}>Refresh runs</button>
       {runsLoaded && !runs.length ? <p>No runs recorded yet.</p> : null}
-      <p>HTTP-handler outcomes; background tasks and streamed response completion are separate. Latest 100 of up to 1,000 retained runs.</p>
-      <div className="run-table"><table><thead><tr><th>Started (UTC)</th><th>Trigger</th><th>Status</th><th>HTTP</th><th>Duration</th><th>Revision</th>{kind === "script" ? <th>Logs</th> : null}</tr></thead><tbody>{runs.map(run => <tr key={run.id}><td>{displayTime(run.started_at)}</td><td>{run.trigger}</td><td>{run.status}</td><td>{run.http_status ?? "—"}</td><td>{run.duration_ms === null ? "—" : `${run.duration_ms} ms`}</td><td title={run.revision}>{run.revision.slice(0, 12)}</td>{kind === "script" ? <td><button disabled={busy} onClick={() => void perform(async () => setLogs(JSON.stringify(await galleryTool(workspace, "script_logs", { name, run_id: run.id }), null, 2)))}>View logs</button></td> : null}</tr>)}</tbody></table></div>
+      <div className="run-table"><table><thead><tr><th>Started (UTC)</th><th>Trigger</th><th>Status</th><th>HTTP</th><th>Duration</th><th>Revision</th>{kind === "script" ? <th>Logs</th> : null}</tr></thead><tbody>{runs.map(run => <tr key={run.id}><td>{utcTime(run.started_at)}</td><td>{run.trigger}</td><td><span className="run-status"><span className="status-dot" data-tone={runTone(run.status)} aria-hidden="true" />{run.status}</span></td><td>{run.http_status ?? "—"}</td><td>{run.duration_ms === null ? "—" : `${run.duration_ms} ms`}</td><td title={run.revision}>{run.revision.slice(0, 12)}</td>{kind === "script" ? <td><button disabled={busy} onClick={() => void perform(async () => setLogs(JSON.stringify(await galleryTool(workspace, "script_logs", { name, run_id: run.id }), null, 2)))}>View logs</button></td> : null}</tr>)}</tbody></table></div>
+      <p className="run-note">Status reflects the HTTP response; background tasks and streamed bodies can finish later. Showing the latest 100 of up to 1,000 retained runs.</p>
       {logs ? <pre aria-label="Run logs">{logs}</pre> : null}
     </section>
   </>;

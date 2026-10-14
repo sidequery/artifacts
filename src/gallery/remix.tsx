@@ -22,7 +22,7 @@ export function RemixPanel({ artifact, version, onSaved, onCancel }: {
   }}>
     <label>Remix name <input autoFocus required value={name} onChange={event => setName(event.target.value)} disabled={busy} /></label>
     <span className="muted">Fresh data and secrets. Hosted URLs start private.</span>
-    <button type="submit" disabled={busy || !name.trim()}>{busy ? "Creating remix…" : "Create remix"}</button>
+    <button className="primary-action" type="submit" disabled={busy || !name.trim()}>{busy ? "Creating remix…" : "Create remix"}</button>
     <button type="button" disabled={busy} onClick={onCancel}>Cancel</button>
     {error ? <span role="alert" className="error-message">{error}</span> : null}
   </form>;

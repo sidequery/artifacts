@@ -20,7 +20,7 @@ const colors = HighlightStyle.define([
 const theme = EditorView.theme({
   "&": { height: "100%", backgroundColor: "transparent", color: "var(--text)", fontSize: "13px" },
   "&.cm-focused": { outline: "none" },
-  ".cm-scroller": { overflow: "auto", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace", lineHeight: "1.65" },
+  ".cm-scroller": { overflow: "auto", fontFamily: "var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace)", lineHeight: "1.65" },
   ".cm-content": { padding: "16px 0", caretColor: "var(--text)" },
   ".cm-line": { padding: "0 20px 0 12px" },
   ".cm-gutters": { backgroundColor: "transparent", color: "var(--subtle)", border: "none", padding: "0 8px 0 12px" },
