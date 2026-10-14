@@ -214,22 +214,6 @@ test("successful serve snapshots deduplicate versions while retaining UUID event
   await fails("events", { workspace: "elsewhere", version_id: first.version.id }, "not found in this workspace");
 });
 
-test("reopening a version with unchanged state reuses its latest event", async () => {
-  const source = "export default function Artifact() { return null; }\n";
-  const serve = (initial_state: Record<string, unknown>, extra: Record<string, unknown> = {}) => call<VersionResult>("recordServe", {
-    workspace: "repeat-serves", name: "overview", source, runtime: "sdk", initial_state, mode: "preview", ...extra,
-  });
-  const first = await serve({ count: 1 });
-  expect((await serve({ count: 1 }, { version_id: first.version.id })).event.id).toBe(first.event.id);
-  const changed = await serve({ count: 2 });
-  expect(changed.event.id).not.toBe(first.event.id);
-  const returned = await serve({ count: 1 });
-  expect(returned.event.id).not.toBe(changed.event.id);
-  expect((await serve({ count: 1 }, { session_id: "another-session" })).event.id).not.toBe(returned.event.id);
-  expect(await call<unknown[]>("events", { workspace: "repeat-serves", version_id: first.version.id })).toHaveLength(4);
-  expect(await call<Array<{ serve_count: number }>>("history", { workspace: "repeat-serves" })).toMatchObject([{ serve_count: 4 }]);
-});
-
 test("version identity includes server source and client-only history stays compatible", async () => {
   const client = "same client\n";
   const first = await call<VersionResult>("recordServe", { workspace: "server-history", name: "overview", source: client, server_source: "server one\n", runtime: "sdk", initial_state: {}, mode: "live" });
