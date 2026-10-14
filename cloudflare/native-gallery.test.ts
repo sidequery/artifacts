@@ -11,7 +11,7 @@ test("gallery lists Worker drafts across workspaces with owner isolation, pagina
       build.onLoad({ filter: /\/cloudflare\/compiler\.ts$/ }, () => ({ loader: "ts", contents: `
         export function compileNativeWorker() { return { ok: false, diagnostics: [{ severity: "error", message: "Fixture draft" }] }; }
         function unexpected() { throw new Error("Gallery reads must not compile or execute projects"); }
-        export { unexpected as compileArtifactSource, unexpected as compileArtifactServerSource, unexpected as compileScriptSource,
+        export { unexpected as compileArtifactSource, unexpected as compileArtifactServerSource, unexpected as compileScriptSource, unexpected as compilePluginSource,
           unexpected as typecheckArtifactSource, unexpected as typecheckArtifactServerSource };
       ` }));
     } }],

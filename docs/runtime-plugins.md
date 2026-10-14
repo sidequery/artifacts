@@ -82,9 +82,9 @@ Server-side plugin functions follow deployment upgrades. Browser libraries and t
 ## Publish a plugin without rebuilding
 
 A plugin that only provides server functions can also be published into a running
-deployment. A published plugin needs no rebuild or redeploy of Artifacts: replacing its
-file replaces the plugin. Add an R2 binding named `PLUGINS` to the deployment's
-Wrangler configuration:
+deployment as its TypeScript source. Publishing needs no build step and no rebuild
+or redeploy of Artifacts: replacing the file replaces the plugin. Add an R2 binding
+named `PLUGINS` to the deployment's Wrangler configuration:
 
 ```json
 "r2_buckets": [
@@ -93,7 +93,7 @@ Wrangler configuration:
 ]
 ```
 
-Write the plugin as one module whose default export is `definePlugin(...)`. It takes
+Write the plugin as one file whose default export is `definePlugin(...)`. It takes
 the same fields as an entry in `artifacts.plugins.ts`, except `browser` and `types`:
 
 ```ts
@@ -116,35 +116,38 @@ export default definePlugin({
 });
 ```
 
-Bundle it from a checkout of this repository, then upload the result to
-`plugins/<name>.json` in that bucket:
+Upload it to `plugins/<name>.ts` in that bucket. The object key must match the
+plugin's `name`:
 
 ```sh
-bun run scripts/bundle-plugin.ts warehouse.plugin.ts --out warehouse.json
 # celld: writes the fleet bucket directly; no node needs to be running.
-celld r2 put artifacts-plugins plugins/warehouse.json --path warehouse.json --content-type application/json --bucket s3://<fleet-bucket>
+celld r2 put artifacts-plugins plugins/warehouse.ts --path warehouse.plugin.ts --content-type text/plain --bucket s3://<fleet-bucket>
 # Cloudflare
-bun x wrangler r2 object put artifacts-plugins/plugins/warehouse.json --file warehouse.json --remote
+bun x wrangler r2 object put artifacts-plugins/plugins/warehouse.ts --file warehouse.plugin.ts --remote
 ```
 
-The bundle is one file: the handlers, their dependencies, and the input/output
-validators. It is reproducible: the same plugin source and Artifacts checkout produce
-the same bytes on any machine, so a deployment repository can commit the bundle and
-check it against its source in CI. The plugin may live in another repository; its
-`@sidequery/artifacts/plugins` import resolves to the checkout used for bundling. Each node uses a new or replaced file within about five seconds. Delete
-the object to remove the plugin.
+Each node uses a new or replaced file within about five seconds. Delete the object
+to remove the plugin. A node compiles each version on its first use, with the same
+bundler as scripts. The plugin is one self-contained file. It may import
+`@sidequery/artifacts/plugins` (types only; no install needed) and Workers builtins
+such as `node:crypto`, and nothing else. A plugin that does not compile, or whose
+`name` does not match its key, is left out of `plugins_list`. Calling it returns
+`Plugin configuration unavailable`, and the reason is in the server log.
 
 A published plugin works like a build-time plugin. It appears in `plugins_list` and
-is called with `artifact_plugin_call` or `pluginCall`. It has the same schemas,
-`authorize`, 30 second limit, 256 KiB limit and generic errors. It differs in these
-ways:
+is called with `artifact_plugin_call` or `pluginCall`. It has the same `authorize`,
+30 second limit, 256 KiB limit and generic errors. It differs in these ways:
 
 - **Isolation.** It runs in its own isolate. Its environment contains only the secrets
   it declares, read from deployment variables with the same names. Other variables,
-  bindings and storage are unavailable to it.
+  bindings and storage are unavailable to it. The host learns the plugin's operations
+  and schemas by asking it to describe itself in an isolate with no secrets.
 - **Secrets.** It can declare only variables named `PLUGIN_*`. Write access to the
   bucket therefore never exposes the deployment's own credentials. Adding a secret
   still means changing the deployment's variables.
+- **Schemas.** The host validates input and output with a JSON Schema draft 7 validator
+  that interprets each schema, because Workers cannot compile validators from
+  generated code. Build-time plugins use compiled Ajv validators.
 - **Server only.** Browser libraries still require a deployment build. Artifacts call
   published plugins with `pluginCall` directly.
 - **Names.** A build-time plugin with the same name takes precedence.

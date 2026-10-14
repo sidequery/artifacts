@@ -2,7 +2,7 @@ import { definePlugin } from "@sidequery/artifacts/plugins";
 
 const VERSION = "fixture-v1";
 
-/** Published at runtime by cloudflare/runtime-plugins.test.ts. */
+/** Published as source by cloudflare/runtime-plugins.test.ts and runtime-plugins-celld.test.ts. */
 export default definePlugin({
   name: "test-warehouse",
   description: "Runtime plugin test fixture",
@@ -23,6 +23,12 @@ export default definePlugin({
       inputSchema: { type: "object" },
       authorize: user => user.subject === "nobody",
       handler: () => ({ reached: true }),
+    },
+    malformed: {
+      description: "Returns output its own schema rejects",
+      inputSchema: { type: "object" },
+      outputSchema: { type: "object", required: ["value"] },
+      handler: () => ({}),
     },
     broken: {
       description: "Throws with provider details",

@@ -63,6 +63,11 @@ await writeFile(join(dirname(output), "browser-runtime.json"), JSON.stringify({
   sharedModules: Object.fromEntries(Object.entries({ react: { value: react, key: "react" }, "react-dom": { value: reactDom, key: "reactDom" }, "react-dom/client": { value: reactDomClient, key: "reactDomClient" }, "react-router": { value: reactRouter, key: "reactRouter" }, "react/jsx-runtime": { value: jsx, key: "jsx" }, "react/jsx-dev-runtime": { value: jsxDev, key: "jsxDev" } }).map(([name, {value, key}]) => [name, `export default globalThis.__artifactsRuntime.${key};\n` + Object.keys(value).filter(item => item !== "default" && /^[A-Za-z_$][\w$]*$/.test(item)).map(item => `export const ${item} = globalThis.__artifactsRuntime.${key}.${item};`).join("\n")])),
   sdkModule: Object.keys(sdk).sort().map(name => `export const ${name} = globalThis.__artifactsRuntime.sdk.${name};`).join("\n"),
 }));
+// The wrapper the host compiles together with each published plugin's source
+// (cloudflare/compiler.ts compilePluginSource).
+const pluginRuntime = await Bun.build({ entrypoints: [join(root, "src/plugins/runtime-entry.ts")], target: "browser", format: "esm", minify: true });
+if (!pluginRuntime.success) throw new Error(pluginRuntime.logs.join("\n"));
+await writeFile(join(dirname(output), "plugin-runtime.json"), JSON.stringify({ js: await pluginRuntime.outputs[0]!.text() }));
 const identity = createHash("sha256").update(JSON.stringify(files)).update(runtimeJs)
   .update(JSON.stringify(plugins.browser)).update(JSON.stringify(plugins.catalog))
   .update(await readFile(join(root, "bun.lock"), "utf8"))

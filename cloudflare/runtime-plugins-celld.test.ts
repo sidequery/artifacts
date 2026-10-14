@@ -1,11 +1,10 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { cp, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { bundleRuntimePlugin } from "../scripts/bundle-plugin";
 import { prepareCelldConfig } from "../scripts/prepare-celld";
 import { spawnCelld, stopCelld, waitForReady, type RunningCelld } from "../e2e/celld-auth-runtime";
 
@@ -30,7 +29,7 @@ beforeAll(async () => {
   const esbuild = process.env.CELLD_ESBUILD ?? resolve(root, "node_modules/.bin/esbuild");
   if (!binary) throw new Error("celld was not found; install celld or set CELLD_BIN to its executable");
   if (!existsSync(join(root, "dist/worker-app/worker.js"))) throw new Error("missing dist/worker-app/worker.js; run bun run build:cloudflare");
-  const record = await bundleRuntimePlugin(join(root, "e2e/runtime-plugin-fixture.ts"));
+  const source = await readFile(join(root, "e2e/runtime-plugin-fixture.ts"), "utf8");
   project = await mkdtemp(join(tmpdir(), "artifact-celld-plugins-"));
   await cp(join(root, "dist/worker-app"), join(project, "dist/worker-app"), { recursive: true });
   await cp(join(root, "dist/cloudflare/assets"), join(project, "dist/cloudflare/assets"), { recursive: true });
@@ -46,7 +45,7 @@ beforeAll(async () => {
   await writeFile(configPath, JSON.stringify({ name: config.name, main: "seed.js", compatibility_date: config.compatibility_date, r2_buckets: [plugins] }));
   runtime = spawnCelld(binary, esbuild, project, port);
   await waitForReady(runtime, origin);
-  const seeded = await fetch(`${origin}/?key=plugins/test-warehouse.json`, { method: "PUT", body: JSON.stringify(record) });
+  const seeded = await fetch(`${origin}/?key=plugins/test-warehouse.ts`, { method: "PUT", body: source });
   if (!seeded.ok) throw new Error(`Seeding failed: ${seeded.status}\n${runtime.logs()}`);
   await stopCelld(runtime);
   await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`);
@@ -59,7 +58,7 @@ afterAll(async () => {
   if (project) await rm(project, { recursive: true, force: true });
 });
 
-celldTest("a published plugin runs in its own isolate on celld", async () => {
+celldTest("a published plugin source compiles and runs in its own isolate on celld", async () => {
   const client = new Client({ name: "runtime-plugin-celld", version: "1" });
   try {
     await client.connect(new StreamableHTTPClientTransport(new URL(`${origin}/mcp?workspace=test`)));

@@ -34,7 +34,7 @@ export function definePlugins<const T extends readonly ArtifactPlugin[]>(plugins
   return plugins;
 }
 
-/** One plugin per module, for publishing at runtime with scripts/bundle-plugin.ts. */
+/** One plugin per module: the default export of a plugin published at runtime as `plugins/<name>.ts`. */
 export function definePlugin<const T extends ArtifactPlugin>(plugin: T): T {
   return plugin;
 }
