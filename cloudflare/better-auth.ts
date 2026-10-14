@@ -123,11 +123,21 @@ export async function getArtifactAuth(env: BetterAuthEnvironment): Promise<Artif
   return auth;
 }
 
+/** A person opening a URL in a tab, such as a shared private link. Frames and
+ * fetches keep the JSON challenge; the gallery client redirects on that. */
+function documentNavigation(request: Request): boolean {
+  if (request.method !== "GET" && request.method !== "HEAD") return false;
+  const destination = request.headers.get("Sec-Fetch-Dest");
+  if (destination) return destination === "document";
+  // Browsers without Fetch Metadata still ask for HTML when navigating.
+  return request.headers.get("Accept")?.includes("text/html") ?? false;
+}
+
 export function browserSignIn(request: Request): Response {
   const current = new URL(request.url);
   const returnTo = current.pathname + current.search;
   const login = `/sign-in?returnTo=${encodeURIComponent(returnTo)}`;
-  if (request.method === "GET" && ["/", "/gallery"].includes(current.pathname)) {
+  if ((request.method === "GET" && ["/", "/gallery"].includes(current.pathname)) || documentNavigation(request)) {
     return new Response(null, { status: 302, headers: { Location: login, "Cache-Control": "no-store" } });
   }
   return Response.json({ error: "Sign in to Artifacts", loginUrl: login }, {
