@@ -150,6 +150,9 @@ export class ArtifactLibrary extends DurableObject<unknown> {
         }
       }
       this.sql.exec("create index if not exists serve_events_version on serve_events(version_id, served_at)");
+      // History lists read only these columns. Covering them keeps listings from
+      // reading each revision's source, which precedes them in the row.
+      this.sql.exec("create index if not exists versions_history on versions(artifact_id, revision, id, created_at, source_hash, runtime, reason, restored_from)");
     });
   }
 

@@ -132,6 +132,16 @@ credentials or other environment variables. The native server binds only to
 loopback. Its state is local application data and is not uploaded or backed up
 automatically.
 
+celld stores full copies of an object's database each time the object is unloaded
+and started again. The host keeps idle objects in memory, so this happens when the
+server restarts or celld unloads objects under memory pressure, not after each idle
+period. Setting `CELLD_IDLE_EVICT_S` unloads objects after that many idle seconds,
+and every later wake stores more copies. The host deletes copies that are older than
+one hour and no longer needed for recovery (`CELLD_LTX_RETENTION_SECS`, default
+`3600`). Deletion can take about ten minutes after the next write to that object.
+Set `CELLD_LTX_RETENTION_SECS=0` to keep every copy; storage then grows with each
+restart.
+
 For bucket-backed production nodes, TLS/authentication boundaries, health checks,
 and graceful rollout guidance, see [celld deployment](celld-deployment.md).
 

@@ -42,6 +42,9 @@ export class ScriptLibrary extends DurableObject<unknown> {
         this.sql.exec(`alter table ${table} add column project text not null default '{"files":{},"dependencies":{},"lock":{}}'`);
       }
     }
+    // History lists read only these columns, newest first. Covering them keeps
+    // listings from reading each revision's source, which precedes them in the row.
+    this.sql.exec("create index if not exists script_versions_history on script_versions(created_at, id, workspace, name, revision, source_hash, reason, restored_from)");
   }
   private row(input: {workspace: string; name: string}): Row {
     const {workspace,name} = key(input);

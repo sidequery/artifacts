@@ -51,11 +51,18 @@ For production or multiple machines, use celld's bucket-backed node mode:
 4. Terminate TLS and authenticate users in the application or a chosen reverse
    proxy. Keep the operator/peer listener on a trusted private network, with an
    encrypted overlay when that network does not provide confidentiality.
-5. Use `/.well-known/celld/health` for node readiness. `/health` is an application
+5. Set `CELLD_LTX_RETENTION_SECS` (for example, `3600`) on every node once all
+   nodes run 0.6.1. Without it, celld never deletes superseded snapshot epochs,
+   so bucket usage grows with each activation, including every wake after idle
+   eviction. Epoch deletion requires list-after-write consistency; see the
+   [storage guarantees](https://github.com/denoland/celld/blob/v0.6.1/docs/guarantees.md)
+   before enabling it on a multi-region bucket. Nodes using `bucket` durability
+   delete nothing. Unset it on every node before rolling back to celld 0.6.0.
+6. Use `/.well-known/celld/health` for node readiness. `/health` is an application
    route and does not establish node readiness. Allow graceful SIGTERM shutdown:
    the supervisor's stop grace must exceed celld's configured shutdown bound
    (40 seconds by default), with enough time for the expected drain and handoff.
-6. Update app code through `celld deploy`. Running nodes adopt deployments in
+7. Update app code through `celld deploy`. Running nodes adopt deployments in
    place; a failed build leaves the previous deployment serving. For runtime
    upgrades, follow the release-specific shutdown requirements. The
    [0.6.0 release](https://github.com/denoland/celld/releases/tag/v0.6.0) requires

@@ -15,7 +15,9 @@ docker run -d --name artifacts --restart unless-stopped \
 Open [localhost:4786](http://127.0.0.1:4786); the MCP endpoint is
 `http://127.0.0.1:4786/mcp`. The named volume preserves apps, databases, files,
 and schedules across container replacements. Stop the container before backing
-up the volume. Allow 60 seconds for graceful shutdown.
+up the volume. Allow 60 seconds for graceful shutdown. The image deletes
+superseded storage snapshots after one hour, as described in the
+[host guide](daemon.md#data-and-configuration).
 
 ## Configure network access
 
