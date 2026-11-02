@@ -513,6 +513,8 @@ test("a service token manages the team library over MCP and confers nothing outs
   expect(linked.isError, JSON.stringify(linked.content)).not.toBe(true);
 
   // The service account has no personal library to fall back to.
+  expect((await service.callTool({ name: "artifact_list", arguments: { library_scope: "private" } })).isError).toBe(true);
+  expect((await service.callTool({ name: "artifacts_execute", arguments: { operation: "artifact_delete", arguments: { name: "service-report", library_scope: "private" } } })).isError).toBe(true);
   for (const query of ["workspace=test", "workspace=test&library=private"]) {
     const response = await fetch(`${origin}/mcp?${query}`, { headers: bearer });
     expect(response.status).toBe(403);

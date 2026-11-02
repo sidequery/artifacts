@@ -54,7 +54,13 @@ export class ArtifactFiles extends DurableObject<FilesEnv> {
   private prefix() { return `canvases/${this.ctx.id.toString()}/`; }
   private key(id: string) { return this.prefix() + id; }
 
+  async setTrashed(trashed: boolean) {
+    await this.ctx.storage.put("trashed", trashed);
+    if (trashed) this.ctx.storage.sql.exec("delete from file_grants");
+  }
+
   async request(input: ArtifactFileRequest): Promise<FileReply> {
+    if (await this.ctx.storage.get("trashed")) throw new ArtifactFileError("Item is in Trash", 404);
     validateFileRequest(input);
     if (!this.env.FILES) throw new ArtifactFileError("Artifact file storage is not configured", 503);
     if (input.operation === "list") {
@@ -111,6 +117,7 @@ export class ArtifactFiles extends DurableObject<FilesEnv> {
   async fetch(request: Request): Promise<Response> {
     const headers = transferHeaders();
     try {
+      if (await this.ctx.storage.get("trashed")) throw new ArtifactFileError("Transfer not found", 404);
       const match = new URL(request.url).pathname.match(TRANSFER_PATH);
       if (!match || match[1] !== this.ctx.id.toString() || !ID.test(match[2]!)) throw new ArtifactFileError("Transfer not found", 404);
       const row = this.ctx.storage.sql.exec<{ value: string }>("select value from file_grants where token = ? and expires > ?", match[2]!, Date.now()).toArray()[0];

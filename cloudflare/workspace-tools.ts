@@ -20,7 +20,7 @@ export async function workspaceTool(service: { workspace: string; productUrl?: s
       page = await service.gallery(true, page.nextOffset);
       matches.push(...page.artifacts.filter(item => item.name.toLocaleLowerCase().includes(query)));
     }
-    const links = matches.slice(0, 100).map(item => ({ type: "resource_link" as const, uri: artifactResourceUri(item, item.working ? undefined : item.versions[0]?.id), name: item.name, title: `${item.name} · ${item.kind ?? "artifact"} · ${item.workspace}`, mimeType: "application/json", description: `${item.kind === "script" ? "Script" : "React artifact"} project and revision in workspace ${item.workspace}` }));
+    const links = matches.slice(0, 100).map(item => ({ type: "resource_link" as const, uri: artifactResourceUri(item, item.working ? undefined : item.versions[0]?.id, gallery.libraryScope), name: item.name, title: `${item.name} · ${item.kind ?? "artifact"} · ${item.workspace}`, mimeType: "application/json", description: `${item.kind === "script" ? "Script" : "React artifact"} project and revision in workspace ${item.workspace}` }));
     return { content: links, structuredContent: { items: links } };
   }
   return workspaceResult({ view, workspace: gallery.workspace, items, nextOffset: gallery.nextOffset ?? null, gallery: { ...gallery, artifacts: items }, ...(service.productUrl ? { productUrl: service.productUrl } : {}) });

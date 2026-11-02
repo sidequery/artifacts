@@ -117,6 +117,87 @@ test("hosted conditional saves return conflicts and invalid drafts can be correc
   expect((await write(good, null)).response.status).toBe(409);
 });
 
+test("gallery deletion moves an artifact to recoverable Trash, revokes files and preserves data with paused schedules", async () => {
+  const name = "trash-roundtrip";
+  const call = async (tool: string, args: Record<string, unknown> = {}) => {
+    const result = await client.callTool({ name: tool, arguments: { name, ...args } });
+    expect(result.isError, JSON.stringify(result.content)).not.toBe(true);
+    return result.structuredContent ?? payload(result);
+  };
+  const written = await call("artifact_write", { contents: counterClient, server: counterServer, access: "public", slug: name });
+  const versionId = written.preview.artifact.versionId;
+  await call("artifact_secrets", { secrets: { RETAINED: "kept" } });
+  const counter = async (method = "GET") => {
+    const result = await call("artifact_request", { request: { path: "/counter", method } });
+    return JSON.parse(atob(result.response.body));
+  };
+  expect((await counter("POST")).value).toBe(1);
+  await call("artifact_schedule", { action: "set", interval_seconds: 3600, request: { path: "/counter", method: "POST" } });
+  const upload = (await call("artifact_files", { request: { operation: "upload", name: "kept.txt", size: 4, type: "text/plain" } })).result;
+  expect((await fetch(upload.url, { method: "PUT", body: "kept" })).status).toBe(201);
+  const download = (await call("artifact_files", { request: { operation: "download", id: upload.file.id } })).result;
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.goto(`${origin}/?workspace=test&name=${name}`);
+    await page.getByRole("heading", { name, exact: true }).waitFor();
+    await page.getByRole("button", { name: "More actions", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Delete", exact: true }).click();
+    const panel = page.getByRole("form", { name: "Move to Trash", exact: true });
+    await panel.getByRole("button", { name: "Cancel", exact: true }).click();
+    expect((await fetch(`${origin}/${name}`)).status).toBe(200);
+    await page.getByRole("button", { name: "More actions", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Delete", exact: true }).click();
+    await panel.getByRole("button", { name: "Move to Trash", exact: true }).click();
+    await page.getByRole("button", { name, exact: true }).waitFor({ state: "detached" });
+    expect((await fetch(`${origin}/${name}`)).status).toBe(404);
+    expect((await fetch(download.url)).status).toBe(404);
+    expect((await client.callTool({ name: "artifact_read", arguments: { name } })).isError).toBe(true);
+    expect((await client.callTool({ name: "artifact_open", arguments: { version_id: versionId } })).isError).toBe(true);
+    expect((await client.callTool({ name: "artifact_write", arguments: { name, contents: source } })).isError).toBe(true);
+    await page.getByRole("button", { name: "Trash", exact: true }).click();
+    const trash = page.getByRole("region", { name: "Trash", exact: true });
+    await trash.getByRole("button", { name: `Restore ${name}`, exact: true }).waitFor();
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    if (process.env.GALLERY_SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.GALLERY_SCREENSHOT_DIR}/trash.png` });
+    await trash.getByRole("button", { name: `Restore ${name}`, exact: true }).click();
+    await trash.getByText("Trash is empty.", { exact: true }).waitFor();
+    await trash.getByRole("button", { name: "Back to library", exact: true }).click();
+    await page.getByRole("button", { name, exact: true }).waitFor();
+  } finally { await browser.close(); }
+  expect((await counter()).value).toBe(1);
+  expect((await call("artifact_schedule")).schedule).toMatchObject({ paused: true, next_run_at: null });
+  expect((await call("artifact_secrets")).names).toEqual(["RETAINED"]);
+  expect((await call("artifact_files", { request: { operation: "list" } })).result.files).toMatchObject([{ id: upload.file.id }]);
+  const restoredDownload = (await call("artifact_files", { request: { operation: "download", id: upload.file.id } })).result;
+  expect(await (await fetch(restoredDownload.url)).text()).toBe("kept");
+  expect(payload(await client.callTool({ name: "artifact_version", arguments: { version_id: versionId } })).source).toBe(counterClient);
+  expect((await fetch(`${origin}/${name}`)).status).toBe(200);
+}, 60_000);
+
+test("one MCP connection trashes and restores team scripts while keeping schedules paused", async () => {
+  const name = "team-trash-handler", library_scope = "team";
+  const call = async (tool: string, args: Record<string, unknown> = {}) => {
+    const result = await client.callTool({ name: tool, arguments: { name, library_scope, ...args } });
+    expect(result.isError, JSON.stringify(result.content)).not.toBe(true);
+    return payload(result);
+  };
+  await call("script_write", { contents: 'export default { fetch() { return new Response("retained"); } };' });
+  await call("script_secrets", { secrets: { RETAINED: "kept" } });
+  await call("script_schedule", { action: "set", interval_seconds: 3600 });
+  await call("script_delete");
+  expect((await fetch(`${origin}/${name}`)).status).toBe(404);
+  expect((await client.callTool({ name: "script_run", arguments: { name, library_scope, request: { path: "/" } } })).isError).toBe(true);
+  const trash = payload(await client.callTool({ name: "artifacts_query", arguments: { operation: "artifacts_trash", arguments: { library_scope } } }));
+  expect(trash.items).toMatchObject([{ name, kind: "script" }]);
+  expect(payload(await client.callTool({ name: "artifacts_trash", arguments: {} })).items).toEqual([]);
+  await call("script_undelete");
+  expect(await (await fetch(`${origin}/${name}`)).text()).toBe("retained");
+  expect((await call("script_schedule")).schedule).toMatchObject({ paused: true, next_run_at: null });
+  expect((await call("script_secrets")).names).toEqual(["RETAINED"]);
+});
+
 test("official HTTP MCP client lists contracts, writes, edits, restores and retrieves raw history", async () => {
   const tools = (await client.listTools()).tools;
   expect(tools.some(tool => tool.name === "artifact_write")).toBe(true);
@@ -375,6 +456,24 @@ test("verified users have isolated private libraries and can collaborate in the 
     expect((await teamBob.callTool({ name: "artifact_edit", arguments: { name: "shared", edits: [{ old_text: "Hosted artifact", new_text: "Team artifact" }] } })).isError).not.toBe(true);
     expect(payload(await teamAlice.callTool({ name: "artifact_read", arguments: { name: "shared" } })).source).toContain("Team artifact");
     expect((await alice.callTool({ name: "artifact_read", arguments: { name: "shared" } })).isError).toBe(true);
+    // One authenticated connection can select either library independently on
+    // concurrent calls. A team URL remains a compatible default, not a boundary.
+    const [personalRead, teamRead] = await Promise.all([
+      alice.callTool({ name: "artifact_read", arguments: { name: "secret", library_scope: "private" } }),
+      alice.callTool({ name: "artifact_read", arguments: { name: "shared", library_scope: "team" } }),
+    ]);
+    expect(payload(personalRead).source).toBe(source);
+    expect(payload(teamRead).source).toContain("Team artifact");
+    expect(payload(await teamAlice.callTool({ name: "artifact_read", arguments: { name: "secret", library_scope: "private" } })).source).toBe(source);
+    expect((await teamBob.callTool({ name: "artifact_read", arguments: { name: "secret", library_scope: "private" } })).isError).toBe(true);
+    const mentions = await alice.callTool({ name: "artifacts_mentions", arguments: { query: "shared", library_scope: "team" } });
+    const mention = (mentions.content as { uri: string }[])[0]!;
+    expect(mention.uri).toContain("library_scope=team");
+    const mentioned = await alice.readResource({ uri: mention.uri });
+    expect(JSON.parse((mentioned.contents[0] as { text: string }).text).source).toContain("Team artifact");
+    const scopedPreview = await alice.callTool({ name: "artifact_open", arguments: { name: "shared", library_scope: "team" } });
+    expect(scopedPreview._meta?.artifact).toMatchObject({ library_scope: "team" });
+    expect((await bob.callTool({ name: "artifact_delete", arguments: { name: "secret", library_scope: "private" } })).isError).toBe(true);
     for (const path of [`/api/source?version=${privateVersion}`, `/gallery/preview?version=${privateVersion}`, `/api/source?name=secret&subject=alice`, `/api/source?library=team&version=${privateVersion}`]) {
       expect((await fetch(address + path + "&workspace=test", { headers: { "Cf-Access-Jwt-Assertion": bobToken } })).status).toBe(404);
     }
@@ -969,7 +1068,13 @@ test("MCP workspace tools admit cross-workspace previews and resources while sup
     const uri = (mentions.structuredContent as any).items[0].uri;
     const resource = await client.readResource({ uri });
     expect(JSON.parse((resource.contents[0] as { text: string }).text)).toMatchObject({ workspace: "workspace-tools", name: "workspace-preview", source });
-    await expect(team.readResource({ uri })).rejects.toThrow();
+    // A resource carries its library selector. The same person's connection
+    // can read it even when that connection defaults to the team library.
+    const fromTeamConnection = await team.readResource({ uri });
+    expect(JSON.parse((fromTeamConnection.contents[0] as { text: string }).text)).toMatchObject({ source });
+    const teamUri = new URL(uri);
+    teamUri.searchParams.set("library_scope", "team");
+    await expect(team.readResource({ uri: teamUri.href })).rejects.toThrow();
     expect((await team.callTool({ name: "artifacts_preview", arguments: { workspace: "workspace-tools", version_id: versionId } })).isError).toBe(true);
     const opened = await client.callTool({ name: "artifacts_preview", arguments: { workspace: "workspace-tools", version_id: versionId } });
     expect(opened.isError).not.toBe(true);
@@ -1013,7 +1118,11 @@ test("MCP gallery editor keeps full projects, workspace routing, CAS errors and 
   const team = new Client({ name: "gallery-denied", version: "1" });
   await team.connect(new StreamableHTTPClientTransport(new URL(`${origin}/mcp?workspace=${workspace}&library=team`), { fetch }));
   try {
-    await expect(team.readResource({ uri: scriptUri })).rejects.toThrow();
+    const fromTeamConnection = await team.readResource({ uri: scriptUri });
+    expect(JSON.parse((fromTeamConnection.contents[0] as { text: string }).text)).toMatchObject({ source: script });
+    const teamUri = new URL(scriptUri);
+    teamUri.searchParams.set("library_scope", "team");
+    await expect(team.readResource({ uri: teamUri.href })).rejects.toThrow();
     expect((await team.callTool({ name: "artifacts_source", arguments: { workspace, kind: "script", name } })).isError).toBe(true);
     const deniedCatalog = await team.callTool({ name: "artifacts_library", arguments: {} });
     expect((deniedCatalog._meta as any).workspace.gallery.artifacts.some((item: { name: string }) => item.name === name)).toBe(false);

@@ -122,6 +122,11 @@ export const galleryStyles = `
   .source-form > .script-fields { padding: 12px 16px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
   .source-actions { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--line); flex-shrink: 0; }
   .source-actions p { margin: 0; color: var(--muted); }
+  .trash-panel { overflow: auto; }
+  .trash-panel > p { margin: 12px 16px; }
+  .trash-item { flex-wrap: wrap; }
+  .trash-item > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .trash-item > button { flex-shrink: 0; }
   .gallery-app button.primary-action { background: var(--primary); color: var(--primary-text); border-color: var(--primary); font-weight: 600; }
   button.primary-action:disabled { opacity: .45; }
   /* Content actions are outlined; header, tab, and menu controls stay quiet. */

@@ -126,6 +126,7 @@
     "src/gallery/source-editor.tsx",
     "src/gallery/select.tsx",
     "src/gallery/move.tsx",
+    "src/gallery/trash.tsx",
     "src/gallery/theme.ts",
     "src/gallery/brand.ts",
     "src/gallery/Geist-OFL.txt",

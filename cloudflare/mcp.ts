@@ -27,7 +27,7 @@ export async function handleCloudMcp(request: Request, service: Pick<CloudArtifa
     csp: { ...ARTIFACTS_RESOURCE._meta.ui.csp, connectDomains: [service.fileStorage.origin] },
   } } } : ARTIFACTS_RESOURCE;
   server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: [resource] }));
-  server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({ resourceTemplates: [{ uriTemplate: "artifact://project?workspace={workspace}&kind={kind}&name={name}", name: "Artifact or script project", description: "Read a complete artifact or script project in the authenticated library.", mimeType: "application/json" }] }));
+  server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({ resourceTemplates: [{ uriTemplate: "artifact://project?workspace={workspace}&kind={kind}&name={name}{&library_scope}", name: "Artifact or script project", description: "Read a complete artifact or script project in the authenticated personal or team library.", mimeType: "application/json" }] }));
   server.setRequestHandler(ReadResourceRequestSchema, async ({ params }) => {
     if (params.uri.startsWith("artifact://")) {
       const { kind, ...selection } = parseArtifactResourceUri(params.uri);

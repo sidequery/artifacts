@@ -18,7 +18,7 @@ test("empty hosted library supplies copyable deployment MCP URL and starter prom
     const page = await context.newPage();
     await page.goto(new URL("?library=team", server.url).href);
     const url = await page.getByLabel("Deployment MCP URL").inputValue();
-    expect(url).toBe(new URL("/mcp?workspace=my-project&library=team", server.url).href);
+    expect(url).toBe(new URL("/mcp?workspace=my-project", server.url).href);
     const before = await page.locator(".agent-onboarding").boundingBox();
     await page.getByRole("button", { name: "Copy MCP URL", exact: true }).click();
     await page.getByText("MCP URL copied", { exact: true }).waitFor();
@@ -26,6 +26,7 @@ test("empty hosted library supplies copyable deployment MCP URL and starter prom
     const prompt = await page.getByLabel("Starter prompt", { exact: true }).inputValue();
     expect(prompt).toContain("artifact_guide");
     expect(prompt).toContain("private access");
+    expect(prompt).toContain('library_scope: "team"');
     await page.getByRole("button", { name: "Copy starter prompt", exact: true }).click();
     await page.getByText("Starter prompt copied", { exact: true }).waitFor();
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(prompt);

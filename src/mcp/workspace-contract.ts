@@ -59,16 +59,17 @@ export const ARTIFACTS_WORKSPACE_TOOLS: Tool[] = [
   },
 ];
 
-export function artifactResourceUri(item: Pick<ArtifactWorkspaceItem, "workspace" | "name" | "kind">, versionId?: string): string {
+export function artifactResourceUri(item: Pick<ArtifactWorkspaceItem, "workspace" | "name" | "kind">, versionId?: string, libraryScope?: "private" | "team"): string {
   const query = new URLSearchParams({ workspace: item.workspace, kind: item.kind ?? "artifact", name: item.name });
   if (versionId) query.set("version_id", versionId);
+  if (libraryScope) query.set("library_scope", libraryScope);
   return `artifact://project?${query}`;
 }
 
 /** Resource identity is descriptive; every read must repeat service authorization. */
 export function parseArtifactResourceUri(uri: string) {
   const url = new URL(uri);
-  const allowed = new Set(["workspace", "kind", "name", "version_id"]);
+  const allowed = new Set(["workspace", "kind", "name", "version_id", "library_scope"]);
   if (url.protocol !== "artifact:" || url.hostname !== "project" || url.pathname || url.hash
     || [...url.searchParams.keys()].some(key => !allowed.has(key) || url.searchParams.getAll(key).length !== 1)) throw new Error("unknown artifact resource");
   const workspace = url.searchParams.get("workspace");
@@ -77,7 +78,9 @@ export function parseArtifactResourceUri(uri: string) {
   if (!workspace || !name || (kind !== "artifact" && kind !== "script")) throw new Error("invalid artifact resource");
   const version_id = url.searchParams.get("version_id");
   if (version_id === "") throw new Error("invalid artifact version");
-  return { workspace, kind, name, ...(version_id ? { version_id } : {}) } as { workspace: string; kind: "artifact" | "script"; name: string; version_id?: string };
+  const library_scope = url.searchParams.get("library_scope");
+  if (library_scope !== null && library_scope !== "private" && library_scope !== "team") throw new Error("invalid library scope");
+  return { workspace, kind, name, ...(version_id ? { version_id } : {}), ...(library_scope ? { library_scope } : {}) } as { workspace: string; kind: "artifact" | "script"; name: string; version_id?: string; library_scope?: "private" | "team" };
 }
 
 export function workspaceResult(payload: ArtifactWorkspacePayload) {

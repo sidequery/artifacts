@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Tabs } from "@base-ui/react/tabs";
 import { Menu } from "@base-ui/react/menu";
-import { DraftProvider, useDrafts, type SourceSnapshot } from "./drafts";
+import { DraftProvider, useDrafts, confirmLeavingDrafts, type SourceSnapshot } from "./drafts";
 import { ArtifactSourcePanel, LinkSettings, ScriptPanel, type ScriptView } from "./hosted";
 import { LibraryNavigation, type LibraryKindFilter } from "./library-navigation";
 import { ProjectEditor } from "./project-editor";
@@ -10,8 +10,9 @@ import { Select } from "./select";
 import { galleryStyles } from "./styles";
 import { GalleryTransportProvider, useGalleryTransport, type GalleryTransport } from "./transport";
 import type { GalleryArtifact, GalleryData } from "./types";
+import { DeletePanel, TrashPanel } from "./trash";
 
-export type WorkspaceSelection = { name?: string; workspace?: string; kind?: "artifact" | "script"; version_id?: string; route?: string; tab?: "preview" | "source" };
+export type WorkspaceSelection = { name?: string; workspace?: string; library_scope?: "private" | "team"; kind?: "artifact" | "script"; version_id?: string; route?: string; tab?: "preview" | "source" };
 export type GalleryWorkspaceProps = {
   initial: GalleryData;
   view: "library" | "working";
@@ -22,10 +23,11 @@ export type GalleryWorkspaceProps = {
   attachedVersionId?: string;
   selection?: WorkspaceSelection;
   onSelectionChange?: (selection: WorkspaceSelection) => void;
-  openProduct?: () => Promise<void>;
+  openProduct?: (scope?: "private" | "team") => Promise<void>;
   openLink?: (url: string) => Promise<void>;
   askCreate?: () => Promise<void>;
   refreshKey?: number;
+  onLibraryChange?: (scope: "private" | "team") => Promise<void>;
 };
 
 /** Catalog pages may contain different revisions of the same project. */
@@ -128,7 +130,7 @@ export function GalleryWorkspace(props: GalleryWorkspaceProps) {
   return <GalleryTransportProvider transport={props.transport}><DraftProvider><Workspace {...props} /></DraftProvider></GalleryTransportProvider>;
 }
 
-function Workspace({ initial, view, search, renderPreview, attach, attachedVersionId, selection, onSelectionChange, openProduct, openLink, askCreate, refreshKey }: GalleryWorkspaceProps) {
+function Workspace({ initial, view, search, renderPreview, attach, attachedVersionId, selection, onSelectionChange, openProduct, openLink, askCreate, refreshKey, onLibraryChange }: GalleryWorkspaceProps) {
   const { drafts } = useDrafts();
   const initialSelection = selectedGalleryArtifact(initial.artifacts, selection);
   const [gallery, setGallery] = useState(initial);
@@ -149,7 +151,8 @@ function Workspace({ initial, view, search, renderPreview, attach, attachedVersi
   const [notice, setNotice] = useState("");
   const [attaching, setAttaching] = useState(false);
   const [refresh, setRefresh] = useState(0);
-  const [disclosure, setDisclosure] = useState<"share" | "remix" | null>(null);
+  const [disclosure, setDisclosure] = useState<"share" | "remix" | "delete" | null>(null);
+  const [showTrash, setShowTrash] = useState(false);
   const [selectionLookup, setSelectionLookup] = useState<{ key: string; state: "loading" | "missing" | "error" }>();
   const searchGeneration = useRef(0);
   const lookupGeneration = useRef(0);
@@ -210,7 +213,7 @@ function Workspace({ initial, view, search, renderPreview, attach, attachedVersi
       const page = await readWorkspaceCatalog(search, searchQuery, () => generation === searchGeneration.current);
       if (!page) return;
       setGallery(page);
-      setCatalog(previous => mergeGalleryItems(previous, page.artifacts));
+      setCatalog(previous => searchQuery ? mergeGalleryItems(previous, page.artifacts) : page.artifacts);
       return page;
     } catch (error) {
       if (generation === searchGeneration.current) setError(error instanceof Error ? error.message : String(error));
@@ -240,7 +243,7 @@ function Workspace({ initial, view, search, renderPreview, attach, attachedVersi
   useEffect(() => { if (activeTab === "source") setSourceVisited(detailId); }, [activeTab, detailId]);
   useEffect(() => { if (mobileDetail) headingRef.current?.focus(); }, [mobileDetail]);
   const notifySelection = (item: GalleryArtifact, selectedVersion: string, selectedRoute = "/", selectedTab = activeTab) => {
-    onSelectionChange?.({ workspace: item.workspace, kind: item.kind ?? "artifact", ...(selectedVersion === "working" ? { name: item.name } : { version_id: selectedVersion }), route: selectedRoute, tab: selectedTab === "preview" ? "preview" : "source" });
+    onSelectionChange?.({ workspace: item.workspace, ...(gallery.libraryScope ? { library_scope: gallery.libraryScope } : {}), kind: item.kind ?? "artifact", ...(selectedVersion === "working" ? { name: item.name } : { version_id: selectedVersion }), route: selectedRoute, tab: selectedTab === "preview" ? "preview" : "source" });
   };
   function selectArtifact(item: GalleryArtifact, preferredTab?: "preview" | "source") {
     ++lookupGeneration.current;
@@ -286,8 +289,13 @@ function Workspace({ initial, view, search, renderPreview, attach, attachedVersi
     <main className="gallery-app mcp-gallery" data-view={view}>
       {error ? <p role="alert" className="refresh-error error-message">{error}</p> : null}
       {notice ? <p role="status" className="workspace-notice">{notice}</p> : null}
-      {!showDetail ? <header className="workspace-library-header"><strong>Library</strong>{artifact ? <button type="button" onClick={() => setMobileDetail(true)}>Return to {artifact.name}</button> : null}</header> : null}
-      <div className={`gallery-layout${!showLibrary ? " workspace-focused" : ""}`}>
+      {gallery.libraryScope && onLibraryChange ? <header className="workspace-library-header"><Select aria-label="Library" value={gallery.libraryScope} onChange={event => {
+        if (confirmLeavingDrafts(drafts)) void perform(() => onLibraryChange(event.target.value as "private" | "team"));
+      }}><option value="private">Personal library</option><option value="team">Team library</option></Select>
+        {gallery.capabilities?.trash ? <button type="button" aria-pressed={showTrash} onClick={() => { if (confirmLeavingDrafts(drafts)) setShowTrash(value => !value); }}>Trash</button> : null}
+      </header> : null}
+      {!showDetail && !showTrash ? <header className="workspace-library-header"><strong>Library</strong>{artifact ? <button type="button" onClick={() => setMobileDetail(true)}>Return to {artifact.name}</button> : null}</header> : null}
+      {showTrash ? <TrashPanel workspace={gallery.workspace} onRestored={async () => { await load(query); }} onClose={() => setShowTrash(false)} /> : <div className={`gallery-layout${!showLibrary ? " workspace-focused" : ""}`}>
         <LibraryNavigation gallery={gallery} artifacts={filtered} query={query} onQueryChange={setQuery}
           kindFilter={kindFilter} onKindFilterChange={setKindFilter} selectedKey={selectedKey} onSelect={selectArtifact}
           isDirty={item => [...drafts.entries()].some(([key, draft]) => key.startsWith(`${item.key}:`) && draft.dirty)}
@@ -320,13 +328,19 @@ function Workspace({ initial, view, search, renderPreview, attach, attachedVersi
                   <Menu.Item disabled={loading} onClick={() => { setRefresh(value => value + 1); void load(query); }}>Refresh</Menu.Item>
                   {gallery.capabilities?.links ? <Menu.Item onClick={() => setDisclosure("share")}>Share</Menu.Item> : null}
                   {editing ? <Menu.Item onClick={() => setDisclosure("remix")}>Remix</Menu.Item> : null}
+                  {gallery.capabilities?.trash ? <Menu.Item onClick={() => setDisclosure("delete")}>Delete</Menu.Item> : null}
                 </> : null}
-                {openProduct ? <Menu.Item onClick={() => void perform(openProduct)}>Open library in browser</Menu.Item> : null}
-                {gallery.capabilities?.nativeApps && openProduct ? <Menu.Item onClick={() => void perform(openProduct)}>Worker apps</Menu.Item> : null}
+                {openProduct ? <Menu.Item onClick={() => void perform(() => openProduct(gallery.libraryScope))}>Open library in browser</Menu.Item> : null}
+                {gallery.capabilities?.nativeApps && openProduct ? <Menu.Item onClick={() => void perform(() => openProduct(gallery.libraryScope))}>Worker apps</Menu.Item> : null}
               </Menu.Popup></Menu.Positioner></Menu.Portal>
             </Menu.Root></div> : null}
           </div>
           {attachedRevision ? <p className="workspace-notice" role="status">Revision {attachedRevision.revision} attached</p> : attachedVersionId && attachedVersionId === resolvedVersion ? <p className="workspace-notice" role="status">Revision attached</p> : null}
+          {artifact && disclosure === "delete" ? <div className="detail-disclosure"><DeletePanel key={artifact.key} artifact={artifact} onCancel={() => setDisclosure(null)} onDeleted={async () => {
+            setCatalog(items => items.filter(item => item.key !== artifact.key));
+            setSelectedKey(null); setDisclosure(null); setMobileDetail(false); appliedSelection.current = selectionKey;
+            await load(query);
+          }} /></div> : null}
           {artifact && resolvedVersion && disclosure === "share" ? <div className="detail-disclosure">
             <div className="workspace-disclosure-header"><strong>Share {artifact.name}</strong><button type="button" onClick={() => setDisclosure(null)} aria-label="Close sharing settings">Close</button></div>
             <LinkSettings key={artifact.key} artifact={artifact} onSaved={async () => { await load(query); }} openLink={openLink} />
@@ -358,7 +372,7 @@ function Workspace({ initial, view, search, renderPreview, attach, attachedVersi
               </>}
           </Tabs.Panel>
         </Tabs.Root>
-      </div>
+      </div>}
     </main>
   </>;
 }

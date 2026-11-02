@@ -13,6 +13,7 @@ export type CatalogRow = {
 };
 
 type OwnershipRow = { physical: string; owner: string; workspace: string; kind: string; name: string };
+export type TrashedItem = { workspace: string; kind: "artifact" | "script"; name: string; deleted_at: string };
 const physicalKey = (target: ArtifactTarget) => JSON.stringify([target.libraryKey, target.workspace, target.kind, target.name]);
 const fromKey = (value: string): ArtifactTarget => {
   const [libraryKey, workspace, kind, name] = JSON.parse(value);
@@ -42,6 +43,7 @@ export class LibraryOwnership {
       physical text primary key, owner text not null, workspace text not null, kind text not null, name text not null,
       unique(owner,workspace,kind,name)
     )`);
+    sql.exec("create table if not exists library_trash (physical text primary key, deleted_at text not null)");
   }
 
   // Only admission and destination reservation are serialized. Source compilation,
@@ -59,6 +61,10 @@ export class LibraryOwnership {
 
   owner(target: ArtifactTarget): string {
     return this.sql.exec<{ owner: string }>("select owner from library_ownership where physical=?", physicalKey(target)).toArray()[0]?.owner ?? target.libraryKey;
+  }
+
+  isTrashed(target: ArtifactTarget): boolean {
+    return this.sql.exec("select 1 from library_trash where physical=?", physicalKey(target)).toArray().length !== 0;
   }
 
   private mapped(selection: LibrarySelection & { name: string }): ArtifactTarget | null {
@@ -84,7 +90,7 @@ export class LibraryOwnership {
     return (await library.history({ workspace: target.workspace, name: target.name, limit: 1 })).length !== 0;
   }
 
-  private async resolve(selection: LibrarySelection): Promise<ArtifactTarget> {
+  private async resolve(selection: LibrarySelection, includeTrash = false): Promise<ArtifactTarget> {
     if (selection.kind !== "artifact" && selection.kind !== "script") throw new Error("kind must be artifact or script");
     const name = selection.name === undefined ? undefined : ownershipName(selection.kind, selection.name);
     if (selection.version_id) {
@@ -94,7 +100,7 @@ export class LibraryOwnership {
         try { version = await library.version({ workspace: selection.workspace, id: selection.version_id }); }
         catch (error) { if (!(error instanceof Error) || !error.message.includes("not found")) throw error; continue; }
         const target = { libraryKey, workspace: selection.workspace, kind: selection.kind, name: version.name };
-        if (this.owner(target) !== selection.libraryKey) continue;
+        if (this.owner(target) !== selection.libraryKey || !includeTrash && this.isTrashed(target)) continue;
         if (name !== undefined && name !== target.name) throw new Error("Version does not belong to this item");
         return target;
       }
@@ -102,7 +108,7 @@ export class LibraryOwnership {
     }
     if (name === undefined) throw new Error("name or version_id is required");
     const target = this.mapped({ ...selection, name });
-    if (!target) throw new Error("item not found in this library");
+    if (!target || !includeTrash && this.isTrashed(target)) throw new Error("item not found in this library");
     return target;
   }
 
@@ -115,9 +121,38 @@ export class LibraryOwnership {
         // item with that logical name gets fresh storage instead of overwriting it.
         libraryKey: `item:${crypto.randomUUID()}`, workspace: selection.workspace, kind: selection.kind, name,
       };
+      if (this.isTrashed(target)) throw new Error("Item is in Trash; restore it before editing or choose a new name");
       this.register(target, selection.libraryKey);
       return target;
     });
+  }
+
+  setTrashed(selection: LibrarySelection & { name: string }, trashed: boolean, suspend: (target: ArtifactTarget, trashed: boolean) => Promise<void>) {
+    return this.serialized(async () => {
+      const target = await this.resolve(selection, true);
+      if (!await this.exists(target)) throw new Error("item not found in this library");
+      this.register(target, selection.libraryKey);
+      if (trashed) {
+        // Revoke admission first. If suspension fails, retrying deletion repairs
+        // it without making the item accessible again.
+        this.sql.exec("insert or ignore into library_trash values(?,?)", physicalKey(target), new Date().toISOString());
+        await suspend(target, true);
+      } else {
+        if (!this.isTrashed(target)) throw new Error("Item is not in Trash");
+        await suspend(target, false);
+        this.sql.exec("delete from library_trash where physical=?", physicalKey(target));
+      }
+      return target;
+    });
+  }
+
+  trash(input: { libraryKey: string; workspace?: string; offset?: number }): TrashedItem[] {
+    const offset = input.offset ?? 0;
+    if (!Number.isSafeInteger(offset) || offset < 0) throw new Error("invalid pagination");
+    return this.sql.exec<TrashedItem>(`select o.workspace,o.kind,o.name,t.deleted_at from library_trash t
+      join library_ownership o on o.physical=t.physical
+      where o.owner=? and (? is null or o.workspace=?)
+      order by t.deleted_at desc,o.workspace,o.kind,o.name limit 100 offset ?`, input.libraryKey, input.workspace ?? null, input.workspace ?? null, offset).toArray();
   }
 
   admitRemix(selection: LibrarySelection, newName: string): Promise<ArtifactTarget> {
@@ -128,7 +163,7 @@ export class LibraryOwnership {
       const target = { ...source, name };
       // Provenance references live in the source library. Keep the existing remix
       // transaction there, reserving its new logical identity before execution.
-      if ((logical && await this.exists(logical)) || await this.exists(target) || this.owner(target) !== source.libraryKey && this.owner(target) !== selection.libraryKey) throw new Error("Destination name is already in use; choose a new name");
+      if ((logical && await this.exists(logical)) || this.isTrashed(target) || await this.exists(target) || this.owner(target) !== source.libraryKey && this.owner(target) !== selection.libraryKey) throw new Error("Destination name is already in use; choose a new name");
       const claimed = this.sql.exec<OwnershipRow>("select * from library_ownership where owner=? and workspace=? and kind=? and name=?", selection.libraryKey, selection.workspace, selection.kind, name).toArray()[0];
       if (claimed && claimed.physical !== physicalKey(target)) throw new Error("Destination name is already in use; choose a new name");
       this.register(target, selection.libraryKey);
@@ -166,7 +201,8 @@ export class LibraryOwnership {
           for (const row of rows) {
             const rowName = input.method === "listDrafts" && input.kind === "artifact" ? row.id! : row.name;
             if (name !== undefined && rowName !== name) continue;
-            if (this.owner({ libraryKey, workspace: row.workspace, name: rowName, kind: input.kind }) !== input.libraryKey) continue;
+            const target = { libraryKey, workspace: row.workspace, name: rowName, kind: input.kind };
+            if (this.owner(target) !== input.libraryKey || this.isTrashed(target)) continue;
             result.push(row as CatalogRow); accepted++;
           }
           if (rows.length < 100) break;

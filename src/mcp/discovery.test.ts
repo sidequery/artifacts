@@ -15,10 +15,12 @@ test("every hosted operation can be inspected through the stable nine-tool surfa
     "artifacts_discover", "artifacts_execute", "artifacts_query",
   ]);
   const catalog = operationCatalog(CLOUD_MCP_TOOLS);
-  expect(catalog).toHaveLength(48);
+  expect(catalog).toHaveLength(53);
   const noExecution = async () => { throw new Error("Discovery without docs must not execute anything"); };
   const listing = await callDiscoveryTool(CLOUD_MCP_TOOLS, "artifacts_discover", { limit: 50 }, noExecution);
-  expect(listing.structuredContent).toMatchObject({ total: 48, next_offset: null });
+  expect(listing.structuredContent).toMatchObject({ total: 53, next_offset: 50 });
+  const lastPage = await callDiscoveryTool(CLOUD_MCP_TOOLS, "artifacts_discover", { offset: 50, limit: 50 }, noExecution);
+  expect(lastPage.structuredContent).toMatchObject({ total: 53, next_offset: null });
   for (const operation of catalog) {
     const result = await callDiscoveryTool(CLOUD_MCP_TOOLS, "artifacts_discover", { operation: operation.name, include_docs: false }, noExecution);
     expect(result.structuredContent).toMatchObject({ operation: operation.name, inputSchema: operation.inputSchema });

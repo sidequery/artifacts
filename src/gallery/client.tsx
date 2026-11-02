@@ -1,6 +1,7 @@
 import { Tabs } from "@base-ui/react/tabs";
 import { Menu } from "@base-ui/react/menu";
 import { LibraryNavigation } from "./library-navigation";
+import { DeletePanel, TrashPanel } from "./trash";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { authClient, signInUrl } from "../auth/client-api";
@@ -117,6 +118,8 @@ function App() {
   const [kindFilter, setKindFilter] = useState<KindFilter>("all");
   const [showLinks, setShowLinks] = useState(false);
   const [showMove, setShowMove] = useState(false);
+  const [showDelete, setShowDelete] = useState(false);
+  const [showTrash, setShowTrash] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [notice, setNotice] = useState("");
   const [sourceVisited, setSourceVisited] = useState<string | null>(null);
@@ -408,6 +411,7 @@ function App() {
     setMobileDetail(true);
     setShowLinks(false);
     setShowMove(false);
+    setShowDelete(false);
     setCreatingKind(null);
     setShowImport(false);
     setNotice("");
@@ -447,6 +451,7 @@ function App() {
     setRemixing(false);
     setShowLinks(false);
     setShowMove(false);
+    setShowDelete(false);
     setMobileDetail(true);
   }
   async function createdItem(name: string, kind: "artifact" | "script") {
@@ -555,6 +560,10 @@ function App() {
           </div>
           {gallery?.workspace ? <span className="header-context" title={gallery.workspace}>{gallery.workspace.split(/[\\/]/).filter(Boolean).at(-1) ?? gallery.workspace}</span> : null}
           <div className="header-actions">
+            {gallery?.capabilities?.trash ? <button type="button" aria-pressed={showTrash} onClick={() => {
+              if (!workerCanLeave() || !confirmLeavingDrafts(drafts)) return;
+              setShowTrash(value => !value); setShowDelete(false);
+            }}>Trash</button> : null}
             <button className="theme-toggle" type="button" title={`Switch to ${theme === "light" ? "dark" : "light"} theme`} aria-label={`Switch to ${theme === "light" ? "dark" : "light"} theme`} onClick={() => setTheme(theme === "light" ? "dark" : "light")}><span className={`theme-icon ${theme === "light" ? "moon" : "sun"}`} aria-hidden="true" /></button>
             {gallery?.libraryScope ? <Select aria-label="Library" value={gallery.libraryScope} onChange={event => {
               if (!workerCanLeave() || !confirmLeavingDrafts(drafts)) return;
@@ -572,7 +581,7 @@ function App() {
         {galleryError && gallery ? <p role="alert" className="refresh-error error-message">Refresh failed: {galleryError}. Showing the last loaded files.</p> : null}
         {accountError ? <p role="alert" className="refresh-error error-message">{accountError}</p> : null}
 
-        <div className="gallery-layout">
+        {showTrash && gallery ? <TrashPanel workspace={gallery.workspace} onRestored={loadGallery} onClose={() => setShowTrash(false)} /> : <div className="gallery-layout">
           <LibraryNavigation gallery={gallery} artifacts={filteredArtifacts} query={query} onQueryChange={setQuery}
             kindFilter={kindFilter} onKindFilterChange={setKindFilter}
             selectedKey={selectedWorker ? selectedWorkerKey : creatingKind || showImport ? null : selectedKey}
@@ -623,6 +632,7 @@ function App() {
                       </Menu.Popup></Menu.Positioner></Menu.Portal>
                     </Menu.SubmenuRoot>
                     {gallery?.capabilities?.moves && gallery.libraryScope ? <Menu.Item onClick={() => { setShowMove(true); setShowLinks(false); setRemixing(false); }}>Move</Menu.Item> : null}
+                    {gallery?.capabilities?.trash ? <Menu.Item onClick={() => { setShowDelete(true); setShowMove(false); setShowLinks(false); setRemixing(false); }}>Delete</Menu.Item> : null}
                     <Menu.Item onClick={() => { setRemixing(true); setShowMove(false); setShowLinks(false); }}>Remix</Menu.Item>
                     {selectedArtifact.kind !== "script" && selectedArtifact.url ? <Menu.Item className="mobile-open" render={<a href={selectedArtifact.url} target="_blank" rel="noopener noreferrer" />}>Open</Menu.Item> : null}
                     <Menu.Item render={<a href={exportUrl} download onClick={downloadSource} />}>Download</Menu.Item>
@@ -631,6 +641,7 @@ function App() {
               </div> : null}
             </div>
             {notice ? <p className="detail-notice" role="status">{notice}</p> : null}
+            {viewingItem && showDelete ? <div className="detail-disclosure"><DeletePanel key={selectedArtifact.key} artifact={selectedArtifact} onCancel={() => setShowDelete(false)} onDeleted={async () => { setShowDelete(false); setMobileDetail(false); await loadGallery(); }} /></div> : null}
             {viewingItem && selectedArtifact.kind !== "script" && resolvedVersion !== "working" && gallery?.capabilities?.links ? <p className="live-data-note"><strong>Live data</strong> · Historical code uses the current database and files and can change them. Restore deploys this code while keeping current data.</p> : null}
             {viewingItem && showMove && gallery?.libraryScope && gallery.capabilities?.moves ? <div id="library-move-panel" className="detail-disclosure"><MovePanel key={selectedArtifact.key} artifact={selectedArtifact} library={gallery.libraryScope} onCancel={() => setShowMove(false)} /></div> : null}
             {viewingItem && remixing ? <div className="detail-disclosure"><RemixPanel key={selectedArtifact.key + resolvedVersion} artifact={selectedArtifact} version={resolvedVersion} onCancel={() => setRemixing(false)} onSaved={async name => { createdRemix.current = {name, workspace:selectedArtifact.workspace, kind:selectedArtifact.kind ?? "artifact"}; await loadGallery(); setSelectedVersion("working"); setQuery(""); setKindFilter("all"); setRemixing(false); }} /></div> : null}
@@ -661,7 +672,7 @@ function App() {
                 </>}
             </Tabs.Panel>
           </Tabs.Root> : null}
-        </div>
+        </div>}
       </main>
     </>
   );

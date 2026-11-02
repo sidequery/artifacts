@@ -59,6 +59,7 @@ export class ArtifactExecution {
     if (!["set", "pause", "resume"].includes(action)) throw new Error("Invalid schedule action");
     return this.storage.transaction(async storage => {
       const previous = this.readSchedule();
+      if (action !== "pause" && await storage.get("trashed")) throw new Error("Item is in Trash");
       if (action !== "set" && !previous) throw new Error("No schedule configured");
       const active = this.readActive();
       if (action !== "pause" && !active?.code) throw new Error("Artifact has no validated server");

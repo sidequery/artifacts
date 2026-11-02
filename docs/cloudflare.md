@@ -79,8 +79,9 @@ application and user policy, enable managed OAuth for MCP, and configure
 ### Connect users and agents
 
 Open the deployed hostname for the gallery. Add `https://<instance-hostname>/mcp`
-to an OAuth-capable MCP client for a personal library, or append
-`?library=team&workspace=<workspace>` for the shared team library. See
+to an OAuth-capable MCP client. One connection supports both libraries: select
+one in the MCP gallery or use `library_scope: "private"` / `"team"` on tool calls.
+Existing `?library=team&workspace=<workspace>` URLs remain supported as defaults. See
 [connection instructions and supported credentials](authentication.md#connect-to-an-existing-deployment).
 Before switching modes on an existing deployment, read
 [the identity migration note](authentication.md#changing-authentication-modes-and-upgrading).

@@ -793,6 +793,55 @@ test("workspace keeps search and pinned revisions while its sandboxed preview re
   expect(errors).toEqual([]);
 }, 30_000);
 
+test("one MCP gallery switches libraries and scopes source and Trash actions without another connection", async () => {
+  const meta = await resultFor(INTERACTIVE_ARTIFACT, "scoped");
+  meta.artifact.workspace = "research";
+  const payload = (scope: "private" | "team", empty = false) => ({
+    ...workspaceFor(meta.artifact), gallery: {
+      workspace: "research", libraryScope: scope, nextOffset: null,
+      capabilities: { editing: true, links: true, scripts: true, trash: true },
+      artifacts: empty ? [] : [{ name: "scoped", key: "scoped", workspace: "research", library_scope: scope, working: true,
+        versions: [{ id: meta.artifact.versionId, revision: 1, createdAt: "2026-11-02T00:00:00Z", reason: "save", serveCount: 0 }] }],
+    },
+  });
+  const personal = payload("private"), team = payload("team"), emptyTeam = payload("team", true);
+  const { page, app, errors } = await openHost({ proxy: true });
+  await page.evaluate(({ meta, personal }) => {
+    window.mcpHost!.configure({ displayMode: "fullscreen" });
+    window.mcpHost!.setServerToolResults({
+      artifacts_search: [{ content: [], _meta: { workspace: personal } }],
+      artifacts_preview: [{ content: [], _meta: { artifact: { ...meta.artifact, library_scope: "private" } } }],
+    });
+  }, { meta, personal });
+  await page.evaluate(workspace => window.mcpHost!.sendResult({ content: [], _meta: { workspace } }), personal);
+  await app.frameLocator(".preview-frame").getByRole("button", { name: "Increment" }).click();
+  await app.frameLocator(".preview-frame").getByText("Count: 1", { exact: true }).waitFor();
+  await page.waitForFunction(() => window.mcpHost!.serverToolCalls.some(call => call.name === "artifacts_search"));
+  await page.evaluate(({ meta, team }) => window.mcpHost!.setServerToolResults({
+    artifacts_search: [{ content: [], _meta: { workspace: team } }],
+    artifacts_preview: [{ content: [], _meta: { artifact: { ...meta.artifact, library_scope: "team" } } }],
+    artifacts_source: [{ content: [], structuredContent: { source: "export default () => null", project: { files: {}, dependencies: {}, lock: {} }, revision_token: "a".repeat(64) } }],
+    artifacts_tool: [{ content: [], structuredContent: { ok: true } }],
+  }), { meta, team });
+  await app.getByRole("combobox", { name: "Library", exact: true }).selectOption("team");
+  await app.frameLocator(".preview-frame").getByText("Count: 0", { exact: true }).waitFor();
+  await app.getByRole("tab", { name: "Source", exact: true }).click();
+  await app.getByRole("textbox", { name: "scoped.artifact.tsx", exact: true }).waitFor();
+  await page.evaluate(emptyTeam => window.mcpHost!.setServerToolResults({
+    artifacts_search: [{ content: [], _meta: { workspace: emptyTeam } }],
+    artifacts_tool: [{ content: [], structuredContent: { ok: true } }],
+  }), emptyTeam);
+  await app.getByRole("button", { name: "More actions", exact: true }).click();
+  await app.getByRole("menuitem", { name: "Delete", exact: true }).click();
+  await app.getByRole("button", { name: "Move to Trash", exact: true }).click();
+  await app.getByRole("button", { name: "scoped", exact: true }).waitFor({ state: "detached" });
+  const calls = await page.evaluate(() => window.mcpHost!.serverToolCalls);
+  expect(calls.find(call => call.name === "artifacts_source")?.arguments).toMatchObject({ library_scope: "team", workspace: "research", name: "scoped" });
+  expect(calls.find(call => call.name === "artifacts_tool")?.arguments).toEqual({ library_scope: "team", workspace: "research", tool: "artifact_delete", arguments: { name: "scoped" } });
+  expect(calls.filter(call => call.name === "artifacts_preview").map(call => call.arguments?.library_scope)).toContain("team");
+  expect(errors).toEqual([]);
+}, 30_000);
+
 test("OpenAI deep links select a revision through the server before entering its internal route", async () => {
   const { ROUTING_ARTIFACT } = await import("../src/test/routing");
   const meta = await resultFor(ROUTING_ARTIFACT, "linked");

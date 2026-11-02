@@ -72,7 +72,8 @@ export function compactToolSurface(tools: readonly Tool[]): Tool[] {
   }).map(tool => ({
     ...tool, _meta: { ...tool._meta, ui: { ...(tool._meta?.ui as Record<string, unknown>), visibility: ["app"] } },
   }));
-  return [...direct, ...DISCOVERY_TOOLS, ...appTools];
+  const discovery = DISCOVERY_TOOLS.map(tool => tools.find(candidate => candidate.name === tool.name) ?? tool);
+  return [...direct, ...discovery, ...appTools];
 }
 
 // An explicit allowlist is intentional: newly added operations default to actions.
@@ -81,6 +82,7 @@ const READ_OPERATIONS = new Set([
   "artifact_guide", "artifact_list", "artifact_read", "artifact_history", "artifact_version", "artifact_export", "artifact_typecheck", "artifact_runs",
   "script_guide", "script_list", "script_read", "script_history", "script_version", "script_export", "script_logs", "script_runs",
   "app_guide", "app_list", "app_read", "app_history", "plugins_list", "plugin_guide",
+  "artifacts_trash",
 ]);
 const MIXED_OPERATIONS: Record<string, string> = {
   artifact_schedule: "action omitted or get, with no schedule configuration fields",

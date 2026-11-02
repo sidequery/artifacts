@@ -113,6 +113,7 @@ export class ScriptBackend extends DurableObject<Env> {
     return this.execute({...active, request});
   }
   private async execute(input: ScriptRequest): Promise<Response> {
+    if (await this.ctx.storage.get("trashed")) throw new Error("Item is in Trash");
     // The namespace identity is deliberately part of the loader key: identical
     // scripts owned by different libraries must never share secrets or globals.
     const hash=this.cacheKey(input);
@@ -153,14 +154,22 @@ export class ScriptBackend extends DurableObject<Env> {
     if (!Number.isSafeInteger(limit)||limit<1||limit>100) throw new Error("limit must be between 1 and 100");
     return this.ctx.storage.sql.exec<ScriptRun>("select * from execution_runs order by started_at desc,rowid desc limit ?",limit).toArray();
   }
+  async setTrashed(trashed: boolean) {
+    if (trashed) await this.ctx.storage.put("trashed", true);
+    if (await this.schedule()) await this.schedule({ action: "pause" });
+    await this.ctx.storage.deleteAlarm();
+    if (!trashed) await this.ctx.storage.put("trashed", false);
+  }
   async schedule(input: {identity?: ScheduleIdentity; interval_seconds?: number; cron?: string; timezone?: string; request?: ArtifactHttpRequest; action?: "get"|"set"|"pause"|"resume"|"run_now"} = {}): Promise<ScriptSchedule|null> {
     const action=input.action??"get";
+    if (action !== "get" && action !== "pause" && await this.ctx.storage.get("trashed")) throw new Error("Item is in Trash");
     if (!["get","set","pause","resume","run_now"].includes(action)) throw new Error("Unknown schedule action");
     if (action==="get") return await this.ctx.storage.get<ScriptSchedule>("schedule")??null;
     if (action==="run_now") { await this.runScheduled("manual"); return await this.schedule(); }
     let next: ScriptSchedule|null=null;
     await this.ctx.storage.transaction(async storage => {
     const previous=await storage.get<ScriptSchedule>("schedule");
+    if (action !== "pause" && await storage.get("trashed")) throw new Error("Item is in Trash");
     if (action!=="set" && !previous) throw new Error("No schedule configured");
     if (action==="set") {
       const timing=normalizeTiming(input);
@@ -176,6 +185,7 @@ export class ScriptBackend extends DurableObject<Env> {
     return next;
   }
   async alarm() {
+    if (await this.ctx.storage.get("trashed")) return;
     // Commit the next occurrence before invoking user code. Alarm redelivery
     // then sees a future timestamp and cannot replay this occurrence.
     let due: {id:string;started:number;schedule:ScriptSchedule}|undefined;

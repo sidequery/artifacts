@@ -40,15 +40,18 @@ credentials. The default local host needs no sign-in.
 and sign in with one of its configured providers. The deployment administrator
 must admit your account. Choose **My library** or **Team library** in the gallery.
 
-**Coding agent:** add a remote HTTP MCP server using one of these URLs:
+**Coding agent:** add one remote HTTP MCP server:
 
 ```text
 https://artifacts.example.com/mcp
-https://artifacts.example.com/mcp?library=team&workspace=default
 ```
 
-The first selects your personal library and the default workspace. The second
-selects the shared team library. Use the same hostname as the gallery. Your MCP
+The connection can use both libraries. Select **Personal library** or **Team
+library** in the MCP gallery, or pass `library_scope: "private"` or
+`library_scope: "team"` on tool calls. The selector is independent for each call;
+it never selects another person's personal library. Existing URLs such as
+`/mcp?library=team&workspace=default` remain supported as defaults when a call
+omits the selector. Use the same hostname as the gallery. Your MCP
 client must support OAuth: connect, complete provider sign-in in the browser, and
 approve access when prompted. Client registration is handled by the OAuth flow;
 you do not need to supply a client ID or secret for a supported public client.

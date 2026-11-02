@@ -1,5 +1,5 @@
 // Bump to refresh cached shells; keep older tool-result payloads readable.
-const ARTIFACTS_APP_VERSION = 7;
+const ARTIFACTS_APP_VERSION = 8;
 export const ARTIFACTS_APP_URI = `ui://artifacts/v${ARTIFACTS_APP_VERSION}/viewer.html`;
 
 /** Saved chat cards keep their original URI across compatible shell updates. */
@@ -25,5 +25,6 @@ export type ArtifactAppPayload = {
   plugins?: boolean;
   files?: boolean;
   workspace?: string;
+  library_scope?: "private" | "team";
   revision?: number;
 };
