@@ -1211,4 +1211,8 @@ test("legacy scripts stay on their own storage and answer artifact operations", 
   const imported = await client.callTool({ name: "artifact_import", arguments: { new_name: "imported-handler", archive } });
   expect(imported.isError).not.toBe(true);
   expect(payload(await client.callTool({ name: "artifact_read", arguments: { name: "imported-handler" } })).part).toBe("server");
+  expect((await client.callTool({ name: "artifact_delete", arguments: { name: "legacy-handler" } })).isError).not.toBe(true);
+  expect((await fetch(`${origin}/legacy-handler`)).status).toBe(404);
+  expect((await client.callTool({ name: "artifact_undelete", arguments: { name: "legacy-handler" } })).isError).not.toBe(true);
+  expect(await (await fetch(`${origin}/legacy-handler`)).json()).toMatchObject({ updated: true });
 }, 60_000);
