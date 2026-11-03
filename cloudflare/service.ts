@@ -135,7 +135,7 @@ export class CloudArtifactService {
         const generation = await this.hosted?.links.begin(target);
         const previous = args.project === undefined ? undefined : await this.snapshot({name: args.name as string}).catch(error => { if (error instanceof Error && error.message.includes("artifact not found")) return undefined; throw error; });
         const project = args.project === undefined ? undefined : await resolveProject(args.project, previous?.project, fetch, browserRuntime.sharedVersions);
-        return this.mutationResult(await this.library.writeDraft({ workspace: this.workspace, name: args.name as string, source: args.contents as string, server_source: args.server as string | null | undefined, project, expected_revision: args.expected_revision as string | null | undefined }), generation, { ...(args.slug === undefined ? {} : { slug: args.slug as string }), ...(args.access === undefined ? {} : { access: args.access as "private" | "public" }) }, args.preview !== false);
+        return this.mutationResult(await this.library.writeDraft({ workspace: this.workspace, name: args.name as string, source: args.contents as string | null | undefined, server_source: args.server as string | null | undefined, project, expected_revision: args.expected_revision as string | null | undefined }), generation, { ...(args.slug === undefined ? {} : { slug: args.slug as string }), ...(args.access === undefined ? {} : { access: args.access as "private" | "public" }) }, args.preview !== false);
       }
       case "artifact_edit": {
         const generation = await this.hosted?.links.begin(this.artifacts.target("artifact", args.name as string));
@@ -148,7 +148,7 @@ export class CloudArtifactService {
       }
       case "artifact_typecheck": {
         const snapshot = await this.snapshot({ name: args.name as string });
-        const diagnostics = [...typecheckArtifactSource(snapshot.source, snapshot.project), ...(snapshot.server_source === null ? [] : typecheckArtifactServerSource(snapshot.server_source, snapshot.project))];
+        const diagnostics = [...(snapshot.source === "" ? [] : typecheckArtifactSource(snapshot.source, snapshot.project)), ...(snapshot.server_source === null ? [] : typecheckArtifactServerSource(snapshot.server_source, snapshot.project))];
         return text({ path: snapshot.path, check: formatArtifactCheck(diagnostics), diagnostics }, diagnostics.length > 0);
       }
       case "artifact_compile": {
@@ -165,6 +165,12 @@ export class CloudArtifactService {
         const preview = await this.preview(snapshot);
         const { _meta, ...payload } = preview;
         return { ...text(payload, !preview.ok), structuredContent: { ...payload, ...(name === "artifacts_preview" && _meta?.artifact ? { appPreview: _meta.artifact } : {}) }, ...(_meta ? { _meta } : {}) };
+      }
+      case "artifact_logs": {
+        const snapshot = await this.snapshot({ name: args.name as string });
+        const backend = this.backends.getByName(JSON.stringify([this.libraryKey, this.workspace, snapshot.name]));
+        const payload = { logs: await backend.logs({ limit: args.limit as number | undefined, run_id: args.run_id as string | undefined }) };
+        return { ...text(payload), structuredContent: payload };
       }
       case "artifact_schedule":
       case "artifact_runs": {
@@ -207,8 +213,10 @@ export class CloudArtifactService {
 
   async preview(snapshot: Snapshot, compiled?: Compiled) {
     compiled ??= await this.savedCompilation(snapshot);
-    const base = { ...await this.artifacts.linkDetails(this.artifacts.target("artifact", snapshot.name)), ok: compiled.ok, path: snapshot.path, check: formatArtifactCheck(compiled.diagnostics), diagnostics: compiled.diagnostics };
-    if (!compiled.ok || !compiled.js || !compiled.artifact) return { ...base, ok: false, _meta: undefined };
+    const ui = snapshot.source !== "";
+    const base = { ...await this.artifacts.linkDetails(this.artifacts.target("artifact", snapshot.name)), ok: compiled.ok, path: snapshot.path, check: formatArtifactCheck(compiled.diagnostics), diagnostics: compiled.diagnostics, ...(ui ? {} : { ui: false }) };
+    const js = compiled.js;
+    if (!compiled.ok || js === undefined || (ui && !js) || !compiled.artifact) return { ...base, ok: false, _meta: undefined };
     const { version, event } = await this.library.recordServe({
       workspace: snapshot.workspace, name: snapshot.name, source: snapshot.source,
       server_source: snapshot.server_source, project: snapshot.project,
@@ -216,7 +224,9 @@ export class CloudArtifactService {
       ...(snapshot.version_id ? { version_id: snapshot.version_id } : {}),
     });
     const artifact = { workspace: snapshot.workspace, name: version.name, versionId: version.id, revision: version.revision, eventId: event!.id, sourceHash: version.source_hash };
-    return { ...base, ok: true, artifact, _meta: { artifact: { ...artifact, js: compiled.js, state: snapshot.state, server: snapshot.server_source !== null, ...(this.plugins ? { plugins: true } : {}), ...(this.fileStorage ? { files: true } : {}) } satisfies ArtifactAppPayload } };
+    // A server-only artifact has nothing to render; its URL and artifact_request invoke the server.
+    if (!ui) return { ...base, ok: true, artifact, _meta: undefined };
+    return { ...base, ok: true, artifact, _meta: { artifact: { ...artifact, js, state: snapshot.state, server: snapshot.server_source !== null, ...(this.plugins ? { plugins: true } : {}), ...(this.fileStorage ? { files: true } : {}) } satisfies ArtifactAppPayload } };
   }
 
   private async mutationResult(mutation: Mutation, generation?: number | null, settings: LinkUpdate = {}, deliverPreview = true): Promise<CallToolResult> {
@@ -271,8 +281,8 @@ export class CloudArtifactService {
       ...(snapshot.compiled_id ? { id: snapshot.compiled_id } : { source: snapshot.source, server_source: snapshot.server_source, project: snapshot.project, runtime }),
     });
     if (saved) return { ok: true, js: saved.client_js, diagnostics: [], artifact: saved };
-    const client = await compileArtifactSource(snapshot.source, snapshot.project);
-    if (!client.ok || !client.js) return client;
+    const client = snapshot.source === "" ? { ok: true, js: "", diagnostics: [] } : await compileArtifactSource(snapshot.source, snapshot.project);
+    if (!client.ok || client.js === undefined) return client;
     const server = snapshot.server_source === null ? null : await compileArtifactServerSource(snapshot.server_source, snapshot.project);
     if (server && (!server.ok || !server.js)) return { ok: false, diagnostics: server.diagnostics };
     const artifact = await this.library.saveCompiled({ workspace: snapshot.workspace, name: snapshot.name,
@@ -380,6 +390,7 @@ export class CloudArtifactService {
       const key = JSON.stringify([draft.workspace, draft.id]);
       const artifact = artifacts.get(key) ?? { key, name: draft.id, workspace: draft.workspace, working: false, versions: [] };
       artifact.working = true;
+      if (draft.server_only) artifact.serverOnly = true;
       artifacts.set(key, artifact);
     }
     let scriptsHaveMore = false;

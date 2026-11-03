@@ -320,7 +320,7 @@ test("native artifact SQLite works through MCP and the gallery, persists across 
   expect(await callCounter()).toMatchObject({ value: 2 });
   expect((await callCounter()).generation).toBeUndefined();
   const serverRead = payload(await client.callTool({ name: "artifact_read", arguments: { name: "counter", part: "server", start_line: 1, end_line: 1 } }));
-  expect(serverRead.source).toBe('import { DurableObject } from "cloudflare:workers";\n');
+  expect(serverRead.source).toBe("export default {\n");
   expect(serverRead.server_source).toBeUndefined();
   const mismatch = await client.callTool({ name: "artifact_request", arguments: { name: "other-counter", version_id: savedVersion.versionId, request: { path: "/counter" } } });
   expect(mismatch.isError).toBe(true);
@@ -1128,4 +1128,91 @@ test("MCP gallery editor keeps full projects, workspace routing, CAS errors and 
     expect((deniedCatalog._meta as any).workspace.gallery.artifacts.some((item: { name: string }) => item.name === name)).toBe(false);
   } finally { await team.close(); }
   await expect(client.callTool({ name: "artifacts_tool", arguments: { workspace, tool: "artifact_write", arguments: { name } } })).rejects.toThrow("Invalid tool arguments");
+}, 60_000);
+
+test("server-only artifacts serve module handlers at their whole URL with logs, secrets and slug-relative paths", async () => {
+  const server = `export default { async fetch(request, env, ctx) {
+    env.sql.exec("create table if not exists hits(value integer)");
+    env.storage.transactionSync(() => env.sql.exec("insert into hits values (1)"));
+    env.storage.kv.put("last", new URL(request.url).pathname);
+    console.log("handled", env.secrets.TOKEN ?? "unset");
+    return Response.json({ path: new URL(request.url).pathname, method: request.method, count: env.sql.exec("select count(*) as n from hits").one().n, last: env.storage.kv.get("last"), cookie: request.headers.get("cookie") });
+  } } satisfies ExportedHandler<ServerEnv>;`;
+  const created = await client.callTool({ name: "artifact_write", arguments: { name: "endpoint", slug: "endpoint", access: "public", server } });
+  expect(created.isError).not.toBe(true);
+  expect(payload(created)).toMatchObject({ ok: true, url: `${origin}/endpoint` });
+  expect((created.structuredContent as any).preview).toMatchObject({ ok: true, ui: false });
+  const gallery = await (await fetch(`${origin}/api/gallery?workspace=test`)).json() as { artifacts: { name: string; serverOnly?: boolean; versions: { revision: number }[] }[] };
+  expect(gallery.artifacts.find(item => item.name === "endpoint")).toMatchObject({ serverOnly: true, working: true });
+  for (const item of gallery.artifacts) expect(item.versions.every(version => typeof version.revision === "number")).toBe(true);
+  await client.callTool({ name: "artifact_secrets", arguments: { name: "endpoint", secrets: { TOKEN: "endpoint-sensitive-value" } } });
+  const root = await fetch(`${origin}/endpoint`, { headers: { Cookie: "session=management" } });
+  expect(await root.json()).toEqual({ path: "/", method: "GET", count: 1, last: "/", cookie: null });
+  const posted = await fetch(`${origin}/endpoint/hooks/github?x=1`, { method: "POST", body: "{}", headers: { Origin: "https://external.example" } });
+  expect(posted.status).toBe(200);
+  expect(await posted.json()).toMatchObject({ path: "/hooks/github", method: "POST", count: 2 });
+  const requested = payload(await client.callTool({ name: "artifact_request", arguments: { name: "endpoint", request: { path: "/manual" } } }));
+  expect(requested.status).toBe(200);
+  const logs = JSON.stringify(await client.callTool({ name: "artifact_logs", arguments: { name: "endpoint" } }));
+  expect(logs).toContain("handled [REDACTED]");
+  expect(logs).not.toContain("endpoint-sensitive-value");
+  const read = payload(await client.callTool({ name: "artifact_read", arguments: { name: "endpoint" } }));
+  expect(read).toMatchObject({ part: "server", source: server });
+  expect(await (await fetch(`${origin}/api/source?workspace=test&name=endpoint`)).text()).toBe(server);
+  const editedServer = server.replace("method: request.method", "method: request.method, edited: true");
+  const edited = await client.callTool({ name: "artifact_edit", arguments: { name: "endpoint", edits: [{ old_text: "method: request.method", new_text: "method: request.method, edited: true" }] } });
+  expect(edited.isError).not.toBe(true);
+  expect(await (await fetch(`${origin}/endpoint/again`)).json()).toMatchObject({ path: "/again", count: 4, edited: true });
+  const invalid = await client.callTool({ name: "artifact_write", arguments: { name: "endpoint", server: "export default { nope: 1 };" } });
+  expect(invalid.isError).toBe(true);
+  expect(JSON.stringify(invalid)).toContain("default-export an object with a fetch");
+  expect((await fetch(`${origin}/endpoint`)).status).toBe(200);
+  expect((await client.callTool({ name: "artifact_write", arguments: { name: "empty-artifact", contents: null, server: null } })).isError).toBe(true);
+
+  // A UI can be added later; the server then answers only under /api.
+  const withUi = await client.callTool({ name: "artifact_write", arguments: { name: "endpoint", contents: source, server: editedServer } });
+  expect(withUi.isError).not.toBe(true);
+  expect((await fetch(`${origin}/endpoint`)).headers.get("content-type")).toContain("text/html");
+  expect(await (await fetch(`${origin}/endpoint/api/data`)).json()).toMatchObject({ path: "/api/data", count: 6, edited: true });
+}, 60_000);
+
+test("legacy scripts stay on their own storage and answer artifact operations", async () => {
+  const code = `export default { async fetch(request: Request, env: ScriptEnv) {
+    env.sql.exec("create table if not exists hits(value integer)");
+    env.sql.exec("insert into hits values (1)");
+    return Response.json({ path: new URL(request.url).pathname, count: env.sql.exec("select count(*) as n from hits").one().n });
+  } };`;
+  expect((await client.callTool({ name: "script_write", arguments: { name: "legacy-handler", slug: "legacy-handler", access: "public", contents: code } })).isError).not.toBe(true);
+  const listed = payload(await client.callTool({ name: "artifact_list", arguments: {} }));
+  expect(listed.legacy_scripts.some((item: { name: string }) => item.name === "legacy-handler")).toBe(true);
+  expect(payload(await client.callTool({ name: "artifact_read", arguments: { name: "legacy-handler" } })).source).toBe(code);
+  const requested = await client.callTool({ name: "artifact_request", arguments: { name: "legacy-handler", request: { path: "/inner" } } });
+  expect(JSON.parse(atob((requested.structuredContent as any).response.body))).toEqual({ path: "/legacy-handler/inner", count: 1 });
+  expect(payload(await client.callTool({ name: "artifact_secrets", arguments: { name: "legacy-handler", secrets: { KEY: "value" } } })).names).toEqual(["KEY"]);
+  expect(payload(await client.callTool({ name: "artifact_history", arguments: { name: "legacy-handler" } })).versions).toHaveLength(1);
+  const updated = await client.callTool({ name: "artifact_write", arguments: { name: "legacy-handler", server: code.replace("count:", "updated: true, count:") } });
+  expect(updated.isError).not.toBe(true);
+  expect(await (await fetch(`${origin}/legacy-handler`)).json()).toEqual({ path: "/legacy-handler", updated: true, count: 2 });
+  expect((await client.callTool({ name: "artifact_write", arguments: { name: "legacy-handler", contents: source } })).isError).toBe(true);
+  const opened = await client.callTool({ name: "artifact_open", arguments: { name: "legacy-handler" } });
+  expect(opened.isError).toBe(true);
+  expect(JSON.stringify(opened)).toContain("legacy script");
+  // script_* calls keep their original contract.
+  expect(payload(await client.callTool({ name: "script_read", arguments: { name: "legacy-handler" } })).source).toContain("updated: true");
+
+  const remixed = await client.callTool({ name: "artifact_remix", arguments: { name: "legacy-handler", new_name: "upgraded-handler" } });
+  expect(remixed.isError).not.toBe(true);
+  expect(JSON.stringify(remixed.content)).toContain("relative to the artifact URL");
+  expect(payload(await client.callTool({ name: "artifact_link", arguments: { kind: "artifact", name: "upgraded-handler", slug: "upgraded-handler", access: "public" } })).url).toBe(`${origin}/upgraded-handler`);
+  expect(await (await fetch(`${origin}/upgraded-handler/inner`)).json()).toEqual({ path: "/inner", updated: true, count: 1 });
+  expect(await (await fetch(`${origin}/legacy-handler`)).json()).toMatchObject({ count: 3 });
+
+  const archive = (await client.callTool({ name: "script_export", arguments: { name: "legacy-handler" } })).structuredContent;
+  const imported = await client.callTool({ name: "artifact_import", arguments: { new_name: "imported-handler", archive } });
+  expect(imported.isError).not.toBe(true);
+  expect(payload(await client.callTool({ name: "artifact_read", arguments: { name: "imported-handler" } })).part).toBe("server");
+  expect((await client.callTool({ name: "artifact_delete", arguments: { name: "legacy-handler" } })).isError).not.toBe(true);
+  expect((await fetch(`${origin}/legacy-handler`)).status).toBe(404);
+  expect((await client.callTool({ name: "artifact_undelete", arguments: { name: "legacy-handler" } })).isError).not.toBe(true);
+  expect(await (await fetch(`${origin}/legacy-handler`)).json()).toMatchObject({ updated: true });
 }, 60_000);

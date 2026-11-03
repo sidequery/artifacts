@@ -79,7 +79,7 @@ export function compactToolSurface(tools: readonly Tool[]): Tool[] {
 // An explicit allowlist is intentional: newly added operations default to actions.
 // An HTTP GET to authored code is still execution, irrespective of its method.
 const READ_OPERATIONS = new Set([
-  "artifact_guide", "artifact_list", "artifact_read", "artifact_history", "artifact_version", "artifact_export", "artifact_typecheck", "artifact_runs",
+  "artifact_guide", "artifact_list", "artifact_read", "artifact_history", "artifact_version", "artifact_export", "artifact_typecheck", "artifact_runs", "artifact_logs",
   "script_guide", "script_list", "script_read", "script_history", "script_version", "script_export", "script_logs", "script_runs",
   "app_guide", "app_list", "app_read", "app_history", "plugins_list", "plugin_guide",
   "artifacts_trash",
@@ -165,7 +165,7 @@ export async function callDiscoveryTool(
       const guide = guideOperation(tool.name);
       let guideArgs: Record<string, unknown> = {};
       if (tool.name === "artifact_files") guideArgs = { topic: "files" };
-      else if (["artifact_request", "artifact_schedule", "artifact_runs", "artifact_secrets"].includes(tool.name)) guideArgs = { topic: "backend" };
+      else if (["artifact_request", "artifact_schedule", "artifact_runs", "artifact_logs", "artifact_secrets"].includes(tool.name)) guideArgs = { topic: "backend" };
       const documentation = args.include_docs === false ? undefined : await callOperation(guide, guideArgs);
       return jsonResult({
         ...operationSummary(tool), inputSchema: tool.inputSchema,

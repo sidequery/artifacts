@@ -27,13 +27,17 @@ for (const tool of CLOUD_MCP_TOOLS) {
       : " Results are paginated, 100 per response; pass next_offset as offset for the next page.";
   }
   if (tool.name === "artifact_write") {
+    tool.description = "Create or replace an artifact: a browser UI, a server, or both. A server-only artifact is an HTTP endpoint, webhook or scheduled job; its URL runs the server. Before creating one, call artifact_guide if you have not read it in this conversation. Import UI helpers from sidequery/artifacts. Pass a kebab-case name without slashes. Returns TypeScript check diagnostics; only valid saves replace the running revision.";
     tool.inputSchema.properties = { ...tool.inputSchema.properties,
-      server: { type: ["string", "null"], description: "Optional native server TypeScript exporting class ArtifactServer extends DurableObject from cloudflare:workers. Use this.ctx.storage.sql for native SQLite and this.ctx.storage.kv for key/value storage. Omit to preserve; null removes server code without deleting its database." },
+      contents: { type: ["string", "null"], description: "Browser .artifact.tsx source. Omit to preserve the saved UI (a new artifact without contents has no UI); null removes the UI." },
+      server: { type: ["string", "null"], description: "Server TypeScript. Prefer export default { async fetch(request, env, ctx) { ... } } satisfies ExportedHandler<ServerEnv>, where env.sql is the artifact's SQLite database, env.storage provides kv and transactionSync, and env.secrets holds its secrets. A class ArtifactServer extends DurableObject from cloudflare:workers is also accepted. Omit to preserve; null removes server code without deleting its database." },
     };
+    tool.inputSchema.required = ["name"];
+    tool.inputSchema.anyOf = [{ required: ["contents"] }, { required: ["server"] }];
   }
   if (tool.name === "artifact_read" || tool.name === "artifact_edit") {
     tool.inputSchema.properties = { ...tool.inputSchema.properties,
-      part: { type: "string", enum: ["client", "server"], default: "client", description: "Select browser TSX or native server TypeScript." },
+      part: { type: "string", enum: ["client", "server"], description: "Select browser TSX or server TypeScript. Defaults to client, or server for an artifact without a UI." },
     };
   }
   if (tool.name === "artifact_compile") {
@@ -54,7 +58,7 @@ export const ARTIFACTS_REQUEST_SCHEMA = {
 };
 CLOUD_MCP_TOOLS.push({
   name: "artifact_request",
-  description: "Send an HTTP request to an artifact's native server. Its fetch handler can use native Durable Object SQLite/KV APIs. Select name or version_id. Database contents remain live across source edits and restores. Returns a response envelope with base64 body; artifactFetch provides ordinary Request/Response behavior in the UI.",
+  description: "Send an HTTP request to an artifact's server. request.path is relative to the artifact's URL. Its handler can use the artifact's SQLite/KV storage. Select name or version_id. Database contents remain live across source edits and restores. Returns a response envelope with base64 body; artifactFetch provides ordinary Request/Response behavior in the UI.",
   inputSchema: { type: "object", properties: {
     name: { type: "string" }, version_id: { type: "string" }, request: ARTIFACTS_REQUEST_SCHEMA,
   }, required: ["request"], anyOf: [{ required: ["name"] }, { required: ["version_id"] }], additionalProperties: false },
@@ -95,12 +99,12 @@ function addScriptTool(name: string, description: string, properties: Record<str
 }
 const nameProperty = { name: { type: "string", minLength: 1, description: "Script name in this workspace." } };
 const pageProperty = { offset: { type: "integer", minimum: 0, default: 0 } };
-addScriptTool("artifact_link", "Give an artifact or script a chosen root URL. Artifact links require valid source and work independently of the gallery. Defaults to private access. Renaming a slug changes its URL.", {
-  kind: { type: "string", enum: ["artifact", "script"] }, name: { type: "string", minLength: 1 }, ...slugProperties,
+addScriptTool("artifact_link", "Give an artifact, legacy script or native Worker app (kind app) a chosen root URL. Artifact links require valid source and work independently of the gallery. Defaults to private access. Renaming a slug changes its URL. Native app links follow the app across library moves.", {
+  kind: { type: "string", enum: ["artifact", "script", "app"] }, name: { type: "string", minLength: 1 }, ...slugProperties,
 }, ["kind", "name", "slug"]);
-addScriptTool("script_guide", "Read the hosted script and root-URL authoring guide before creating a script. Covers runtime, access, storage, secrets, validation, HTTP requests, and bundling third-party dependencies.", {});
+addScriptTool("script_guide", "Legacy: read the hosted script guide. New endpoints are server-only artifacts; see artifact_guide topic backend. Covers runtime, access, storage, secrets, validation, HTTP requests, and bundling third-party dependencies.", {});
 CLOUD_MCP_TOOLS[CLOUD_MCP_TOOLS.length - 1]!.annotations = { readOnlyHint: true };
-addScriptTool("script_write", "Call script_guide first. Create or replace arbitrary Workers-compatible TypeScript exporting default { fetch(request, env, ctx) }. Saved drafts and history are retained even when validation fails; only valid updates replace the running code. Scripts have outbound fetch, env.secrets, and env.sql for persistent SQLite. Slug defaults to the name; URLs use /<slug>. Use project.files for relative modules and project.dependencies for exact package versions. Dependencies are resolved and integrity-verified at write time, then archived as a source lock; execution and replay do not install packages. This loads the module for validation but does not execute the handler.", {
+addScriptTool("script_write", "Legacy: prefer artifact_write with server and no contents for new endpoints. Call script_guide first. Create or replace arbitrary Workers-compatible TypeScript exporting default { fetch(request, env, ctx) }. Saved drafts and history are retained even when validation fails; only valid updates replace the running code. Scripts have outbound fetch, env.secrets, and env.sql for persistent SQLite. Slug defaults to the name; URLs use /<slug>. Use project.files for relative modules and project.dependencies for exact package versions. Dependencies are resolved and integrity-verified at write time, then archived as a source lock; execution and replay do not install packages. This loads the module for validation but does not execute the handler.", {
   ...nameProperty, contents: { type: "string", maxLength: 262144 }, ...slugProperties,
 }, ["name", "contents"]);
 addScriptTool("script_read", "Read script source with bounded line ranges, optionally from a historical version. Does not execute the script.", {
@@ -118,7 +122,7 @@ addScriptTool("script_schedule", "Inspect or configure recurring execution of th
 addScriptTool("script_runs", "Inspect recent invocation outcomes, revision hashes, triggers, and HTTP-handler durations. Retains 1000 runs, returns the latest 100. Interrupted means completion is unknown; background waitUntil work and streamed response completion are not part of HTTP-handler success.", {...nameProperty,limit:{type:"integer",minimum:1,maximum:100}},["name"]);
 addScriptTool("script_logs", "Read bounded recent execution logs and errors without executing the script. Optionally filter by run_id from script_runs.", { ...nameProperty, run_id:{type:"string"}, limit: { type: "integer", minimum: 1, maximum: 100 } }, ["name"]);
 addScriptTool("script_secrets", "Set or delete per-script secrets (null deletes). Omit secrets to list names. Values are never returned or added to source history.", { ...nameProperty, secrets: { type: "object", maxProperties: 32, additionalProperties: { type: ["string", "null"], maxLength: 4096 } } }, ["name"]);
-addScriptTool("artifact_secrets", "Set or delete per-artifact backend secrets (null deletes). Omit secrets to list names. Values are available as this.env.secrets in ArtifactServer, never returned or added to source history. Edits and restores preserve secrets; remixes and imports start empty.", { ...nameProperty, secrets: { type: "object", maxProperties: 32, additionalProperties: { type: ["string", "null"], maxLength: 4096 } } }, ["name"]);
+addScriptTool("artifact_secrets", "Set or delete per-artifact server secrets (null deletes). Omit secrets to list names. Values are available as env.secrets (this.env.secrets in an ArtifactServer class), never returned or added to source history. Edits and restores preserve secrets; remixes and imports start empty.", { ...nameProperty, secrets: { type: "object", maxProperties: 32, additionalProperties: { type: ["string", "null"], maxLength: 4096 } } }, ["name"]);
 
 addScriptTool("plugins_list", "List deployment-installed plugins, browser availability, and operation schemas and read-only hints. Does not execute operations.", {});
 CLOUD_MCP_TOOLS[CLOUD_MCP_TOOLS.length - 1]!.annotations = { readOnlyHint: true };
@@ -129,11 +133,13 @@ addScriptTool("artifact_plugin_call", "Call a deployment-installed server functi
 }, ["plugin", "operation", "input"]);
 CLOUD_MCP_TOOLS[CLOUD_MCP_TOOLS.length - 1]!.annotations = { readOnlyHint: false, destructiveHint: true, openWorldHint: true };
 
-addScriptTool("artifact_schedule", "Configure recurring requests to an artifact's latest validated native server. Uses Durable Object alarms, with no automatic retry after uncertain side effects. Exactly one of interval_seconds or cron is required for set; timezone defaults to UTC. run_now executes the configured request, including while paused. Historical previews do not change the scheduled revision.", {
+addScriptTool("artifact_schedule", "Configure recurring requests to an artifact's latest validated server. Uses Durable Object alarms, with no automatic retry after uncertain side effects. Exactly one of interval_seconds or cron is required for set; timezone defaults to UTC. run_now executes the configured request, including while paused. Historical previews do not change the scheduled revision.", {
   name: { type: "string", minLength: 1 }, action: { type: "string", enum: ["get", "set", "pause", "resume", "run_now"], default: "get" },
   interval_seconds: { type: "integer", minimum: 60, maximum: 31536000 }, cron: { type: "string", maxLength: 256 }, timezone: { type: "string", maxLength: 100 }, request: ARTIFACTS_REQUEST_SCHEMA,
 }, ["name"]);
-addScriptTool("artifact_runs", "Read recent native artifacts server invocations, their source revision, trigger, duration and outcome. Host-owned history is separate from application SQLite. An interrupted run may already have performed writes and is never automatically retried.", { name: { type: "string", minLength: 1 }, limit: { type: "integer", minimum: 1, maximum: 100 } }, ["name"]);
+addScriptTool("artifact_logs", "Read bounded recent server console output, request summaries and errors without executing the artifact. Optionally filter by run_id from artifact_runs. Secret values are redacted from captured output.", { name: { type: "string", minLength: 1 }, run_id: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 100 } }, ["name"]);
+CLOUD_MCP_TOOLS[CLOUD_MCP_TOOLS.length - 1]!.annotations = { readOnlyHint: true };
+addScriptTool("artifact_runs", "Read recent artifact server invocations, their source revision, trigger, duration and outcome. Host-owned history is separate from application SQLite. An interrupted run may already have performed writes and is never automatically retried.", { name: { type: "string", minLength: 1 }, limit: { type: "integer", minimum: 1, maximum: 100 } }, ["name"]);
 CLOUD_MCP_TOOLS[CLOUD_MCP_TOOLS.length - 1]!.annotations = { readOnlyHint: true };
 // Project source is additive to legacy entrypoints; dependency locks are generated by the service.
 const projectProperty = { type: "object", properties: {

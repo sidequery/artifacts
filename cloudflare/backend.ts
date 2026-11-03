@@ -4,12 +4,33 @@ import { createHash } from "node:crypto";
 import type { ArtifactLibrary } from "./library";
 import { scriptRuntimeConfig } from "./script-runtime";
 
-import { ArtifactExecution, type ArtifactActive, type ArtifactClaim, type ArtifactScheduleInput } from "./artifact-execution";
+import { ArtifactExecution, type ArtifactActive, type ArtifactClaim, type ArtifactLog, type ArtifactScheduleInput } from "./artifact-execution";
+import { SERVER_LOGGING_MODULE } from "./server-logging";
 
 export type BackendEnv = { LOADER: WorkerLoader; LIBRARIES: DurableObjectNamespace<ArtifactLibrary>; ARTIFACTS_RUNTIME?: string };
 export const ARTIFACT_HEADER = "x-artifacts-backend";
 const MAX_BODY = 256 * 1024;
 type BackendCode = { code: string; hash: string; version_id?: string; trigger?: "http" | "manual" | "schedule" };
+const RUN_HEADER = "x-artifacts-internal-run";
+declare abstract class ServerFacet extends DurableObject { __artifactsTakeLogs(): ArtifactLog[]; }
+// Old immutable compiled revisions export CanvasServer. Preserve the default
+// Worker object too: celld requires it on the main module. The subclass only
+// tags console output with the run and hands it back to this supervisor.
+const SERVER_WRAPPER = `import { takeLogs, execution } from "./logging.js";
+import * as source from "./source.js";
+const Base = source.ArtifactServer ?? source.CanvasServer;
+export class ArtifactServer extends Base {
+  fetch(incoming) {
+    const { id, original } = JSON.parse(incoming.headers.get("${RUN_HEADER}") ?? '{"id":null,"original":null}');
+    const request = new Request(incoming);
+    if (original === null) request.headers.delete("${RUN_HEADER}");
+    else request.headers.set("${RUN_HEADER}", original);
+    return execution.run(id, () => super.fetch(request));
+  }
+  __artifactsTakeLogs() { return takeLogs(); }
+}
+export default source.default;
+`;
 
 function decode(body: string): Uint8Array {
   if (body.length > Math.ceil(MAX_BODY / 3) * 4) throw new Error("Artifact request body exceeds 256 KiB");
@@ -53,6 +74,7 @@ async function serializeResponse(response: Response, method: string): Promise<Ar
  * class runs in a separate isolate and owns its own native SQLite database. */
 export class ArtifactBackend extends DurableObject<BackendEnv> {
   private activeKey: string | undefined;
+  private facet?: Fetcher<ServerFacet>;
   private execution: ArtifactExecution;
   constructor(state: DurableObjectState, env: BackendEnv) {
     super(state, env);
@@ -87,6 +109,13 @@ export class ArtifactBackend extends DurableObject<BackendEnv> {
     await this.ctx.storage.deleteAlarm();
     if (!trashed) await this.ctx.storage.put("trashed", false);
     // Restoration deliberately leaves schedules paused until explicitly resumed.
+  }
+  async logs(input: { limit?: number; run_id?: string } = {}) {
+    if (this.facet) await this.collect(this.facet);
+    return this.execution.logs(input.limit, input.run_id);
+  }
+  private async collect(facet: Fetcher<ServerFacet>) {
+    try { for (const log of (await facet.__artifactsTakeLogs()).slice(-100)) this.execution.record(log); } catch { /* An aborted isolate cannot supply pending logs. */ }
   }
   async schedule(input: ArtifactScheduleInput = {}) {
     if (input.action !== undefined && input.action !== "get" && input.action !== "pause" && await this.ctx.storage.get("trashed")) throw new Error("Item is in Trash");
@@ -148,33 +177,39 @@ export class ArtifactBackend extends DurableObject<BackendEnv> {
       const secrets = await this.ctx.storage.get<Record<string, string>>("secrets") ?? {};
       const config = scriptRuntimeConfig(this.env.ARTIFACTS_RUNTIME);
       // Identical source owned by different artifacts must not share globals or secrets.
-      const key = createHash("sha256").update(JSON.stringify([this.ctx.id.toString(), input.code, secrets, config])).digest("hex");
+      const key = createHash("sha256").update(JSON.stringify([this.ctx.id.toString(), input.code, secrets, config, SERVER_WRAPPER, SERVER_LOGGING_MODULE])).digest("hex");
       if (this.activeKey !== key) {
         // Reload code while preserving the facet's database. Never delete/reset
         // storage as a side effect of an edit, preview, or source restoration.
+        if (this.facet) await this.collect(this.facet);
         this.ctx.facets.abort("canvas", "Artifact server code or secrets updated");
         this.activeKey = key;
       }
       // This persisted facet key owns existing user databases.
-      const facet = this.ctx.facets.get("canvas", () => {
+      const facet = this.ctx.facets.get<ServerFacet>("canvas", () => {
         const worker = this.env.LOADER.get(key, async () => ({
           ...config,
           mainModule: "artifact-server.js",
-          // Old immutable compiled revisions export CanvasServer. Preserve the
-          // default Worker object too: celld requires it on the main module.
           modules: {
-            "artifact-server.js": 'import * as source from "./source.js"; export const ArtifactServer = source.ArtifactServer ?? source.CanvasServer; export default source.default;',
+            "artifact-server.js": SERVER_WRAPPER,
+            "logging.js": SERVER_LOGGING_MODULE.replace("__ARTIFACTS_SCRIPT_SECRETS__", () => JSON.stringify(secrets)),
             "source.js": input.code,
           },
           env: { secrets },
         }));
-        return { class: worker.getDurableObjectClass("ArtifactServer") };
+        return { class: worker.getDurableObjectClass<ServerFacet>("ArtifactServer") };
       });
-      const response = await facet.fetch(request);
+      this.facet = facet;
+      const tagged = new Request(request);
+      tagged.headers.set(RUN_HEADER, JSON.stringify({ id: run.id, original: request.headers.get(RUN_HEADER) }));
+      const response = await facet.fetch(tagged);
       this.execution.finish(run, response.status);
+      this.execution.record({ run_id: run.id, timestamp: new Date().toISOString(), level: "request", message: `${request.method} ${response.status} ${Date.now() - run.started}ms` });
+      await this.collect(facet);
       return response;
     } catch (error) {
       this.execution.finish(run, null);
+      this.execution.record({ run_id: run.id, timestamp: new Date().toISOString(), level: "error", message: "Server execution failed" });
       throw error;
     }
   }

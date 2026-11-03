@@ -34,7 +34,7 @@ export function SecretControls({ workspace, name, kind, onSaved, active = true }
   }
   useEffect(() => { if (active && !loaded) void update(); }, [active, workspace, name, kind]);
   return <section className="secret-controls" aria-label={kind === "script" ? "Script secrets" : kind === "app" ? "App secrets" : "Artifact secrets"}>
-    <p className="settings-description">Available to this {kind === "script" ? "script" : kind === "app" ? "Worker app" : "artifact backend"} on the server. Saved values stay hidden.</p>
+    <p className="settings-description">Available to this {kind === "script" ? "script" : kind === "app" ? "native Worker" : "artifact server"} on the server. Saved values stay hidden.</p>
     <div className="secret-list-header"><h3>Saved secrets</h3><button type="button" aria-label="Load secret names" disabled={busy} onClick={() => void update()}>Refresh</button></div>
     <ul className="secret-list" aria-label="Secret names" aria-busy={busy}>
       {names.map(name => <li key={name}><code>{name}</code><button type="button" disabled={busy} onClick={() => { setSecretName(name); setSecretValue(""); setConfirmingRemove(false); }}>Replace</button></li>)}

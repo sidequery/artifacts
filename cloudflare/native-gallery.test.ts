@@ -63,6 +63,14 @@ test("gallery lists Worker drafts across workspaces with owner isolation, pagina
     expect(JSON.stringify(all)).not.toContain("fixture-provider-secret");
     expect((await gallery()).workerApps?.map(item => item.workspace)).toEqual(["default"]);
     expect((await gallery("owner=bob&all=1")).workerApps?.map(item => item.name)).toEqual(["bob-only"]);
+    // Native links share the deployment slug namespace and name the app's permanent ID.
+    const link = (owner: string, slug: string) => request(`/tools?owner=${owner}`, { name: "artifact_link", arguments: { kind: "app", name: "example", slug, access: "public" } });
+    expect(JSON.parse((await link("alice", "example-app")).content[0].text)).toMatchObject({ ok: true, slug: "example-app", access: "public", url: `${origin}/example-app` });
+    await expect(link("bob", "taken-by-bob")).rejects.toThrow("App not found");
+    expect((await gallery()).workerApps?.find(item => item.name === "example")).toMatchObject({ slug: "example-app", access: "public", url: `${origin}/example-app` });
+    expect(JSON.parse((await request("/tools", { name: "app_read", arguments: { name: "example" } })).content[0].text)).toMatchObject({ slug: "example-app" });
+    const draftRoute = await fetch(`${origin}/route/example-app/jobs`);
+    expect([draftRoute.status, await draftRoute.text()]).toEqual([503, "App deployment requires reconciliation"]);
     for (let index = 0; index < 100; index++) await write(`worker-${String(index).padStart(3, "0")}`, "workspace=other");
     const first = await gallery("all=1"), second = await gallery("all=1&offset=100");
     expect(first.workerApps).toHaveLength(100);
@@ -79,6 +87,8 @@ test("gallery lists Worker drafts across workspaces with owner isolation, pagina
     expect(await otherWorkspace!.changes()).toEqual([]);
     expect((await gallery()).workerApps).toEqual([]);
     expect((await gallery("owner=team&all=1")).workerApps?.map(item => item.name)).toEqual(["example"]);
+    expect((await gallery("owner=team&all=1")).workerApps?.[0]).toMatchObject({ slug: "example-app" });
+    expect((await fetch(`${origin}/route/example-app`)).status).toBe(503);
   } finally {
     subscriptions.forEach(subscription => subscription.close());
     await runtime.dispose();

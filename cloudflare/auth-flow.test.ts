@@ -406,9 +406,9 @@ test("ownership transfer preserves live resources and revokes former library acc
     const decode = (result: any) => JSON.parse(atob(result.structuredContent.response.body));
     const artifact = "ownership-artifact", script = "ownership-script";
     const project = { files: { "helper.ts": "export const retained = 17;" }, dependencies: {} };
-    const server = counterServer.replace("extends DurableObject {", "extends DurableObject<ArtifactEnv> {")
+    const server = counterServer
       .replace('pathname !== "/counter"', 'pathname !== "/counter" && new URL(request.url).pathname !== "/api/counter"')
-      .replace("value: row.value,", 'value: row.value, secret: this.env.secrets.TOKEN ?? null, authorization: request.headers.get("authorization"), cookie: request.headers.get("cookie"),');
+      .replace("value: row.value,", 'value: row.value, secret: env.secrets.TOKEN ?? null, authorization: request.headers.get("authorization"), cookie: request.headers.get("cookie"),');
     const created = await tool(alice, "artifact_write", { name: artifact, slug: artifact, contents: counterClient, server, project });
     const version = (created._meta as any).artifact.versionId;
     const scriptSource = 'export default { fetch(request: Request, env: ScriptEnv) { env.sql.exec("create table if not exists counted(n integer)"); if(request.method === "POST") env.sql.exec("insert into counted values(1)"); return Response.json({count:env.sql.exec("select count(*) as n from counted").one().n,secret:env.secrets.TOKEN ?? null}); }}';

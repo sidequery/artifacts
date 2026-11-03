@@ -1,11 +1,11 @@
 import { Tabs } from "@base-ui/react/tabs";
 import { Menu } from "@base-ui/react/menu";
-import { LibraryNavigation } from "./library-navigation";
+import { LibraryNavigation, matchesKindFilter } from "./library-navigation";
 import { DeletePanel, TrashPanel } from "./trash";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { authClient, signInUrl } from "../auth/client-api";
-import type { GalleryArtifact, GalleryData, GalleryWorker } from "./types";
+import { isServerOnly, type GalleryArtifact, type GalleryData, type GalleryWorker } from "./types";
 import { ExecutionControls } from "./execution-controls";
 import { SecretControls } from "./secrets";
 import { AgentOnboarding, ArtifactSourcePanel, LinkSettings, ScriptPanel, type ScriptView } from "./hosted";
@@ -106,7 +106,7 @@ function App() {
     try { localStorage.setItem("artifacts-theme", theme); } catch { /* The theme still works when storage is unavailable. */ }
   }, [theme]);
   const [remixing, setRemixing] = useState(false);
-  const [creatingKind, setCreatingKind] = useState<"artifact" | "script" | null>(null);
+  const [creatingKind, setCreatingKind] = useState<"artifact" | "endpoint" | null>(null);
   const [selectedWorker, setSelectedWorker] = useState(workerSelection);
   const showNativeApps = selectedWorker !== null;
   const workerEditor = useRef<NativeAppEditorHandle>(null);
@@ -263,7 +263,7 @@ function App() {
   const filteredArtifacts = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
     return libraryItems.filter((artifact) =>
-      (kindFilter === "all" || (artifact.kind ?? "artifact") === kindFilter) &&
+      matchesKindFilter(artifact, kindFilter) &&
       (!normalized || `${artifact.name}\n${artifact.workspace}`.toLocaleLowerCase().includes(normalized)),
     );
   }, [libraryItems, query, kindFilter]);
@@ -276,7 +276,7 @@ function App() {
     ? gallery?.workerApps?.find(worker => worker.workspace === selectedWorker.workspace && worker.name === selectedWorker.name)?.key ?? null
     : null;
 
-  const activeTab: DetailTab = selectedArtifact?.kind === "script"
+  const activeTab: DetailTab = isServerOnly(selectedArtifact)
     ? tab === "preview" ? "source" : tab
     : tab === "requests" || ((tab === "settings" || tab === "schedule") && !gallery?.capabilities?.links) ? "preview" : tab;
 
@@ -303,7 +303,7 @@ function App() {
     if (activeTab === "source" && selectedArtifact && resolvedVersion) setSourceVisited(`${selectedArtifact.key}:${resolvedVersion}`);
   }, [activeTab, selectedArtifact?.key, resolvedVersion]);
 
-  const previewUrl = selectedArtifact && selectedArtifact.kind !== "script" && resolvedVersion
+  const previewUrl = selectedArtifact && !isServerOnly(selectedArtifact) && resolvedVersion
     ? `${artifactUrl("/gallery/preview", selectedArtifact, resolvedVersion)}&revision=${encodeURIComponent(resolvedVersion === WORKING_VERSION ? selectedArtifact.draftRevision ?? selectedArtifact.liveId ?? "" : resolvedVersion)}`
     : "";
   const downloadUrl = selectedArtifact && resolvedVersion
@@ -442,7 +442,7 @@ function App() {
   };
 
   function workerCanLeave() { return workerEditor.current?.canLeave() ?? true; }
-  function startCreating(kind: "artifact" | "script") {
+  function startCreating(kind: "artifact" | "endpoint") {
     if (!leaveWorker()) return;
     setCreatingKind(kind);
     setTab("source");
@@ -454,8 +454,9 @@ function App() {
     setShowDelete(false);
     setMobileDetail(true);
   }
-  async function createdItem(name: string, kind: "artifact" | "script") {
-    createdRemix.current = { name, kind, workspace: gallery?.workspace ?? "default" };
+  async function createdItem(name: string, kind: "artifact" | "endpoint") {
+    // Endpoints are server-only artifacts.
+    createdRemix.current = { name, kind: "artifact", workspace: gallery?.workspace ?? "default" };
     await loadGallery();
     setCreatingKind(null);
     setSelectedVersion("working");
@@ -533,7 +534,7 @@ function App() {
       const url = URL.createObjectURL(await response.blob());
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = new URL(downloadHref).searchParams.get("format") === "project" ? `${selectedArtifact?.name ?? "artifact"}.artifact-project.json` : `${selectedArtifact?.name ?? "artifact"}${selectedArtifact?.kind === "script" ? ".ts" : ".artifact.tsx"}`;
+      anchor.download = new URL(downloadHref).searchParams.get("format") === "project" ? `${selectedArtifact?.name ?? "artifact"}.artifact-project.json` : `${selectedArtifact?.name ?? "artifact"}${selectedArtifact?.kind === "script" ? ".ts" : selectedArtifact?.serverOnly ? ".artifact.server.ts" : ".artifact.tsx"}`;
       anchor.click();
       URL.revokeObjectURL(url);
     } catch (error) {
@@ -552,8 +553,8 @@ function App() {
               <Menu.Trigger className="create-item" aria-label="Create or import" title="Create or import" disabled={!gallery}><span aria-hidden="true">+</span></Menu.Trigger>
               <Menu.Portal><Menu.Positioner sideOffset={6} align="end"><Menu.Popup className="action-menu">
                 <Menu.Item onClick={() => startCreating("artifact")}>New artifact</Menu.Item>
-                {gallery?.capabilities?.scripts ? <Menu.Item onClick={() => startCreating("script")}>New script</Menu.Item> : null}
-                {gallery?.capabilities?.nativeApps ? <Menu.Item onClick={() => selectWorker({ workspace: gallery.workspace, name: null })}>New Worker app</Menu.Item> : null}
+                {gallery?.capabilities?.scripts ? <Menu.Item onClick={() => startCreating("endpoint")}>New endpoint</Menu.Item> : null}
+                {gallery?.capabilities?.nativeApps ? <Menu.Item onClick={() => selectWorker({ workspace: gallery.workspace, name: null })}>New native Worker</Menu.Item> : null}
                 <Menu.Item onClick={() => { if (!leaveWorker()) return; setShowImport(true); setCreatingKind(null); setShowLinks(false); setShowMove(false); setRemixing(false); setNotice(""); setMobileDetail(true); }}>Import project</Menu.Item>
               </Menu.Popup></Menu.Positioner></Menu.Portal>
             </Menu.Root>
@@ -604,9 +605,9 @@ function App() {
                 </span> : null}
               </div>
             {viewingItem ? <>
-              <Tabs.List className="view-control" activateOnFocus aria-label={selectedArtifact.kind === "script" ? "Script view" : "Artifact view"}>
+              <Tabs.List className="view-control" activateOnFocus aria-label={selectedArtifact.kind === "script" ? "Script view" : selectedArtifact.serverOnly ? "Endpoint view" : "Artifact view"}>
                 {([
-                  ...(selectedArtifact.kind === "script" ? [["source", "Source"], ["requests", "Requests"]] : [["preview", "Preview"], ["source", "Source"]]),
+                  ...(isServerOnly(selectedArtifact) ? [["source", "Source"], ["requests", "Requests"]] : [["preview", "Preview"], ["source", "Source"]]),
                   // Schedule and Settings open from More actions; while one is open it shows here so the header says where you are.
                   ...(activeTab === "schedule" ? [["schedule", "Schedule"]] : activeTab === "settings" ? [["settings", "Settings"]] : []),
                 ] as [DetailTab, string][]).map(([value, label]) => <Tabs.Tab key={value} value={value}>{label}</Tabs.Tab>)}
@@ -614,7 +615,7 @@ function App() {
             </> : null}
               {viewingItem ? <div className="detail-actions">
                 <button className="share-action" type="button" aria-expanded={showLinks} aria-controls="link-settings-panel" onClick={() => setShowLinks(value => !value)}>Share</button>
-                {selectedArtifact.kind !== "script" && selectedArtifact.url ? <a className="download-link open-link" href={selectedArtifact.url} target="_blank" rel="noopener noreferrer">Open<span aria-hidden="true">↗</span></a> : null}
+                {!isServerOnly(selectedArtifact) && selectedArtifact.url ? <a className="download-link open-link" href={selectedArtifact.url} target="_blank" rel="noopener noreferrer">Open<span aria-hidden="true">↗</span></a> : null}
                 <Menu.Root>
                   <Menu.Trigger className="more-actions" aria-label="More actions"><span aria-hidden="true">⋮</span></Menu.Trigger>
                   <Menu.Portal><Menu.Positioner sideOffset={6} align="end"><Menu.Popup className="action-menu">
@@ -634,7 +635,7 @@ function App() {
                     {gallery?.capabilities?.moves && gallery.libraryScope ? <Menu.Item onClick={() => { setShowMove(true); setShowLinks(false); setRemixing(false); }}>Move</Menu.Item> : null}
                     {gallery?.capabilities?.trash ? <Menu.Item onClick={() => { setShowDelete(true); setShowMove(false); setShowLinks(false); setRemixing(false); }}>Delete</Menu.Item> : null}
                     <Menu.Item onClick={() => { setRemixing(true); setShowMove(false); setShowLinks(false); }}>Remix</Menu.Item>
-                    {selectedArtifact.kind !== "script" && selectedArtifact.url ? <Menu.Item className="mobile-open" render={<a href={selectedArtifact.url} target="_blank" rel="noopener noreferrer" />}>Open</Menu.Item> : null}
+                    {!isServerOnly(selectedArtifact) && selectedArtifact.url ? <Menu.Item className="mobile-open" render={<a href={selectedArtifact.url} target="_blank" rel="noopener noreferrer" />}>Open</Menu.Item> : null}
                     <Menu.Item render={<a href={exportUrl} download onClick={downloadSource} />}>Download</Menu.Item>
                   </Menu.Popup></Menu.Positioner></Menu.Portal>
                 </Menu.Root>
@@ -644,17 +645,17 @@ function App() {
             {viewingItem && showDelete ? <div className="detail-disclosure"><DeletePanel key={selectedArtifact.key} artifact={selectedArtifact} onCancel={() => setShowDelete(false)} onDeleted={async () => { setShowDelete(false); setMobileDetail(false); await loadGallery(); }} /></div> : null}
             {viewingItem && selectedArtifact.kind !== "script" && resolvedVersion !== "working" && gallery?.capabilities?.links ? <p className="live-data-note"><strong>Live data</strong> · Historical code uses the current database and files and can change them. Restore deploys this code while keeping current data.</p> : null}
             {viewingItem && showMove && gallery?.libraryScope && gallery.capabilities?.moves ? <div id="library-move-panel" className="detail-disclosure"><MovePanel key={selectedArtifact.key} artifact={selectedArtifact} library={gallery.libraryScope} onCancel={() => setShowMove(false)} /></div> : null}
-            {viewingItem && remixing ? <div className="detail-disclosure"><RemixPanel key={selectedArtifact.key + resolvedVersion} artifact={selectedArtifact} version={resolvedVersion} onCancel={() => setRemixing(false)} onSaved={async name => { createdRemix.current = {name, workspace:selectedArtifact.workspace, kind:selectedArtifact.kind ?? "artifact"}; await loadGallery(); setSelectedVersion("working"); setQuery(""); setKindFilter("all"); setRemixing(false); }} /></div> : null}
+            {viewingItem && remixing ? <div className="detail-disclosure"><RemixPanel key={selectedArtifact.key + resolvedVersion} artifact={selectedArtifact} version={resolvedVersion} onCancel={() => setRemixing(false)} onSaved={async name => { createdRemix.current = {name, workspace:selectedArtifact.workspace, kind:"artifact"}; await loadGallery(); setSelectedVersion("working"); setQuery(""); setKindFilter("all"); setRemixing(false); }} /></div> : null}
             {viewingItem ? <div id="link-settings-panel" className="detail-disclosure" hidden={!showLinks}><LinkSettings key={selectedArtifact.key} artifact={selectedArtifact} localUrl={gallery?.capabilities?.links ? undefined : localShareUrl} onSaved={loadGallery} /></div> : null}
-            <Tabs.Panel value={activeTab} id="artifact-panel" className="artifact-stage" aria-label={showImport ? "Import project" : creatingKind === "artifact" ? "Artifact source" : selectedArtifact?.kind === "script" || creatingKind === "script" ? "Script editor" : activeTab === "preview" ? "Artifact preview" : activeTab === "schedule" ? "Artifact schedule" : activeTab === "settings" ? "Artifact settings" : "Artifact source"}>
+            <Tabs.Panel value={activeTab} id="artifact-panel" className="artifact-stage" aria-label={showImport ? "Import project" : creatingKind === "artifact" ? "Artifact source" : selectedArtifact?.kind === "script" ? "Script editor" : isServerOnly(selectedArtifact) || creatingKind === "endpoint" ? "Endpoint editor" : activeTab === "preview" ? "Artifact preview" : activeTab === "schedule" ? "Artifact schedule" : activeTab === "settings" ? "Artifact settings" : "Artifact source"}>
               {showImport && gallery ? <ProjectImportPanel workspace={gallery.workspace} hosted={!!gallery.capabilities?.links} onCancel={() => setShowImport(false)}
                 onSaved={async (name, kind) => { createdRemix.current = { name, kind, workspace: gallery.workspace }; await loadGallery(); setSelectedVersion("working"); setTab("source"); setQuery(""); setKindFilter("all"); }}
                 onImported={message => { setShowImport(false); setNotice(message); }} />
                 : creatingKind === "artifact" ? <ArtifactSourcePanel key="new-artifact" workspace={gallery?.workspace ?? "default"} hosted={!!gallery?.capabilities?.links} onCancel={() => setCreatingKind(null)} onSaved={name => createdItem(name, "artifact")} />
-                : creatingKind === "script" ? <ScriptPanel key="new-script" workspace={gallery?.workspace ?? "default"} onCancel={() => setCreatingKind(null)} onSaved={name => createdItem(name, "script")} />
-                : selectedArtifact?.kind === "script" ? <ScriptPanel key={`${selectedArtifact.key}:${resolvedVersion}`} artifact={selectedArtifact} workspace={selectedArtifact.workspace} version={resolvedVersion ?? undefined} view={activeTab as ScriptView} sourceUrl={resolvedVersion ? artifactUrl("/api/source", selectedArtifact, resolvedVersion) : undefined} onSaved={async () => { setSelectedVersion("working"); await loadGallery(); }} />
+                : creatingKind === "endpoint" ? <ScriptPanel key="new-endpoint" server workspace={gallery?.workspace ?? "default"} onCancel={() => setCreatingKind(null)} onSaved={name => createdItem(name, "endpoint")} />
+                : isServerOnly(selectedArtifact) && selectedArtifact ? <ScriptPanel key={`${selectedArtifact.key}:${resolvedVersion}`} server={selectedArtifact.kind !== "script"} artifact={selectedArtifact} workspace={selectedArtifact.workspace} version={resolvedVersion ?? undefined} view={activeTab as ScriptView} sourceUrl={resolvedVersion ? artifactUrl("/api/source", selectedArtifact, resolvedVersion) : undefined} onSaved={async () => { setSelectedVersion("working"); await loadGallery(); }} />
                 : !selectedArtifact && gallery?.capabilities?.links ? <AgentOnboarding workspace={gallery.workspace} onCreate={() => startCreating("artifact")} />
-                : !selectedArtifact ? <div className="empty-detail"><h2>{loading ? "Loading your library…" : "Your library"}</h2><p>{loading ? "Your saved artifacts will appear shortly." : "Select an artifact or script to open it."}</p></div>
+                : !selectedArtifact ? <div className="empty-detail"><h2>{loading ? "Loading your library…" : "Your library"}</h2><p>{loading ? "Your saved artifacts will appear shortly." : "Select an artifact to open it."}</p></div>
                 : !resolvedVersion ? <div className="empty-detail"><h2>No readable version</h2><p>This artifact has no saved source available to preview.</p></div>
                 : <>
                   {activeTab === "preview" ? <div className="preview-stage">

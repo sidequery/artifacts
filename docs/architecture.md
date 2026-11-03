@@ -26,10 +26,14 @@ turn it into the filesystem/stdio implementation.
 `cloudflare/worker.ts` connects authenticated requests to the application.
 `mcp.ts` owns the HTTP MCP transport and `tool-contract.ts` specializes the shared
 schemas for hosted capabilities. `service.ts` coordinates artifact operations,
-artifact activation, artifact links, and the combined gallery. `script-service.ts`
-owns script reads, mutations, execution, secrets and logs; `script-guide.ts`
-contains its MCP authoring guidance. `artifact-service.ts` supplies the shared
-library/workspace identity and URL metadata used by both services.
+artifact activation, artifact links, and the combined gallery. An artifact's
+server is either a default-exported fetch handler, which `compiler.ts` wraps in the
+`ArtifactServer` Durable Object class, or that class itself; artifacts without a UI
+store empty browser source. `script-service.ts` owns legacy script reads,
+mutations, execution, secrets and logs; `script-guide.ts` contains its MCP
+authoring guidance. `server-logging.ts` is the console capture module loaded
+beside both artifact servers and legacy scripts. `artifact-service.ts` supplies
+the shared library/workspace identity and URL metadata used by both services.
 
 `managed-service.ts` resolves authenticated library selections through the
 ownership directory in the existing deployment `ArtifactLinks` Durable Object.
@@ -38,6 +42,10 @@ library/workspace/name identities. A move changes one ownership row, retaining
 sources, revisions, projects, compiled code, runtime SQLite/KV, files, secrets,
 schedules, execution history, and existing URLs. Legacy records retain their
 original library owner until first moved; no data migration is required.
+Artifact operations that name a legacy script, and no artifact, are served from
+the script's own storage by `managed-service.ts`; scripts are never copied into
+artifact storage. Native Worker links name the app's permanent ID, and the root
+route asks the native controller for its current owner.
 
 The directory serializes only admission and destination reservations. Compilation,
 HTTP execution, and file operations run outside that queue. An operation admitted

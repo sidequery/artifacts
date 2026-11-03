@@ -71,7 +71,7 @@ export class NativeApps extends DurableObject<NativeEnvironment> {
     return result;
   }
   private summary(row: Row) {
-    return { name: row.name, workspace: row.workspace, provider: row.provider, desired_revision: row.desired, active_revision: row.active,
+    return { id: row.id, name: row.name, workspace: row.workspace, provider: row.provider, desired_revision: row.desired, active_revision: row.active,
       revision_token: createHash("sha256").update(row.draft).digest("hex"), status: row.status, stage: row.stage, error: row.error, updated_at: row.updated_at };
   }
   list(input: { owner: string; workspace?: string; offset?: number }) {
@@ -86,6 +86,13 @@ export class NativeApps extends DurableObject<NativeEnvironment> {
     const row = this.row(input);
     const revision = input.revision_id ? this.revision(row.id, input.revision_id) : null;
     return { ...this.summary(row), ...(revision ? { source: revision.source, manifest: revision.manifest, project: revision.project ?? emptyProject(), revision_id: revision.id } : JSON.parse(row.draft) as Draft) };
+  }
+  /** The permanent ID survives library moves; deployment-wide links refer to it. */
+  identity(input: Selection) { return { id: this.row(input).id }; }
+  owner(input: { id: string }) {
+    if (typeof input.id !== "string") throw new Error("App not found");
+    const row = this.byId(input.id);
+    return { owner: row.owner, workspace: row.workspace, name: row.name };
   }
   history(input: Selection & { offset?: number }) {
     const row = this.row(input), offset = input.offset ?? 0;
@@ -278,7 +285,10 @@ export class NativeApps extends DurableObject<NativeEnvironment> {
   async fetch(request: Request): Promise<Response> {
     const encoded = request.headers.get("x-artifacts-app-selection");
     if (!encoded) return new Response("Not found", { status: 404 });
-    const row = this.row(JSON.parse(encoded) as Selection);
+    const selected = JSON.parse(encoded) as Selection | { id: string };
+    let row: Row;
+    try { row = "id" in selected ? this.byId(selected.id) : this.row(selected); }
+    catch { return new Response("Not found", { status: 404 }); }
     if (row.status !== "active" || !row.endpoint) return new Response("App deployment requires reconciliation", { status: 503 });
     const headers = new Headers(request.headers);
     for (const key of ["x-artifacts-app-selection", "x-artifacts-gateway-token", "x-artifacts-target-url", "authorization", "cookie", "cf-access-jwt-assertion", "cf-access-client-id", "cf-access-client-secret"]) headers.delete(key);

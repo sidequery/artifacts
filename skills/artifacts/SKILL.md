@@ -1,6 +1,6 @@
 ---
 name: artifacts
-description: Create and edit Sidequery artifacts or hosted HTTP scripts, choose root URL slugs, and use storage, secrets and bundled third-party dependencies through MCP; optional local CLI and Herdr integration.
+description: Create and edit Sidequery artifacts, including hosted HTTP endpoints without a UI, choose root URL slugs, and use storage, secrets and bundled third-party dependencies through MCP; optional local CLI and Herdr integration.
 ---
 
 # Sidequery Artifacts
@@ -11,17 +11,19 @@ tool, or asks for a hosted script, HTTP endpoint, API, HTML handler, webhook, or
 
 ## Runtime and artifact choice
 
-Keep artifacts for React UIs; create standalone scripts for arbitrary Workers-compatible HTTP handlers. Both can have a user/AI-chosen root URL at `/<slug>`, with no type prefix or namespace. Discover the available MCP tools first: hosted HTTP MCP exposes `script_*` and `artifact_link`; local Bun stdio and filesystem commands remain artifact-only.
+An artifact has a React UI, a server, or both. Use a UI for anything visual; use a server with no UI for an HTTP endpoint, API, HTML handler, webhook, or scheduled job. Any artifact can have a user/AI-chosen root URL at `/<slug>`, with no type prefix or namespace. Hosted HTTP MCP runs servers; local Bun stdio and filesystem commands are UI-only.
 
-Read `artifact_guide` before writing an artifact and `script_guide` before writing a script. These tools provide the current runtime contract without needing a repository checkout. For hosted scripts, URLs, access, persistence, diagnostics and third-party dependencies, read [docs/scripts.md](../../docs/scripts.md). For dependencies specifically, follow its **Third-party dependencies** recipe: install pinned Workers-compatible packages locally, typecheck original source, prebundle into one module, and send the generated contents to `script_write`. The hosted compiler does not install packages. Keep original source and lockfiles for subsequent edits.
+Read `artifact_guide` before writing an artifact, with topic `backend` for servers. It provides the current runtime contract without needing a repository checkout. For hosted endpoints, URLs, access, persistence, diagnostics and third-party dependencies, read [docs/scripts.md](../../docs/scripts.md). Pass exact dependency versions in `project.dependencies`; the service resolves and archives them. Keep original source for subsequent edits.
 
-## Hosted scripts and URLs
+## Hosted endpoints and URLs
 
-Use `script_write({name,slug,contents,access})` with a standard default-exported Workers handler. `env.secrets` contains explicitly configured per-script values, `env.sql` provides persistent SQLite, and outbound `fetch` is available. The MCP guide has the complete supported shape and limits.
+Use `artifact_write({name,slug,access,server})` without `contents`, where `server` is a standard default-exported Workers handler typed `ExportedHandler<ServerEnv>`. `env.secrets` contains explicitly configured values, `env.sql` provides persistent SQLite, `env.storage` provides KV and transactions, and outbound `fetch` is available. The URL receives paths relative to the slug. The MCP guide has the complete supported shape and limits.
 
-Use `script_read` and `script_edit` for source changes; check `applied`, `ok` and diagnostics. Invalid drafts retain the working endpoint and chosen slug. Use `script_secrets` rather than embedding credentials, `script_history`/`script_version` for source history, and `script_restore` when restoration is requested.
+Use `artifact_read` and `artifact_edit` for source changes; they select the server when there is no UI. Check `applied`, `ok` and diagnostics. Invalid drafts retain the working endpoint and chosen slug. Use `artifact_secrets` rather than embedding credentials, `artifact_history`/`artifact_version` for source history, and `artifact_restore` when restoration is requested.
 
-Use `artifact_link` for either artifact kind, or `slug` on creation. Private is the default; use public only when external access is intended. Return the exact URL supplied by the tool. Explicit `script_run` and visiting a script URL execute user code; reading, listing and editing do not invoke its handler. Validate intended requests and inspect response status/body and `script_logs` before claiming it works.
+Use `artifact_link`, or `slug` on creation. Private is the default; use public only when external access is intended. Return the exact URL supplied by the tool. Explicit `artifact_request` and visiting the URL execute user code; reading, listing and editing do not invoke its handler. Validate intended requests and inspect response status/body and `artifact_logs` before claiming it works.
+
+Scripts created with the older `script_*` tools are listed as `legacy_scripts`; the same `artifact_*` tools operate on them by name, and `artifact_remix` copies one into a server-only artifact.
 
 ## Local artifact location
 

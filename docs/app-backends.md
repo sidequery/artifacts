@@ -9,18 +9,27 @@ Ask your coding agent to read `artifact_guide` and create an app with a server,
 or use the [counter example](../examples/counter.artifact.server.ts).
 Browser code calls the backend through `artifactFetch`; each app has its own
 persistent SQLite database. Saving or restoring source keeps the current data.
+An artifact can also have a server and no UI; that is an
+[endpoint](scripts.md), and it uses the same server contract.
 
 ## Server source and storage
 
 A hosted artifact may contain two source snapshots: browser React source and an
-optional native server. Server source must export `ArtifactServer`, a Durable
-Object class from `cloudflare:workers`, with a normal `fetch(request)` method.
-Each artifact with a server gets one native SQLite database. Different artifact names
-get separate databases; multiple tabs and server restarts use the same database. Use `this.ctx.storage.sql.exec(sql, ...bindings)`
-with `?` placeholders for values, and `.toArray()` or `.one()` to read the cursor.
-Use `this.ctx.storage.kv.get/put/delete` for key/value data and
-`this.ctx.storage.transactionSync(() => { ... })` for synchronous SQL/KV transactions. Artifacts does
-not add a database abstraction or query-hook layer.
+optional server. Server source default-exports a Workers handler,
+`export default { fetch(request, env, ctx) }`, typed as
+`ExportedHandler<ServerEnv>`. Each artifact with a server gets one native SQLite
+database. Different artifact names get separate databases; multiple tabs and server
+restarts use the same database. Use `env.sql.exec(sql, ...bindings)` with `?`
+placeholders for values, and `.toArray()` or `.one()` to read the cursor. Use
+`env.storage.kv.get/put/delete` for key/value data and
+`env.storage.transactionSync(() => { ... })` for synchronous SQL/KV transactions.
+Artifacts does not add a database abstraction or query-hook layer.
+
+Servers written before handlers were supported export `ArtifactServer`, a Durable
+Object class from `cloudflare:workers`, with a normal `fetch(request)` method, and
+use `this.ctx.storage` and `this.env.secrets`. That form remains supported. Both
+forms run in the same Durable Object facet, so rewriting a class as a handler keeps
+the artifact's database.
 
 ### Application schema migrations
 
@@ -28,7 +37,7 @@ Artifacts does not provide a migration command or automatic application-schema r
 The sample initializes tables with `create table if not exists`; that does not
 upgrade an existing table. For schema changes, keep a schema version in the artifact
 database, check it during server initialization, and apply pending changes together
-with the new version in one `this.ctx.storage.transactionSync`. Complete that work
+with the new version in one `env.storage.transactionSync`. Complete that work
 before serving requests. Saving server source only stores and validates code;
 initialization and migrations run when the updated server is next requested.
 
@@ -44,11 +53,14 @@ Generated servers do not receive the outer Worker's ordinary bindings. In
 particular, do not assume D1, R2 or custom environment bindings are available.
 The server supports outbound `fetch` and Workers-compatible `node:` imports.
 Persistent application data uses the artifact Durable Object's own SQL/KV storage.
-The same CPU and subrequest limits as scripts apply on Cloudflare (30 seconds CPU,
-50 subrequests); the pinned celld runtime does not enforce these per-worker budgets.
+Cloudflare limits each request to 30 seconds CPU and 50 subrequests; the pinned
+celld runtime does not enforce these per-worker budgets. Console output, request
+summaries and errors are kept as the latest 100 log entries; read them with
+`artifact_logs` or from a run in the gallery's run history. Secret values are
+redacted from captured output.
 
-Declare `ArtifactServer extends DurableObject<ArtifactEnv>` to use
-`this.env.secrets.NAME`. Configure values in the gallery's **Secrets** tab or with
+Read secrets from `env.secrets.NAME` (`this.env.secrets.NAME` in an
+`ArtifactServer extends DurableObject<ArtifactEnv>` class). Configure values in the gallery's **Secrets** tab or with
 `artifact_secrets({name, secrets: {API_TOKEN: "value", OLD_TOKEN: null}})`;
 omitting `secrets` lists names only. Up to 32 keys, 4 KiB per value, and 32 KiB
 total are supported. Secrets belong to the artifact, outside source history,
@@ -57,19 +69,17 @@ remixes and imports start empty. Secret updates reload the server without
 resetting its database. Never include secrets in app responses.
 
 ```ts
-import { DurableObject } from "cloudflare:workers";
-
-export class ArtifactServer extends DurableObject<ArtifactEnv> {
-  async fetch(request: Request): Promise<Response> {
+export default {
+  async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname !== "/api/customer") {
       return Response.json({ error: "Not found" }, { status: 404 });
     }
     return fetch("https://api.example.com/customer", {
-      headers: { authorization: `Bearer ${this.env.secrets.API_TOKEN}` },
+      headers: { authorization: `Bearer ${env.secrets.API_TOKEN}` },
     });
-  }
-}
+  },
+} satisfies ExportedHandler<ServerEnv>;
 ```
 
 Direct `/slug/api/*` URLs preserve native HTTP streaming and support larger

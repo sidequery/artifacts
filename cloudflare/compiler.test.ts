@@ -401,3 +401,26 @@ test("legacy server class exports compile to canonical ArtifactServer", async ()
     expect((await call(source, "compile-server")).ok).toBe(false);
   }
 }, 60000);
+
+test("module servers compile to the ArtifactServer facet with typed env storage", async () => {
+  for (const handler of [
+    'export default { async fetch(request, env, ctx) { env.sql.exec("select 1"); env.storage.kv.put("k", 1); return env.storage.transactionSync(() => Response.json({ secret: env.secrets.TOKEN })); } } satisfies ExportedHandler<ServerEnv>;',
+    // Script source keeps compiling as a server.
+    'export default { fetch(request: Request, env: ScriptEnv) { env.sql.exec("select 1"); return new Response("ok"); } };',
+  ]) {
+    expect((await call(handler, "typecheck-server")).diagnostics).toEqual([]);
+    const compiled = await call(handler, "compile-server");
+    expect(compiled.diagnostics).toEqual([]);
+    expect(compiled.js).toMatch(/export\s*\{[^}]*\bArtifactServer\b/);
+  }
+  for (const [invalid, message] of [
+    ['export default { nope: 1 };', "default-export an object with a fetch"],
+    ['export default { fetch() { return 1; } };', "must return a Response"],
+    ['export default { fetch(request: Request, env: ServerEnv) { return Response.json(env.sql.missing()); } };', "missing"],
+    ['import x from "left-pad"; export default { fetch() { return new Response(x); } };', "left-pad"],
+  ]) {
+    const compiled = await call(invalid!, "compile-server");
+    expect(compiled.ok).toBe(false);
+    expect(compiled.diagnostics.map(diagnostic => diagnostic.message).join("\n")).toContain(message!);
+  }
+}, 60000);

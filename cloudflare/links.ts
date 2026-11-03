@@ -7,7 +7,11 @@ import type { ArtifactFiles } from "./files";
 
 type TrashEnvironment = { BACKENDS?: DurableObjectNamespace<ArtifactBackend>; SCRIPT_BACKENDS?: DurableObjectNamespace<ScriptBackend>; FILE_BACKENDS?: DurableObjectNamespace<ArtifactFiles> };
 
-export type ArtifactTarget = { libraryKey: string; workspace: string; kind: "artifact" | "script"; name: string };
+export type ArtifactTarget = { libraryKey: string; workspace: string; kind: "artifact" | "script" | "app"; name: string };
+/** Native app links name the app's permanent ID; the controller resolves its current owner. */
+export function nativeLinkTarget(workspace: string, id: string): ArtifactTarget {
+  return { libraryKey: "native", workspace, kind: "app", name: id };
+}
 export type LiveRevision = { id: string; revision: number; revision_token: string };
 export type LinkUpdate = { slug?: string; access?: "private" | "public"; version_id?: string; script_hash?: string; live?: LiveRevision };
 export type ArtifactLink = ArtifactTarget & LinkUpdate & { slug: string; access: "private" | "public"; generation: number };

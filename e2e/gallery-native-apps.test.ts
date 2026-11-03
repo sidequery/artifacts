@@ -58,7 +58,7 @@ test("Workers share the library folders, search, selection and mobile navigation
     expect(await report.count()).toBe(0);
     await search.fill("");
     const filters = library.getByRole("group", { name: "Filter library" });
-    await filters.getByRole("button", { name: "Workers", exact: true }).click();
+    await filters.getByRole("button", { name: "Native", exact: true }).click();
     expect(await report.count()).toBe(0);
     expect(await library.locator(".artifact-row").count()).toBe(2);
     await filters.getByRole("button", { name: "All", exact: true }).click();
@@ -68,7 +68,7 @@ test("Workers share the library folders, search, selection and mobile navigation
     const artifactSource = page.getByRole("textbox", { name: "Report.artifact.tsx", exact: true });
     await artifactSource.fill("export default function Report() { return <h1>Unsaved report</h1>; }");
     await worker.click();
-    const panel = page.getByRole("region", { name: "Worker apps", exact: true });
+    const panel = page.getByRole("region", { name: "Native Workers", exact: true });
     const source = panel.getByRole("textbox", { name: "worker.ts", exact: true });
     await source.waitFor();
     expect(await source.innerText()).toContain('"Jobs"');
@@ -244,12 +244,12 @@ test("Worker gallery deploys drafts, manages revisions/secrets and preserves edi
     page.on("pageerror", (error) => errors.push(error.message));
     await page.goto(server.url.href);
     const library = page.getByRole("complementary");
-    expect(await page.locator(".header-actions").getByRole("button", { name: "Worker apps", exact: true }).count()).toBe(0);
+    expect(await page.locator(".header-actions").getByRole("button", { name: "Native Workers", exact: true }).count()).toBe(0);
     await page.getByRole("button", { name: "Create or import", exact: true }).click();
-    await page.getByRole("menuitem", { name: "New Worker app", exact: true }).click();
-    const panel = page.getByRole("region", { name: "Worker apps", exact: true });
+    await page.getByRole("menuitem", { name: "New native Worker", exact: true }).click();
+    const panel = page.getByRole("region", { name: "Native Workers", exact: true });
     expect(await library.isVisible()).toBe(true);
-    await panel.getByLabel("Worker app name").fill("example");
+    await panel.getByLabel("Native Worker name").fill("example");
     await panel.getByRole("button", { name: "Continue to editor" }).click();
     await panel.getByRole("tab", { name: "Settings", exact: true }).click();
     await panel.getByText("Advanced manifest (JSON)", { exact: true }).click();
@@ -266,7 +266,7 @@ test("Worker gallery deploys drafts, manages revisions/secrets and preserves edi
       },
       triggers: { crons: ["0 * * * *"], queues: ["jobs"] },
     };
-    await panel.getByLabel("Worker app manifest").fill(JSON.stringify(fullManifest));
+    await panel.getByLabel("Native Worker manifest").fill(JSON.stringify(fullManifest));
     await panel.getByLabel("Variable value 1", { exact: true }).fill("production");
     await panel.getByRole("tab", { name: "Resources", exact: true }).click();
     await panel.getByLabel("Resource name 1", { exact: true }).fill("stable_store");
@@ -283,7 +283,7 @@ test("Worker gallery deploys drafts, manages revisions/secrets and preserves edi
       triggers: { crons: ["30 * * * *"], queues: ["jobs"] },
     });
     await panel.getByRole("button", { name: "Save and deploy Worker", exact: true }).click();
-    await panel.getByText("Worker app deployed", { exact: true }).waitFor();
+    await panel.getByText("Native Worker deployed", { exact: true }).waitFor();
     await library.getByTitle("test/example", { exact: true }).waitFor();
     expect(await library.getByTitle("test/example", { exact: true }).getAttribute("aria-current")).toBe("true");
     expect(calls.filter((call) => call.name === "app_write").at(-1)!.arguments.expected_revision).toBe(firstToken);
@@ -336,7 +336,7 @@ test("Worker gallery deploys drafts, manages revisions/secrets and preserves edi
     expect(await panel.locator(".cm-content").innerText()).toContain("restored draft");
     expect(await panel.getByText("Unsaved changes", { exact: true }).count()).toBe(0);
     await panel.getByRole("button", { name: "Save and deploy Worker", exact: true }).click();
-    await panel.getByText("Worker app deployed", { exact: true }).waitFor();
+    await panel.getByText("Native Worker deployed", { exact: true }).waitFor();
     expect(calls.filter((call) => call.name === "app_write").at(-1)!.arguments.expected_revision).toBe(restoredToken);
     expect(calls.filter((call) => call.name === "app_write").at(-1)!.arguments.source).toContain("restored draft");
     await panel.getByRole("tab", { name: "Deployments", exact: true }).click();
@@ -394,10 +394,10 @@ test("a newly configured fleet provider enables Worker creation without reloadin
   try {
     const page = await browser.newPage();
     await page.goto(`${server.url.href}?view=workers`);
-    await page.getByRole("heading", { name: "Worker apps are unavailable" }).waitFor();
+    await page.getByRole("heading", { name: "Native Workers are unavailable" }).waitFor();
     configured = true;
     await page.evaluate(() => window.dispatchEvent(new Event("online")));
-    await page.getByLabel("Worker app name").fill("fleet-app");
+    await page.getByLabel("Native Worker name").fill("fleet-app");
     await page.getByRole("button", { name: "Continue to editor", exact: true }).click();
     await page.getByRole("textbox", { name: "worker.ts", exact: true }).waitFor();
     expect(await page.getByRole("button", { name: "Save and deploy Worker", exact: true }).isEnabled()).toBe(true);
@@ -450,12 +450,12 @@ test("Worker provider empty state has documentation and no creation editor", asy
   try {
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
     await page.goto(`${server.url.href}?workspace=test&library=team&view=workers`);
-    const panel = page.getByRole("region", { name: "Worker apps", exact: true });
-    await panel.getByRole("heading", { name: "Worker apps are unavailable" }).waitFor();
+    const panel = page.getByRole("region", { name: "Native Workers", exact: true });
+    await panel.getByRole("heading", { name: "Native Workers are unavailable" }).waitFor();
     expect(await panel.getByRole("link", { name: "Worker setup documentation" }).getAttribute("href")).toBe(
       "https://github.com/sidequery/artifacts/blob/main/docs/native-workers.md",
     );
-    expect(await panel.getByLabel("Worker app name").count()).toBe(0);
+    expect(await panel.getByLabel("Native Worker name").count()).toBe(0);
     expect(await panel.locator(".cm-content").count()).toBe(0);
     await page.goto(`${server.url.href}?workspace=test&library=team&view=workers&app=unavailable-app&appTab=source`);
     await panel

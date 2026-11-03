@@ -5,7 +5,7 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 export const GALLERY_TOOL_NAMES = [
   "artifact_write", "artifact_restore", "artifact_remix", "artifact_import", "artifact_export", "artifact_link",
   "script_write", "script_restore", "script_remix", "script_import", "script_export", "script_run", "script_logs",
-  "script_schedule", "script_runs", "artifact_schedule", "artifact_runs", "artifact_secrets", "script_secrets",
+  "script_schedule", "script_runs", "artifact_schedule", "artifact_runs", "artifact_logs", "artifact_request", "artifact_secrets", "script_secrets",
   "artifact_delete", "artifact_undelete", "script_delete", "script_undelete", "artifacts_trash",
 ] as const;
 

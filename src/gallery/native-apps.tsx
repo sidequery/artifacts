@@ -1,5 +1,5 @@
 import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
-import { GalleryToolError, galleryTool } from "./hosted";
+import { GalleryToolError, LinkSettings, galleryTool } from "./hosted";
 import { ProjectEditor, editableProject, emptyEditableProject, type EditableProject } from "./project-editor";
 import { SecretControls } from "./secrets";
 import { Select } from "./select";
@@ -15,6 +15,9 @@ type App = {
   active_revision?: string;
   desired_revision?: string;
   revision_token: string;
+  slug?: string;
+  access?: "private" | "public";
+  url?: string;
 };
 type Snapshot = App & { source: string; manifest: AppManifest; project: EditableProject };
 const initialManifest = {
@@ -74,7 +77,7 @@ export function NativeAppEditor({ workspace, appName, providers, onNavigate, onS
     [restoreId, setRestoreId] = useState("");
   const [editorKey, setEditorKey] = useState(0);
   const library = new URLSearchParams(window.location.search).get("library") === "team" ? "team" : "private";
-  const allowLeave = () => !dirty || window.confirm("Discard unsaved Worker app changes?");
+  const allowLeave = () => !dirty || window.confirm("Discard unsaved native Worker changes?");
   useImperativeHandle(ref, () => ({ canLeave: () => !busy && allowLeave() }));
   useEffect(() => {
     setSection(workerSection());
@@ -186,7 +189,7 @@ export function NativeAppEditor({ workspace, appName, providers, onNavigate, onS
   return (
     <Tabs.Root
       render={<section />}
-      aria-label="Worker apps"
+      aria-label="Native Workers"
       className="artifact-detail worker-workspace"
       hidden={hidden}
       value={section}
@@ -227,9 +230,9 @@ export function NativeAppEditor({ workspace, appName, providers, onNavigate, onS
       <header className="detail-header">
         <button className="back-library" type="button" onClick={onBack} aria-label="Back to library"><span aria-hidden="true">←</span></button>
         <div className="detail-title">
-          <h1 ref={heading} tabIndex={-1}>{appName || name || "New Worker app"}</h1>
+          <h1 ref={heading} tabIndex={-1}>{appName || name || "New native Worker"}</h1>
         </div>
-        {detail ? <Tabs.List aria-label="Worker app sections" className="view-control" activateOnFocus>
+        {detail ? <Tabs.List aria-label="Native Worker sections" className="view-control" activateOnFocus>
           {workerSections.map(tab => <Tabs.Tab key={tab} value={tab} type="button">{tab[0]!.toUpperCase() + tab.slice(1)}</Tabs.Tab>)}
         </Tabs.List> : null}
         {appUrl ? <div className="detail-actions"><a className="download-link open-link" aria-label="Open private app" href={appUrl} target="_blank" rel="noopener">Open<span aria-hidden="true">↗</span></a></div> : null}
@@ -256,7 +259,7 @@ export function NativeAppEditor({ workspace, appName, providers, onNavigate, onS
           </p>
         ) : null}
         {status ? <p role="status" className="detail-notice">{status}</p> : null}
-        {appName && !selected && busy ? <p role="status">Loading Worker app…</p> : null}
+        {appName && !selected && busy ? <p role="status">Loading native Worker…</p> : null}
         {selected && !providerAvailable ? (
           <p role="status">
             {selected.name} uses {selected.provider}, which is not available on this deployment. Configure that provider
@@ -265,9 +268,9 @@ export function NativeAppEditor({ workspace, appName, providers, onNavigate, onS
         ) : null}
         {!providers.length ? (
           <div className="worker-empty">
-            <h2>Worker apps are unavailable</h2>
+            <h2>Native Workers are unavailable</h2>
             <p>
-              No Worker app provider is available on this deployment. Configure a provider to create and deploy Workers.
+              No native Worker provider is available on this deployment. Configure a provider to create and deploy Workers.
             </p>
             <a href="https://github.com/sidequery/artifacts/blob/main/docs/native-workers.md">
               Worker setup documentation
@@ -289,12 +292,12 @@ export function NativeAppEditor({ workspace, appName, providers, onNavigate, onS
               );
             }}
           >
-            <h2>New Worker app</h2>
+            <h2>New native Worker</h2>
             <div className="script-fields">
               <label>
                 Name
                 <input
-                  aria-label="Worker app name"
+                  aria-label="Native Worker name"
                   value={name}
                   required
                   onChange={(event) => { setName(event.target.value); setDirty(true); }}
@@ -306,7 +309,7 @@ export function NativeAppEditor({ workspace, appName, providers, onNavigate, onS
                 <label>
                   Provider
                   <Select
-                    aria-label="Worker app provider"
+                    aria-label="Native Worker provider"
                     value={provider}
                     onChange={(event) => { setProvider(event.target.value); setDirty(true); }}
                   >
@@ -319,7 +322,7 @@ export function NativeAppEditor({ workspace, appName, providers, onNavigate, onS
               <label>
                 Template
                 <Select
-                  aria-label="Worker app template"
+                  aria-label="Native Worker template"
                   value={template}
                   onChange={(event) => { setTemplate(event.target.value); setDirty(true); }}
                 >
@@ -358,7 +361,7 @@ export function NativeAppEditor({ workspace, appName, providers, onNavigate, onS
                   await onSaved();
                   await loadApp(name);
                   navigate(name);
-                  setStatus(result.ok ? "Worker app deployed" : "Worker app needs reconciliation");
+                  setStatus(result.ok ? "Native Worker deployed" : "Native Worker needs reconciliation");
                 }, true);
               }}
             >
@@ -463,7 +466,7 @@ export function NativeAppEditor({ workspace, appName, providers, onNavigate, onS
                       <label>
                         Revision
                         <Select
-                          aria-label="Worker app revision"
+                          aria-label="Native Worker revision"
                           value={restoreId}
                           disabled={busy}
                           onChange={(event) => setRestoreId(event.target.value)}
@@ -547,7 +550,7 @@ export function NativeAppEditor({ workspace, appName, providers, onNavigate, onS
                   <label>
                     Manifest
                     <textarea
-                      aria-label="Worker app manifest"
+                      aria-label="Native Worker manifest"
                       rows={16}
                       value={manifest}
                       disabled={busy}
@@ -579,6 +582,15 @@ export function NativeAppEditor({ workspace, appName, providers, onNavigate, onS
                     await onSaved();
                     const saved = decode<Snapshot>(await galleryTool(workspace, "app_read", { name }));
                     setSelected(saved);
+                  }}
+                />
+                <h3>Link</h3>
+                <LinkSettings
+                  key={`${selected.name}:link`}
+                  artifact={{ workspace, name: selected.name, kind: "app", slug: selected.slug, access: selected.access, url: selected.url }}
+                  onSaved={async () => {
+                    await onSaved();
+                    setSelected(decode<Snapshot>(await galleryTool(workspace, "app_read", { name })));
                   }}
                 />
                 <h3>Library</h3>

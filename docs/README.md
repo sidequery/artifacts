@@ -16,18 +16,18 @@ then open [localhost:4786](http://127.0.0.1:4786).
 
 ## Build something
 
-Ask your agent to read `artifact_guide` for a React app or `script_guide` for an
-API, webhook, or scheduled job. These tools describe the APIs available in your
-running installation.
+Ask your agent to read `artifact_guide`, with topic `backend` for an API,
+webhook, or scheduled job. It describes the APIs available in your running
+installation.
 
 | I need… | Guide |
 | --- | --- |
-| An API, webhook, or scheduled job | [Scripts](scripts.md) |
+| An API, webhook, or scheduled job | [Endpoints](scripts.md) |
 | A React app with a database or server-side secrets | [App backends and SQLite](app-backends.md) |
 | File uploads and downloads | [File storage](files.md) |
 | Multiple pages or HTTP API routes | [Routing](routing.md) |
 | To copy a project to another installation | [Export and import](project-portability.md) |
-| Native queues, KV, R2, D1, or Durable Objects | [Native Worker apps](native-workers.md) |
+| Native queues, KV, R2, D1, or Durable Objects | [Native Workers](native-workers.md) |
 
 ## Run Artifacts for a team
 
