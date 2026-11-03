@@ -2,23 +2,26 @@
 
 Build and share small apps, APIs, and automations on infrastructure you control.
 
-Create interactive React apps and TypeScript scripts with persistent SQLite
-storage, file uploads, secrets, and scheduled runs. Build with your coding agent
-through MCP, then manage source, versions, and execution in the browser.
+Everything you build is an artifact: a React UI, a TypeScript server, or both,
+with persistent SQLite storage, file uploads, secrets, logs, and scheduled runs.
+Build with your coding agent through MCP, then manage source, versions, and
+execution in the browser.
 
 Deploy on **Cloudflare** or run your own servers with **celld**. Keep tools private,
 share them with your team, or publish a public URL.
 
 ## What you can build
 
-- **Apps and dashboards:** React interfaces with their own TypeScript backend,
-  SQLite database, and file storage.
-- **APIs and webhooks:** TypeScript HTTP handlers with outbound requests,
-  per-script secrets, and persistent SQLite storage.
-- **Automations:** run scripts or app backends on an interval or cron schedule,
-  with pause/resume, manual runs, and execution history.
-- **Tools to share:** give apps and scripts readable URLs, choose private or
-  public access, and organize them in personal or team libraries.
+- **Dashboards and tools:** artifacts with a React UI and, optionally, their own
+  TypeScript server, SQLite database, and file storage.
+- **APIs and webhooks:** endpoints, which are artifacts with a server and no UI:
+  Workers fetch handlers with outbound requests, secrets, and SQLite storage.
+- **Automations:** run any artifact's server on an interval or cron schedule,
+  with pause/resume, manual runs, logs, and execution history.
+- **Platform resources:** native Workers declare queues, KV, R2, D1, or Durable
+  Objects when the managed runtime is not enough.
+- **Things to share:** give any artifact a readable URL, choose private or
+  public access, and organize it in a personal or team library.
 
 Projects support helper files and pinned bun dependencies. Edit and restore
 source revisions, or remix an existing project into a new one with fresh data.
@@ -119,7 +122,7 @@ parameters remain supported as connection defaults.
 
 The connection advertises nine model tools: `artifact_guide`, `artifact_list`,
 `artifact_read`, `artifact_write`, `artifact_edit`, `artifact_open`,
-`artifacts_discover`, `artifacts_query`, and `artifacts_execute`. All 53 hosted
+`artifacts_discover`, `artifacts_query`, and `artifacts_execute`. All 54 hosted
 operations remain available through that same connection. Use `artifacts_discover`
 to find an operation and retrieve its exact argument schema and relevant guide;
 call it through `artifacts_query` for reads or `artifacts_execute` for actions.
@@ -133,22 +136,23 @@ original link. Schedules stay paused until explicitly resumed. MCP exposes
 Local file connections expose their supported artifact operations through the
 same interface. No configuration switch is needed.
 
-Ask your agent to read `artifact_guide` before authoring React apps. For scripts,
-inspect `script_write` through `artifacts_discover`, which also returns the script
-guide. For example:
+Ask your agent to read `artifact_guide` before authoring; topic `backend` covers
+servers, endpoints, and schedules. For example:
 
 > Build a team lunch poll with a React UI and a SQLite backend.
 
 > Create a webhook that verifies a signature using a stored secret and saves
 > incoming events to SQLite.
 
-> Make a script that checks an endpoint every hour and records the result.
+> Make an endpoint that checks a URL every hour and records the result.
 
 For sign-in steps, supported credentials, and connection failures, see
 [Connect to an existing deployment](docs/authentication.md#connect-to-an-existing-deployment).
 
 The tools support source reads and edits, typechecking, history, restore, remix,
-and execution. MCP Apps clients can also display interactive React artifacts
+and execution. Scripts created with the earlier `script_*` tools keep working, and
+`artifact_*` tools operate on them by name; see
+[legacy scripts](docs/scripts.md#legacy-scripts). MCP Apps clients can also display interactive React artifacts
 inside the conversation. Clients without MCP Apps support still receive tool
 results and diagnostics.
 
@@ -163,7 +167,7 @@ artifacts web --port 4784
 ```
 
 This workspace mode supports local source files, history, and stdio MCP. It does
-not execute scripts, app backends, or schedules, and it does not synchronize with
+not execute artifact servers or schedules, and it does not synchronize with
 the full host. Herdr is optional for opening artifacts beside a terminal agent.
 See the [local workspace and MCP reference](docs/local-workspace.md) for setup,
 inline views, targeted edits, history, and compatibility with older Canvas sources.
@@ -177,8 +181,8 @@ Start with the [documentation index](docs/README.md) to find the guide for your 
 - [Host commands and local persistence](docs/daemon.md)
 - [Deploy to Cloudflare](docs/cloudflare.md)
 - [Deploy celld on your own infrastructure](docs/celld-deployment.md)
-- [Scripts, URLs, dependencies, remix, and schedules](docs/scripts.md)
-- [Native Worker apps, manifests, providers, and recovery](docs/native-workers.md)
+- [Endpoints, URLs, dependencies, remix, schedules, and legacy scripts](docs/scripts.md)
+- [Native Workers, manifests, providers, and recovery](docs/native-workers.md)
 - [Complete project export and import](docs/project-portability.md)
 - [App backends and SQLite](docs/app-backends.md)
 - [File storage](docs/files.md)

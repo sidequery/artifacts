@@ -9,7 +9,7 @@ export type CatalogRow = {
   workspace: string; name: string; id?: string; version_id?: string; created_at?: string;
   artifact_id?: string; source_path?: string; path?: string; source_hash?: string; updated_at?: string;
   runtime?: string; reason?: string; restored_from?: string | null; revision?: number; serve_count?: number;
-  active_hash?: string | null; kind?: "script";
+  active_hash?: string | null; kind?: "script"; server_only?: boolean;
 };
 
 type OwnershipRow = { physical: string; owner: string; workspace: string; kind: string; name: string };

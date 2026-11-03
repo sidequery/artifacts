@@ -331,7 +331,7 @@ function Workspace({ initial, view, search, renderPreview, attach, attachedVersi
                   {gallery.capabilities?.trash ? <Menu.Item onClick={() => setDisclosure("delete")}>Delete</Menu.Item> : null}
                 </> : null}
                 {openProduct ? <Menu.Item onClick={() => void perform(() => openProduct(gallery.libraryScope))}>Open library in browser</Menu.Item> : null}
-                {gallery.capabilities?.nativeApps && openProduct ? <Menu.Item onClick={() => void perform(() => openProduct(gallery.libraryScope))}>Worker apps</Menu.Item> : null}
+                {gallery.capabilities?.nativeApps && openProduct ? <Menu.Item onClick={() => void perform(() => openProduct(gallery.libraryScope))}>Native Workers</Menu.Item> : null}
               </Menu.Popup></Menu.Positioner></Menu.Portal>
             </Menu.Root></div> : null}
           </div>

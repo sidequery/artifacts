@@ -1,24 +1,31 @@
-# Native Worker apps
+# Native Workers
 
-Use a native Worker app when you need platform resources such as queues, KV, R2,
-or D1 in addition to a request handler. For a React interface with SQLite, start
-with [app backends](app-backends.md); for an endpoint or scheduled job with SQLite,
-start with [scripts](scripts.md).
+Artifacts run on one of two runtimes. The managed runtime, used by default, runs an
+artifact's UI and server in a sandbox with SQLite, KV, secrets, files, schedules
+and logs already provided. A native Worker is the other runtime: you deploy an
+ordinary Cloudflare Worker module and declare the platform resources it needs,
+such as queues, KV, R2, D1 or Durable Objects. For a React interface with SQLite,
+start with [app backends](app-backends.md); for an endpoint or scheduled job with
+SQLite, start with [endpoints](scripts.md). Switching an existing artifact between
+runtimes does not move its data; managed SQLite does not become D1.
 
 Your administrator must configure a [deployment provider](#providers) before you
-can deploy native apps. Then choose **New Worker app** from the **+** menu beside Artifacts, or ask your agent
-to read `app_guide`. Native app URLs are private; they do not currently support
-public links.
+can deploy native Workers. Then choose **New native Worker** from the **+** menu beside Artifacts, or ask your agent
+to read `app_guide`. The MCP operations keep their `app_*` names.
 
-Native apps deploy ordinary Cloudflare Worker modules with their default handler and named Durable Object exports. They use native KV, R2, D1, queue and DO bindings rather than the script SDK's `env.sql` wrapper. Worker apps appear alongside artifacts and scripts in the sidebar, with the same folders and search. Select one to edit its source, resources, triggers, deployments, and settings in the detail pane. The gallery and hosted MCP `app_*` tools use the same authenticated deployment controller.
+Native Workers deploy ordinary Cloudflare Worker modules with their default handler and named Durable Object exports. They use native KV, R2, D1, queue and DO bindings rather than the managed `env.sql` and `env.storage` wrappers. Native Workers appear alongside other artifacts in the sidebar, with a **Native** label and the same folders and search. Select one to edit its source, resources, triggers, deployments, and settings in the detail pane. The gallery and hosted MCP `app_*` tools use the same authenticated deployment controller.
 
-An app belongs to a private or team library and a workspace. Its UUID permanently owns provider resources; source revisions, export names, logical library moves and binding names do not change those identities. App URLs are private:
+An app belongs to a private or team library and a workspace. Its UUID permanently owns provider resources; source revisions, export names, logical library moves and binding names do not change those identities.
+
+Give a native Worker a root URL like any other artifact: use **Link** under its **Settings** in the gallery, or `artifact_link({kind:"app",name,slug,access})`. Slugs share the deployment-wide namespace with artifacts. Private links admit the app's current library, following it across library moves; public links admit any caller, and the app can implement its own authentication. The app receives paths relative to the slug, so `/my-app/jobs` arrives as `/jobs`. `app_read` and `app_list` report the link's `slug`, `access` and `url`.
+
+Every app also keeps its management URL, which is always private:
 
 ```text
 /apps/my-app/?workspace=default&library=private
 ```
 
-The controller authenticates library access before proxying HTTP, removes management credentials/cookies and strips response cookies. The app receives its app-relative path and deployment origin. HTTP bodies stream and have no browser/MCP envelope limit. App URLs must include their workspace/library selectors on subsequent requests; clients should preserve these selectors when constructing links. This delivery does not assign public root slugs or provide an iframe application viewer.
+Both routes remove management credentials/cookies before proxying and strip response cookies. The app receives its app-relative path and deployment origin. HTTP bodies stream and have no browser/MCP envelope limit. Management URLs must include their workspace/library selectors on subsequent requests; clients should preserve these selectors when constructing links. Native Workers have no iframe application viewer.
 
 ## Manifest and source
 

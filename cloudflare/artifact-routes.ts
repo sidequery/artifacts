@@ -15,6 +15,13 @@ import navigationHost from "../dist/cloudflare/navigation-host.json";
 import { artifactApiRequest, artifactApiResponse } from "./artifact-api";
 import { SCRIPT_HEADER } from "./script-backend";
 import { ARTIFACT_HEADER } from "./backend";
+import type { ArtifactLink } from "./links";
+
+async function linkOwner(link: ArtifactLink, env: Env): Promise<string | null> {
+  if (link.kind !== "app") return env.LINKS.getByName("deployment").owner(link);
+  try { return (await env.NATIVE_APPS?.getByName("deployment").owner({ id: link.name }))?.owner ?? null; }
+  catch { return null; }
+}
 
 export async function identify(request: Request, env: Env): Promise<{ privateKey: string; user: PluginUser } | Response> {
   if (env.AUTH_MODE && !["access", "better-auth"].includes(env.AUTH_MODE)) return Response.json({ error: "Invalid AUTH_MODE" }, { status: 503 });
@@ -44,11 +51,18 @@ export async function artifactRoute(request: Request, env: Env): Promise<Respons
   if (link.access === "private") {
     const identity = await identify(request, env);
     if (identity instanceof Response) return identity;
-    const owner = await env.LINKS.getByName("deployment").owner(link);
+    const owner = await linkOwner(link, env);
     if (owner !== "team" && owner !== identity.privateKey) return new Response("Not found", { status: 404 });
     plugins = { user: identity.user, env };
     const origin = request.headers.get("Origin");
     if (origin && origin !== url.origin) return new Response("Origin is not allowed", { status: 403 });
+  }
+  if (link.kind === "app") {
+    if (!env.NATIVE_APPS) return new Response("Not found", { status: 404 });
+    // The controller strips credentials and forwards app-relative paths to the native Worker.
+    const input = artifactApiRequest(request, `/${slug}`, link.access === "private");
+    input.headers.set("x-artifacts-app-selection", JSON.stringify({ id: link.name }));
+    return env.NATIVE_APPS.getByName("deployment").fetch(input);
   }
   if (link.kind === "script") {
     if (!link.script_hash) return new Response("Script has no valid version", { status: 409 });
@@ -88,18 +102,6 @@ export async function artifactRoute(request: Request, env: Env): Promise<Respons
     const result = await service.fileRequest({ name: link.name, version_id: link.version_id }, args.request, link.access === "private");
     return Response.json({ result }, { headers: { "cache-control": "private, no-store" } });
   }
-  if (url.pathname === `/${slug}/api` || url.pathname.startsWith(`/${slug}/api/`)) {
-    const origin = request.headers.get("Origin");
-    if (origin && origin !== url.origin) return new Response("Origin is not allowed", { status: 403 });
-    const snapshot = await service.snapshot({ version_id: link.version_id });
-    if (snapshot.server_source === null) return Response.json({ error: "Artifact has no server" }, { status: 404 });
-    if (!snapshot.compiled_id) return Response.json({ error: "Artifact has no saved server bundle" }, { status: 409 });
-    const input = artifactApiRequest(request, `/${slug}`, link.access === "private");
-    input.headers.set(ARTIFACT_HEADER, JSON.stringify({ libraryKey: link.libraryKey, workspace: link.workspace, name: link.name,
-      compiled_id: snapshot.compiled_id, version_id: link.version_id, original: input.headers.get(ARTIFACT_HEADER) }));
-    const backend = env.BACKENDS.getByName(JSON.stringify([link.libraryKey, link.workspace, link.name]));
-    return artifactApiResponse(await backend.fetch(input), request.method);
-  }
   if (url.pathname === `/${slug}/_artifact/plugins`) {
     if (request.method !== "POST") return new Response("Method not allowed", { status: 405, headers: { Allow: "POST" } });
     let input: PluginRequest;
@@ -123,8 +125,20 @@ export async function artifactRoute(request: Request, env: Env): Promise<Respons
     return Response.json({ response: await service.request({ name: link.name, version_id: link.version_id }, args.request) }, { headers: { "cache-control": "no-store" } });
   }
   if (url.pathname === `/${slug}/_artifact` || url.pathname.startsWith(`/${slug}/_artifact/`)) return new Response("Not found", { status: 404 });
-  if (request.method !== "GET" && request.method !== "HEAD") return new Response("Method not allowed", { status: 405, headers: { Allow: "GET, HEAD" } });
   const snapshot = await service.snapshot({ version_id: link.version_id });
+  // A server-only artifact's whole URL is its HTTP API; UI artifacts serve /api/*.
+  if (snapshot.source === "" || url.pathname === `/${slug}/api` || url.pathname.startsWith(`/${slug}/api/`)) {
+    const origin = request.headers.get("Origin");
+    if (snapshot.source !== "" && origin && origin !== url.origin) return new Response("Origin is not allowed", { status: 403 });
+    if (snapshot.server_source === null) return Response.json({ error: "Artifact has no server" }, { status: 404 });
+    if (!snapshot.compiled_id) return Response.json({ error: "Artifact has no saved server bundle" }, { status: 409 });
+    const input = artifactApiRequest(request, `/${slug}`, link.access === "private");
+    input.headers.set(ARTIFACT_HEADER, JSON.stringify({ libraryKey: link.libraryKey, workspace: link.workspace, name: link.name,
+      compiled_id: snapshot.compiled_id, version_id: link.version_id, original: input.headers.get(ARTIFACT_HEADER) }));
+    const backend = env.BACKENDS.getByName(JSON.stringify([link.libraryKey, link.workspace, link.name]));
+    return artifactApiResponse(await backend.fetch(input), request.method);
+  }
+  if (request.method !== "GET" && request.method !== "HEAD") return new Response("Method not allowed", { status: 405, headers: { Allow: "GET, HEAD" } });
   const preview = await service.preview(snapshot);
   if (!preview.ok || !preview._meta) return new Response(preview.check, { status: 400 });
   const payload = preview._meta.artifact;

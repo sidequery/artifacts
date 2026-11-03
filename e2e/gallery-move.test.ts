@@ -60,7 +60,7 @@ test("gallery moves artifacts and scripts between libraries, preserves selection
       const selected = page.locator('.artifact-row[aria-current="true"]');
       await selected.waitFor();
       expect(await selected.getAttribute("title")).toBe(`${workspace}/${name}`);
-      expect(await selected.innerText()).toBe(kind === "script" ? `${name}\nScript` : name);
+      expect(await selected.innerText()).toBe(kind === "script" ? `${name}\nLegacy script` : name);
       expect(await page.getByRole("combobox", { name: "Library", exact: true }).inputValue()).toBe("private");
       await page.getByRole("button", { name: "More actions", exact: true }).click(); await page.getByRole("menuitem", { name: "Move", exact: true }).click();
       const panel = page.getByRole("form", { name: "Move between libraries" });
@@ -101,7 +101,7 @@ test("gallery moves artifacts and scripts between libraries, preserves selection
         expect(await page.getByRole("combobox", { name: "Library", exact: true }).inputValue()).toBe(destination);
         expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ library: destination, workspace, name, kind, tab: "source" });
         expect(await selected.getAttribute("title")).toBe(`${workspace}/${name}`);
-        expect(await selected.innerText()).toBe(kind === "script" ? `${name}\nScript` : name);
+        expect(await selected.innerText()).toBe(kind === "script" ? `${name}\nLegacy script` : name);
         expect(moves.at(-1)).toEqual({ from, workspace, kind, name, library: destination });
         expect(libraries[from].some(artifact => artifact.kind === kind && artifact.workspace === workspace)).toBe(false);
         expect(libraries[destination].some(artifact => artifact.kind === kind && artifact.workspace === workspace)).toBe(true);

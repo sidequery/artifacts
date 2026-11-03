@@ -6,6 +6,7 @@ export type ArtifactScheduleInput = ScheduleTiming & { action?: "get" | "set" | 
 export type ArtifactRun = { id: string; revision: string; trigger: string; started_at: string; finished_at: string | null; duration_ms: number | null; status: string; http_status: number | null };
 export type ArtifactActive = { code: string | null; hash: string; version_id: string; revision: number };
 export type ArtifactClaim = { schedule: ArtifactSchedule; active: ArtifactActive | undefined; run: { id: string; started: number } };
+export type ArtifactLog = { timestamp: string; level: string; message: string; run_id?: string | null };
 
 /** Supervisor storage belongs to the host, separate from ArtifactServer's facet. */
 export class ArtifactExecution {
@@ -14,6 +15,15 @@ export class ArtifactExecution {
     storage.sql.exec("create table if not exists active_server(id integer primary key check(id=1),payload text not null)");
     storage.sql.exec("create table if not exists execution_runs(id text primary key,revision text not null,trigger text not null,started_at text not null,finished_at text,duration_ms integer,status text not null,http_status integer)");
     storage.sql.exec("update execution_runs set status='interrupted' where status='running'");
+    storage.sql.exec("create table if not exists execution_logs(id integer primary key autoincrement,timestamp text not null,level text not null,message text not null,run_id text)");
+  }
+  record(log: ArtifactLog) {
+    this.storage.sql.exec("insert into execution_logs(timestamp,level,message,run_id) values(?,?,?,?)", log.timestamp, log.level, log.message.slice(0, 2048), log.run_id ?? null);
+    this.storage.sql.exec("delete from execution_logs where id not in (select id from execution_logs order by id desc limit 100)");
+  }
+  logs(limit = 100, runId?: string) {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error("limit must be between 1 and 100");
+    return this.storage.sql.exec<ArtifactLog>("select timestamp,level,message,run_id from execution_logs where (? is null or run_id=?) order by id desc limit ?", runId ?? null, runId ?? null, limit).toArray();
   }
   async activate(active: ArtifactActive) {
     await this.storage.transaction(async storage => {

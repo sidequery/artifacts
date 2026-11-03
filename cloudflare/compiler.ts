@@ -15,6 +15,8 @@ const serverPath = "artifact.artifact.server.ts";
 const sdkPath = "src/sdk/index.ts";
 const compilerFiles: Record<string, string> = { ...files, ...browserPlugins.files };
 compilerFiles["artifact-env.d.ts"] = "interface ArtifactEnv { secrets: Record<string, string> }";
+// Module servers receive the facet's own storage. ScriptEnv keeps script source compiling as a server.
+compilerFiles["server-env.d.ts"] = 'interface ServerEnv { secrets: Record<string, string>; sql: SqlStorage; storage: Pick<DurableObjectStorage, "sql" | "kv" | "transactionSync"> }\ntype ScriptEnv = ServerEnv;\n';
 const options: ts.CompilerOptions = {
     target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
     moduleResolution: ts.ModuleResolutionKind.Bundler, jsx: ts.JsxEmit.ReactJSX,
@@ -27,7 +29,9 @@ const normalize = (path: string) => path.replace(/^\//, "");
 let currentSource = "";
 let currentProject = emptyProject();
 let serverMode = false;
-let scriptMode = false;
+// class: ArtifactServer Durable Object. module: default-exported fetch handler. script: legacy script.
+type ServerKind = "class" | "module" | "script";
+let serverKind: ServerKind = "class";
 let sourceVersion = 0;
 const serverOptions: ts.CompilerOptions = { ...options, paths: {}, lib: ["lib.es2022.d.ts"], types: ["node"] };
 const read = (path: string) => normalize(path) === (serverMode ? serverPath : sourcePath) ? currentSource : currentProject.files[normalize(path)] ?? currentProject.lock[normalize(path)] ?? compilerFiles[normalize(path)];
@@ -35,8 +39,8 @@ const read = (path: string) => normalize(path) === (serverMode ? serverPath : so
 // Typechecking is synchronous, so overlapping requests cannot observe another
 // source while checking. No per-user project/program cache accumulates here.
 const host: ts.LanguageServiceHost = {
-    getCompilationSettings: () => scriptMode ? { ...serverOptions, noImplicitAny: false, types: ["node"] } : serverMode ? serverOptions : options,
-    getScriptFileNames: () => serverMode ? [`/${serverPath}`, "/node_modules/@cloudflare/workers-types/index.d.ts", ...(!scriptMode ? ["/artifact-env.d.ts"] : [])] : [`/${sourcePath}`],
+    getCompilationSettings: () => serverMode && serverKind !== "class" ? { ...serverOptions, noImplicitAny: false, types: ["node"] } : serverMode ? serverOptions : options,
+    getScriptFileNames: () => serverMode ? [`/${serverPath}`, "/node_modules/@cloudflare/workers-types/index.d.ts", ...(serverKind === "class" ? ["/artifact-env.d.ts"] : serverKind === "module" ? ["/server-env.d.ts"] : [])] : [`/${sourcePath}`],
     getScriptVersion: path => {
       const file = normalize(path);
       // Keep immutable SDK/lib ASTs cached while invalidating every project
@@ -98,16 +102,30 @@ export function typecheckArtifactSource(source: string, project = emptyProject()
     diagnostics.push(...sandboxToDiagnostics(path, violations));
   }
   if (diagnostics.length) return diagnostics;
-  return typecheckSource(source, false, false, project);
+  return typecheckSource(source, false, "class", project);
 }
 
 export function typecheckArtifactServerSource(source: string, project = emptyProject()): Diagnostic[] {
-  return typecheckSource(source, true, false, project);
+  return serverShape(source) === "class" ? typecheckSource(source, true, "class", project) : checkHandler(source, "module", project);
 }
 
-function typecheckSource(source: string, server: boolean, script = false, project = emptyProject()): Diagnostic[] {
+/** Servers exporting ArtifactServer (or legacy CanvasServer) keep the Durable Object class contract. */
+export function serverShape(source: string): "class" | "module" {
+  const file = ts.createSourceFile(serverPath, source, ts.ScriptTarget.ES2022, false, ts.ScriptKind.TS);
+  const names = new Set<string>();
+  for (const statement of file.statements) {
+    const modifiers = ts.canHaveModifiers(statement) ? ts.getModifiers(statement) ?? [] : [];
+    const exported = modifiers.some(modifier => modifier.kind === ts.SyntaxKind.ExportKeyword) && !modifiers.some(modifier => modifier.kind === ts.SyntaxKind.DefaultKeyword);
+    if (exported && ts.isClassDeclaration(statement) && statement.name) names.add(statement.name.text);
+    if (exported && ts.isVariableStatement(statement)) for (const declaration of statement.declarationList.declarations) if (ts.isIdentifier(declaration.name)) names.add(declaration.name.text);
+    if (ts.isExportDeclaration(statement) && statement.exportClause && ts.isNamedExports(statement.exportClause)) for (const element of statement.exportClause.elements) names.add(element.name.text);
+  }
+  return names.has("ArtifactServer") || names.has("CanvasServer") ? "class" : "module";
+}
+
+function typecheckSource(source: string, server: boolean, kind: ServerKind = "class", project = emptyProject()): Diagnostic[] {
   currentProject = normalizeProject(project);
-  scriptMode = script;
+  serverKind = kind;
   serverMode = server;
   currentSource = source;
   sourceVersion++;
@@ -126,7 +144,7 @@ function typecheckSource(source: string, server: boolean, script = false, projec
         ...(position ? { line: position.line + 1, column: position.character + 1 } : {}),
       };
     });
-  if (server && !script) diagnostics.push(...validateArtifactServerClass(program));
+  if (server && kind === "class") diagnostics.push(...validateArtifactServerClass(program));
   return diagnostics;
 }
 
@@ -186,7 +204,7 @@ export async function compileArtifactServerSource(source: string, project = empt
 async function queueCompile(source: string, server: boolean, script = false, project = emptyProject(), native?: { manifest: AppManifest; resources: ResourceLedger }) {
   const release = await compileSlot();
   if (!release) return { ok: false, diagnostics: [{ severity: "error" as const, message: "Compiler is busy; retry shortly", file: server ? serverPath : sourcePath }] };
-  try { return await (native ? compileNative(source, project, native.manifest, native.resources) : script ? compileScript(source, project) : server ? compileServer(source, project) : compileSource(source, project)); }
+  try { return await (native ? compileNative(source, project, native.manifest, native.resources) : script ? compileScript(source, project) : server ? (serverShape(source) === "class" ? compileServer(source, project) : compileModuleServer(source, project)) : compileSource(source, project)); }
   finally { release(); }
 }
 
@@ -316,9 +334,10 @@ async function compileSource(source: string, project: ArtifactProject) {
 /** Scripts use Workers globals and can import supported builtins, without the artifact UI restrictions. */
 export function compileScriptSource(source: string, project = emptyProject()) { return queueCompile(source, true, true, project); }
 
-async function compileScript(source: string, project: ArtifactProject) {
-  const declarations = '\ninterface ScriptEnv { secrets: Record<string, string>; sql: SqlStorage }\ntype __ArtifactScriptResult = Response | Promise<Response>;\n';
-  const diagnostics = typecheckSource(source + declarations, true, true, project);
+/** Typechecks a default-exported Workers fetch handler. */
+function checkHandler(source: string, kind: "module" | "script", project: ArtifactProject): Diagnostic[] {
+  const declarations = (kind === "script" ? "\ninterface ScriptEnv { secrets: Record<string, string>; sql: SqlStorage }" : "") + "\ntype __ArtifactScriptResult = Response | Promise<Response>;\n";
+  const diagnostics = typecheckSource(source + declarations, true, kind, project);
   const program = languageService!.getProgram()!;
   const file = program.getSourceFiles().find(item => normalize(item.fileName) === serverPath)!;
   const checker = program.getTypeChecker();
@@ -327,12 +346,55 @@ async function compileScript(source: string, project: ArtifactProject) {
   const handler = exported && checker.getTypeOfSymbolAtLocation(exported, file);
   const fetch = handler && checker.getPropertyOfType(handler, "fetch");
   const signatures = fetch ? checker.getTypeOfSymbolAtLocation(fetch, file).getCallSignatures() : [];
-  if (!signatures.length) diagnostics.push({severity: "error", file: "script.ts", message: "Script must default-export an object with a fetch(request, env, ctx) handler"});
+  const label = kind === "script" ? "Script" : "Server code";
+  if (!signatures.length) diagnostics.push({severity: "error", file: serverPath, message: kind === "script"
+    ? "Script must default-export an object with a fetch(request, env, ctx) handler"
+    : "Server code must default-export an object with a fetch(request, env, ctx) handler, or export class ArtifactServer extending DurableObject from cloudflare:workers"});
   const resultType = file.statements.find((node): node is ts.TypeAliasDeclaration => ts.isTypeAliasDeclaration(node) && node.name.text === "__ArtifactScriptResult");
   if (resultType && signatures.some(signature => !checker.isTypeAssignableTo(checker.getReturnTypeOfSignature(signature), checker.getTypeFromTypeNode(resultType.type)))) {
-    diagnostics.push({severity: "error", file: "script.ts", message: "Script fetch handler must return a Response or Promise<Response>"});
+    diagnostics.push({severity: "error", file: serverPath, message: `${label} fetch handler must return a Response or Promise<Response>`});
   }
-  if (diagnostics.length) return {ok: false, diagnostics: diagnostics.map(item => ({...item, file: item.file === serverPath ? "script.ts" : item.file}))};
+  return kind === "script" ? diagnostics.map(item => ({...item, file: item.file === serverPath ? "script.ts" : item.file})) : diagnostics;
+}
+
+// Wrap the handler in the Durable Object class that backends already execute.
+// Its facet owns the same SQLite database as a class-based server.
+const MODULE_SERVER_ENTRY = `import { DurableObject } from "cloudflare:workers";
+import handler from "./${serverPath}";
+export class ArtifactServer extends DurableObject {
+  async fetch(request) {
+    const ctx = this.ctx;
+    try {
+      const response = await handler.fetch(request, { secrets: this.env.secrets ?? {}, sql: ctx.storage.sql, storage: ctx.storage }, {
+        waitUntil: promise => ctx.waitUntil(Promise.resolve(promise).catch(error => { console.error(error); })),
+        passThroughOnException() {},
+      });
+      if (!(response instanceof Response)) throw new Error("Server fetch handler must return a Response");
+      return response;
+    } catch (error) { console.error(error); return new Response("Server execution failed", { status: 500 }); }
+  }
+}
+export default { fetch() { return new Response("Not found", { status: 404 }); } };
+`;
+
+async function compileModuleServer(source: string, project: ArtifactProject) {
+  const diagnostics = checkHandler(source, "module", project);
+  if (diagnostics.length) return { ok: false, diagnostics };
+  try {
+    const result = await createWorker({ files: { ...project.lock, ...project.files, [serverPath]: source, "server-entry.js": MODULE_SERVER_ENTRY }, entryPoint: "server-entry.js", target: "es2022", sourcemap: false });
+    if (result.warnings?.length) throw new Error(result.warnings.join("\n"));
+    const js = result.modules[result.mainModule];
+    if (typeof js !== "string") throw new Error("Server compiler did not return JavaScript");
+    assertBuiltinImports(js, "Server has an unresolved external import; use Workers runtime builtins or self-contained source");
+    return { ok: true, js, diagnostics: [] as Diagnostic[] };
+  } catch (error) {
+    return { ok: false, diagnostics: [{ severity: "error" as const, message: error instanceof Error ? error.message : String(error), file: serverPath }] };
+  }
+}
+
+async function compileScript(source: string, project: ArtifactProject) {
+  const diagnostics = checkHandler(source, "script", project);
+  if (diagnostics.length) return {ok: false, diagnostics};
   try {
     const result = await createWorker({ files: { ...project.lock, ...project.files, "script.ts": source }, entryPoint: "script.ts", target: "es2022", sourcemap: false });
     if (result.warnings?.length) throw new Error(result.warnings.join("\n"));

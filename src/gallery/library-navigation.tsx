@@ -1,8 +1,15 @@
 import { useRef, type ReactNode, type RefObject } from "react";
 import { ArtifactFolders } from "./folders";
-import type { GalleryArtifact, GalleryData, GalleryItem, GalleryWorker } from "./types";
+import { isServerOnly, type GalleryArtifact, type GalleryData, type GalleryItem, type GalleryWorker } from "./types";
 
 export type LibraryKindFilter = "all" | "artifact" | "script" | "worker";
+/** Filters follow the artifact settings: a UI or a server-only endpoint, and the native Worker runtime. */
+export function matchesKindFilter(item: GalleryItem, filter: LibraryKindFilter): boolean {
+  if (filter === "all") return true;
+  if (filter === "worker") return item.kind === "worker";
+  if (item.kind === "worker") return false;
+  return filter === "script" ? isServerOnly(item) : !isServerOnly(item);
+}
 
 export function workerStatusTone(status: string): "success" | "warning" | "error" | undefined {
   return status === "active" ? "success" : status === "deploying" ? "warning" : status === "recovery-required" ? "error" : undefined;
@@ -31,14 +38,14 @@ export function LibraryNavigation({ gallery, artifacts, query, onQueryChange, ki
       {query ? <button type="button" className="clear-search" aria-label="Clear search" onClick={() => { onQueryChange(""); input.current?.focus(); }}><span aria-hidden="true">×</span></button> : null}
     </div>
     {gallery?.capabilities?.scripts || workers ? <div className="library-filters" role="group" aria-label="Filter library">
-      {([['all', 'All'], ['artifact', 'Artifacts'], ...(gallery?.capabilities?.scripts ? [['script', 'Scripts']] : []), ...(workers ? [['worker', 'Workers']] : [])] as [LibraryKindFilter, string][]).map(([value, label]) =>
+      {([['all', 'All'], ['artifact', 'With UI'], ...(gallery?.capabilities?.scripts ? [['script', 'Endpoints']] : []), ...(workers ? [['worker', 'Native']] : [])] as [LibraryKindFilter, string][]).map(([value, label]) =>
         <button type="button" key={value} aria-pressed={kindFilter === value} onClick={() => onKindFilterChange(value)}>{label}</button>)}
     </div> : null}
     <div className="artifact-list" aria-busy={loading}>
       {loading && !gallery ? <p className="state-message" role="status">Loading library…</p>
         : error && !gallery ? <div role="alert" className="library-empty"><p className="error-message">{error}</p><button type="button" onClick={onRetry}>Try again</button></div>
         : artifacts.length === 0 ? <div className="library-empty">
-          <p>{loading ? "Searching…" : query ? "No matches" : kindFilter !== "all" ? `No ${kindFilter === "script" ? "scripts" : kindFilter === "worker" ? "Worker apps" : "artifacts"}` : "Your library is empty"}</p>
+          <p>{loading ? "Searching…" : query ? "No matches" : kindFilter !== "all" ? `No ${kindFilter === "script" ? "endpoints" : kindFilter === "worker" ? "native Workers" : "artifacts with a UI"}` : "Your library is empty"}</p>
           {query || kindFilter !== "all" ? <button type="button" onClick={() => { onQueryChange(""); onKindFilterChange("all"); }}>Show all items</button> : <p>Saved artifacts will appear here.</p>}
         </div>
         : <ArtifactFolders artifacts={artifacts} workspaces={[...new Set(libraryItems.map(item => item.workspace))]} searching={!!query} renderArtifact={(artifact, depth) => <button className="artifact-row" style={{ paddingLeft: depth * 14 + 10 }} type="button" key={artifact.key}
@@ -51,7 +58,7 @@ export function LibraryNavigation({ gallery, artifacts, query, onQueryChange, ki
             {isDirty(artifact) ? <span className="unsaved-dot" title="Unsaved changes"><span className="sr-only">Unsaved changes</span></span> : null}
             {artifact.kind === "worker" ? <span className="status-dot" data-tone={workerStatusTone(artifact.status)} title={artifact.status.replaceAll("-", " ")}><span className="sr-only">{artifact.status.replaceAll("-", " ")}</span></span>
               : !artifact.working ? <span>Archived</span> : null}
-            {artifact.kind === "script" ? <span>Script</span> : artifact.kind === "worker" ? <span>Worker</span> : null}
+            {artifact.kind === "script" ? <span>Legacy script</span> : artifact.kind === "worker" ? <span>Native</span> : artifact.serverOnly ? <span>Endpoint</span> : null}
           </span>
         </button>} />}
     </div>

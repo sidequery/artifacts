@@ -26,7 +26,8 @@ test("gallery edits scripts without execution and runs requests only on demand",
     if (url.pathname === "/api/tools") {
       const call = await request.json() as typeof calls[number]; calls.push(call);
       if (call.name === "script_write" && call.arguments.name !== "hello") artifacts.push({ key: "script:new", kind: "script", name: call.arguments.name, workspace: "default", working: true, versions: [] });
-      if (call.name === "script_remix") artifacts.push({key:"script:remixed",kind:"script",name:call.arguments.new_name,workspace:"default",working:true,versions:[]});
+      if (call.name === "artifact_write" && call.arguments.server !== undefined) artifacts.push({ key: "endpoint:new", kind: "artifact", serverOnly: true, name: call.arguments.name, workspace: "default", working: true, versions: [] });
+      if (call.name === "artifact_remix") artifacts.push({key:"endpoint:remixed",kind:"artifact",serverOnly:true,name:call.arguments.new_name,workspace:"default",working:true,versions:[]});
       if (call.name === "artifact_link") return Response.json({ error: "Slug is already in use" }, { status: 409 });
       return Response.json({ structuredContent: { response: { status: 200, statusText: "OK", headers: [["content-type", "text/plain"]], body: Buffer.from("<script>alert(1)</script> 🌍").toString("base64") } } });
     }
@@ -64,27 +65,28 @@ test("gallery edits scripts without execution and runs requests only on demand",
     await page.getByRole("button", { name: "Save link", exact: true }).click();
     await page.getByRole("status").filter({ hasText: "Slug is already in use" }).waitFor();
     await page.getByRole("button", { name: "Create or import", exact: true }).click();
-    await page.getByRole("menuitem", { name: "New script", exact: true }).click();
-    await page.getByRole("textbox", { name: "Script name", exact: true }).fill("new-handler");
-    await page.getByRole("textbox", { name: "Script slug" }).fill("new-handler");
+    await page.getByRole("menuitem", { name: "New endpoint", exact: true }).click();
+    await page.getByRole("textbox", { name: "Endpoint name", exact: true }).fill("new-handler");
+    await page.getByRole("textbox", { name: "Endpoint slug" }).fill("new-handler");
     await page.getByRole("button", { name: "Save and deploy", exact: true }).click();
-    await page.getByRole("button", { name: "new-handler Script", exact: true }).waitFor();
-    expect(await page.getByRole("button", { name: "new-handler Script", exact: true }).getAttribute("aria-current")).toBe("true");
+    await page.getByRole("button", { name: "new-handler Endpoint", exact: true }).waitFor();
+    expect(await page.getByRole("button", { name: "new-handler Endpoint", exact: true }).getAttribute("aria-current")).toBe("true");
+    expect(calls.find(call => call.name === "artifact_write")?.arguments).toMatchObject({ name: "new-handler", server: expect.stringContaining("ServerEnv"), slug: "new-handler", access: "private", expected_revision: null });
     expect(calls.filter(call => call.name === "script_run")).toHaveLength(1);
     await page.getByRole("button", { name: "More actions", exact: true }).click();
     await page.getByRole("menuitem", { name: "Remix", exact: true }).click();
     await page.getByRole("textbox", {name:"Remix name"}).fill("remixed-handler");
     await page.getByRole("button", {name:"Create remix",exact:true}).click();
-    const remixedRow=page.getByRole("button",{name:"remixed-handler Script",exact:true});
+    const remixedRow=page.getByRole("button",{name:"remixed-handler Endpoint",exact:true});
     await remixedRow.waitFor();
     expect(await remixedRow.getAttribute("aria-current")).toBe("true");
-    expect(calls.at(-1)).toEqual({name:"script_remix",arguments:{name:"new-handler",new_name:"remixed-handler"}});
+    expect(calls.at(-1)).toEqual({name:"artifact_remix",arguments:{name:"new-handler",new_name:"remixed-handler"}});
     hosted = false;
     await page.reload();
     await page.getByRole("tab", { name: "Preview", exact: true }).click();
     await page.getByTitle("Preview of local").waitFor();
     await page.getByRole("button", { name: "Create or import", exact: true }).click();
-    expect(await page.getByRole("menuitem", { name: "New script", exact: true }).count()).toBe(0);
+    expect(await page.getByRole("menuitem", { name: "New endpoint", exact: true }).count()).toBe(0);
     expect(await page.getByRole("textbox", { name: "URL slug" }).count()).toBe(0);
   } finally { await browser.close(); server.stop(true); }
 }, 30000);

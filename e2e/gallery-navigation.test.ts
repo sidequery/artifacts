@@ -108,11 +108,11 @@ test("gallery filters, previews revisions, and preserves mobile library navigati
     expect(await script.isVisible()).toBe(true);
 
     const filters = desktop.getByRole("group", { name: "Filter library" });
-    await filters.getByRole("button", { name: "Artifacts", exact: true }).click();
+    await filters.getByRole("button", { name: "With UI", exact: true }).click();
     await script.waitFor({ state: "hidden" });
     expect(await campaign.isVisible()).toBe(true);
     expect(await revenue.isVisible()).toBe(true);
-    await filters.getByRole("button", { name: "Scripts", exact: true }).click();
+    await filters.getByRole("button", { name: "Endpoints", exact: true }).click();
     await script.waitFor();
     expect(await campaign.count()).toBe(0);
     expect(await revenue.count()).toBe(0);
@@ -191,7 +191,7 @@ test("gallery filters, previews revisions, and preserves mobile library navigati
     await screenshot(mobile, "gallery-mobile-library");
     const mobileSearch = mobile.getByRole("searchbox", { name: "Search artifacts and scripts" });
     await mobileSearch.fill("campaign");
-    await mobile.getByRole("group", { name: "Filter library" }).getByRole("button", { name: "Artifacts", exact: true }).click();
+    await mobile.getByRole("group", { name: "Filter library" }).getByRole("button", { name: "With UI", exact: true }).click();
     await mobileLibrary.getByTitle("default/Campaign overview", { exact: true }).click();
     await mobile.getByRole("heading", { level: 1, name: "Campaign overview", exact: true }).waitFor();
     expect(await mobileLibrary.isVisible()).toBe(false);
@@ -222,7 +222,7 @@ test("gallery filters, previews revisions, and preserves mobile library navigati
     await mobileLibrary.waitFor();
     expect(await mobileSearch.inputValue()).toBe("campaign");
     expect(await mobileLibrary.getByTitle("default/Campaign overview", { exact: true }).evaluate(element => element === document.activeElement)).toBe(true);
-    expect(await mobile.getByRole("group", { name: "Filter library" }).getByRole("button", { name: "Artifacts", exact: true }).getAttribute("aria-pressed")).toBe("true");
+    expect(await mobile.getByRole("group", { name: "Filter library" }).getByRole("button", { name: "With UI", exact: true }).getAttribute("aria-pressed")).toBe("true");
     expect(await mobileLibrary.getByTitle("default/Campaign overview", { exact: true }).getAttribute("aria-current")).toBe("true");
     expect(await mobile.getByRole("heading", { level: 1, name: "Campaign overview", exact: true }).isVisible()).toBe(false);
     await mobile.getByRole("button", { name: "Clear search", exact: true }).click();

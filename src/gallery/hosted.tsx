@@ -49,7 +49,8 @@ export function parseRequestHeaders(text: string): [string, string][] {
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || Object.values(parsed).some(value => typeof value !== "string")) throw new Error("Headers must be a JSON object of string values.");
   return Object.entries(parsed);
 }
-export function LinkSettings({ artifact, onSaved, localUrl, openLink }: { artifact: GalleryArtifact; onSaved: () => Promise<void>; localUrl?: string; openLink?: (url: string) => Promise<void> }) {
+type LinkTarget = Pick<GalleryArtifact, "workspace" | "name" | "slug" | "access" | "url"> & { kind?: "artifact" | "script" | "app" };
+export function LinkSettings({ artifact, onSaved, localUrl, openLink }: { artifact: LinkTarget; onSaved: () => Promise<void>; localUrl?: string; openLink?: (url: string) => Promise<void> }) {
   const { tool: galleryTool } = useGalleryTransport();
   const [slug, setSlug] = useState(artifact.slug ?? "");
   const [access, setAccess] = useState(artifact.access ?? "private");
@@ -104,6 +105,7 @@ function ConflictActions({ sourceUrl, dirty, onReload }: { sourceUrl: string; di
   </div>;
 }
 const initialSource = `export default {\n  async fetch(request, env, ctx) {\n    return Response.json({ message: "Hello" });\n  },\n} satisfies ExportedHandler<ScriptEnv>;\n`;
+const initialServerSource = initialSource.replace("ScriptEnv", "ServerEnv");
 const initialArtifactSource = `import { Button, H1, Stack, Text, useArtifactState } from "sidequery/artifacts";
 
 export default function Artifact() {
@@ -148,14 +150,18 @@ export function AgentOnboarding({ workspace, onCreate }: { workspace: string; on
     </section>
   </div>;
 }
-export function ScriptPanel({ artifact, workspace, version, sourceUrl, onSaved, onCancel, view = "source" }: { artifact?: GalleryArtifact; workspace: string; version?: string; sourceUrl?: string; onSaved: (name: string) => Promise<void>; onCancel?: () => void; view?: ScriptView }) {
+/** Edits an HTTP server: a server-only artifact, or a legacy script when `server` is false. */
+export function ScriptPanel({ artifact, workspace, version, sourceUrl, onSaved, onCancel, view = "source", server = false }: { artifact?: GalleryArtifact; workspace: string; version?: string; sourceUrl?: string; onSaved: (name: string) => Promise<void>; onCancel?: () => void; view?: ScriptView; server?: boolean }) {
   const { tool: galleryTool, loadSource: loadSourceSnapshot } = useGalleryTransport();
-  const buffer = useProjectDraft(artifact ? `${artifact.key}:${version}` : `new-script:${workspace}`);
+  const buffer = useProjectDraft(artifact ? `${artifact.key}:${version}` : `${server ? "new-endpoint" : "new-script"}:${workspace}`);
   const { draft } = buffer;
+  const noun = server ? "Endpoint" : "Script";
+  const sourceField = server ? "server_source" : "source";
+  const filename = server ? `${(artifact?.name ?? draft?.content.name ?? "").trim() || "endpoint"}.artifact.server.ts` : "script.ts";
   const name = artifact?.name ?? draft?.content.name ?? "";
   const slug = draft?.content.slug ?? "";
   const access = draft?.content.access ?? "private";
-  const contents = draft?.content.source ?? "";
+  const contents = (server ? draft?.content.server_source : draft?.content.source) ?? "";
   const project = draft?.content.project ?? emptyEditableProject();
   const [projectValid, setProjectValid] = useState(true);
   const [projectLoad, setProjectLoad] = useState(0);
@@ -173,7 +179,7 @@ export function ScriptPanel({ artifact, workspace, version, sourceUrl, onSaved, 
   const historical = !!artifact && version !== "working";
   useEffect(() => {
     if (draft && (!artifact || historical || draft.dirty || !artifact.draftRevision || draft.content.revision_token === artifact.draftRevision)) return;
-    if (!artifact) { buffer.reset({ source: initialSource, project: emptyEditableProject(), name: "", slug: "", access: "private" }); return; }
+    if (!artifact) { buffer.reset({ ...(server ? { source: "", server_source: initialServerSource } : { source: initialSource }), project: emptyEditableProject(), name: "", slug: "", access: "private" }); return; }
     if (!sourceUrl) return;
     const controller = new AbortController(); setError("");
     void loadSourceSnapshot(sourceUrl, controller.signal).then(snapshot => { if (!controller.signal.aborted) buffer.reset(snapshot, true); }).catch(error => { if (!controller.signal.aborted) setError(message(error)); });
@@ -185,14 +191,18 @@ export function ScriptPanel({ artifact, workspace, version, sourceUrl, onSaved, 
     try { await action(); } catch (error) { setError(error); } finally { setBusy(false); }
   }
   return <div className="script-panel">
-    <ErrorFeedback error={error} files={["script.ts", ...Object.keys(project.files)]} onLocate={diagnostic => setLocation({ ...diagnostic, file: diagnostic.file!, request: (location?.request ?? 0) + 1 })} />
+    <ErrorFeedback error={error} files={[filename, ...(server ? ["artifact.artifact.server.ts"] : []), ...Object.keys(project.files)]} onLocate={diagnostic => setLocation({ ...diagnostic, file: diagnostic.file!, request: (location?.request ?? 0) + 1 })} />
     {conflict && sourceUrl ? <ConflictActions sourceUrl={sourceUrl} dirty={draft?.dirty ?? false} onReload={snapshot => { buffer.reset(snapshot); setConflict(false); setError(""); setProjectLoad(value => value + 1); }} /> : null}
     <form className="source-form" hidden={view !== "source"} onSubmit={event => {
       event.preventDefault();
       if (busy || !sourceReady || !projectValid || !name.trim()) return;
       void perform(async () => {
         try {
-          const result = await galleryTool(workspace, historical ? "script_restore" : "script_write", historical ? { name, version_id: version } : { name, contents, project, expected_revision: artifact ? draft!.content.revision_token : null, ...(!artifact ? { ...(slug ? { slug } : {}), access } : {}) }) as MutationResult;
+          const link = !artifact ? { ...(slug ? { slug } : {}), access } : {};
+          const expected_revision = artifact ? draft!.content.revision_token : null;
+          const result = await galleryTool(workspace, historical ? (server ? "artifact_restore" : "script_restore") : server ? "artifact_write" : "script_write",
+            historical ? { ...(server ? {} : { name }), version_id: version }
+              : server ? { name, server: contents, project, expected_revision, ...link } : { name, contents, project, expected_revision, ...link }) as MutationResult;
           buffer.saved(result.revision_token);
           if (historical) buffer.invalidateClean(`${artifact!.key}:working`);
           setConflict(false);
@@ -204,16 +214,16 @@ export function ScriptPanel({ artifact, workspace, version, sourceUrl, onSaved, 
           }
           throw error;
         }
-        await onSaved(name); setStatus(historical ? "Revision restored and deployed" : "Script saved and deployed");
+        await onSaved(name); setStatus(historical ? "Revision restored and deployed" : `${noun} saved and deployed`);
       });
     }}>
       {!artifact ? <div className="script-fields">
-        <label>Name<input aria-label="Script name" required value={name} onChange={event => buffer.update({name: event.target.value})} /></label>
-        <label>URL slug<input aria-label="Script slug" value={slug} onChange={event => buffer.update({slug: event.target.value})} /></label>
-        <label>Link access<Select aria-label="Script access" value={access} onChange={event => buffer.update({access: event.target.value as typeof access})}><option value="private">Private</option><option value="public">Public</option></Select></label>
-        <p className="link-note">An HTTP handler. Visiting its URL runs the script and returns its response.</p>
+        <label>Name<input aria-label={`${noun} name`} required value={name} onChange={event => buffer.update({name: event.target.value})} /></label>
+        <label>URL slug<input aria-label={`${noun} slug`} value={slug} onChange={event => buffer.update({slug: event.target.value})} /></label>
+        <label>Link access<Select aria-label={`${noun} access`} value={access} onChange={event => buffer.update({access: event.target.value as typeof access})}><option value="private">Private</option><option value="public">Public</option></Select></label>
+        <p className="link-note">{server ? "An artifact without a UI. Requests to its URL run the server, with paths relative to the URL." : "An HTTP handler. Visiting its URL runs the script and returns its response."}</p>
       </div> : null}
-      {draft ? <ProjectEditor key={projectLoad} location={location} entries={[{ id: "script", filename: "script.ts", source: contents }]} project={project} onProjectChange={project => buffer.update({project})} onEntryChange={(_, source) => buffer.update({source})} dependencyText={draft.dependencyText} onDependencyTextChange={text => buffer.update({}, text)} readOnly={historical} disabled={busy} onValidityChange={setProjectValid} /> : <p role="status">Loading source…</p>}
+      {draft ? <ProjectEditor key={projectLoad} location={location} entries={[{ id: "script", filename, source: contents }]} project={project} onProjectChange={project => buffer.update({project})} onEntryChange={(_, source) => buffer.update({[sourceField]: source})} dependencyText={draft.dependencyText} onDependencyTextChange={text => buffer.update({}, text)} readOnly={historical} disabled={busy} onValidityChange={setProjectValid} /> : <p role="status">Loading source…</p>}
       <div className="source-actions">
         {historical ? <span className="source-readonly muted">Read-only revision</span> : null}
         {draft?.dirty ? <span role="status">Unsaved changes</span> : null}
@@ -223,29 +233,30 @@ export function ScriptPanel({ artifact, workspace, version, sourceUrl, onSaved, 
       </div>
     </form>
     {artifact ? <>
-      <section className="script-activity" aria-label="Script requests" hidden={view !== "requests"}>
+      <section className="script-activity" aria-label={`${noun} requests`} hidden={view !== "requests"}>
         <form onSubmit={event => { event.preventDefault(); void perform(async () => {
           const parsed = parseRequestHeaders(headers);
           if (!path.startsWith("/")) throw new Error("Path must start with /.");
-          const result = await galleryTool(workspace, "script_run", { name, request: { path, method, headers: parsed, ...(method !== "GET" && method !== "HEAD" && body ? { body: encodeRequestBody(body) } : {}) } });
+          const request = { path, method, headers: parsed, ...(method !== "GET" && method !== "HEAD" && body ? { body: encodeRequestBody(body) } : {}) };
+          const result = await galleryTool(workspace, server ? "artifact_request" : "script_run", { name, request });
           setOutput(formatScriptResponse(result));
         }); }}>
-          <p className="muted">Run target: {liveRevisionLabel(artifact)}. Unsaved changes and invalid drafts are not included.</p>
+          <p className="muted">Run target: {liveRevisionLabel(artifact)}. Unsaved changes and invalid drafts are not included.{server ? " Paths are relative to the endpoint URL." : ""}</p>
           <div className="script-fields">
             <label>Method<Select aria-label="Request method" value={method} onChange={event => setMethod(event.target.value)}>{["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"].map(value => <option key={value}>{value}</option>)}</Select></label>
             <label>Path<input aria-label="Request path" value={path} onChange={event => setPath(event.target.value)} /></label>
-            <button disabled={busy}>Run script</button>
+            <button disabled={busy}>{server ? "Send request" : "Run script"}</button>
           </div>
           <label>Headers (JSON)<textarea aria-label="Request headers" value={headers} onChange={event => setHeaders(event.target.value)} /></label>
           {method !== "GET" && method !== "HEAD" ? <label>Body<textarea aria-label="Request body" value={body} onChange={event => setBody(event.target.value)} /></label> : null}
         </form>
-        {output ? <pre aria-label="Script response">{output}</pre> : null}
+        {output ? <pre aria-label={`${noun} response`}>{output}</pre> : null}
       </section>
-      <section className="script-activity artifact-execution" aria-label="Script schedule" hidden={view !== "schedule"}>
-        <ExecutionControls key={`${workspace}/${name}`} workspace={workspace} name={name} active={view === "schedule"}/>
-        <details><summary>Logs</summary><button disabled={busy} onClick={() => void perform(async () => setLogs(show(await galleryTool(workspace, "script_logs", { name }))))}>Load logs</button><pre aria-label="Script logs">{logs}</pre></details>
+      <section className="script-activity artifact-execution" aria-label={`${noun} schedule`} hidden={view !== "schedule"}>
+        <ExecutionControls key={`${workspace}/${name}`} workspace={workspace} name={name} kind={server ? "artifact" : "script"} active={view === "schedule"}/>
+        <details><summary>Logs</summary><button disabled={busy} onClick={() => void perform(async () => setLogs(show(await galleryTool(workspace, server ? "artifact_logs" : "script_logs", { name }))))}>Load logs</button><pre aria-label={`${noun} logs`}>{logs}</pre></details>
       </section>
-      <div className="settings-panel" hidden={view !== "settings"}><h2 className="settings-title">Secrets</h2><SecretControls key={`${workspace}/${name}secrets`} workspace={workspace} name={name} kind="script" active={view === "settings"} /></div>
+      <div className="settings-panel" hidden={view !== "settings"}><h2 className="settings-title">Secrets</h2><SecretControls key={`${workspace}/${name}secrets`} workspace={workspace} name={name} kind={server ? "artifact" : "script"} active={view === "settings"} /></div>
     </> : null}
   </div>;
 }

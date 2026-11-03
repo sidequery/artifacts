@@ -13,7 +13,8 @@ export function RemixPanel({ artifact, version, onSaved, onCancel }: {
     event.preventDefault();
     setBusy(true); setError("");
     try {
-      await galleryTool(artifact.workspace, `${artifact.kind ?? "artifact"}_remix`, {
+      // A remixed legacy script becomes a server-only artifact.
+      await galleryTool(artifact.workspace, "artifact_remix", {
         ...(version === "working" ? { name: artifact.name } : { version_id: version }), new_name: name,
       });
       await onSaved(name);

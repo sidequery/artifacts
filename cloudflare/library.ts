@@ -15,7 +15,7 @@ type DraftRow = {
   workspace: string; name: string; source: string; server_source: string | null; source_hash: string;
   project: string; state: string; created_at: string; updated_at: string;
 };
-type DraftListRow = Pick<DraftRow, "workspace" | "name" | "source_hash" | "updated_at">;
+type DraftListRow = Pick<DraftRow, "workspace" | "name" | "source_hash" | "updated_at"> & { server_only: number };
 type StoredVersion = Version & { server_source: string | null; compiled_id: string | null; project: ArtifactProject };
 export type CompiledArtifact = { id: string; runtime: string; client_js: string; server_js: string | null };
 type CompiledRow = { id: string; runtime: string; source_hash: string; server_hash: string | null; project_hash: string };
@@ -26,6 +26,11 @@ function projectFile(project: ArtifactProject, file: string): string {
 }
 
 function projectHash(project?: ArtifactProject): string { return sha256(JSON.stringify(normalizeProject(project))); }
+
+// Server-only artifacts read and edit their server by default.
+function defaultPart(row: Pick<DraftRow, "source" | "server_source">): "client" | "server" {
+  return row.source === "" && row.server_source !== null ? "server" : "client";
+}
 
 function bytes(value: string): number { return encoder.encode(value).byteLength; }
 
@@ -65,6 +70,11 @@ function sourceText(value: unknown, appendNewline = false): string {
   const source = appendNewline && !value.endsWith("\n") ? `${value}\n` : value;
   if (bytes(source) > MAX_SOURCE_BYTES) throw new Error("Artifact source exceeds 256 KiB");
   return source;
+}
+
+// An empty browser source marks a server-only artifact; it has no UI to compile or render.
+function assertHasPart(source: string, server: string | null) {
+  if (source === "" && server === null) throw new Error("An artifact needs browser source, server source, or both");
 }
 
 function runtimeName(value: unknown): string {
@@ -160,7 +170,7 @@ export class ArtifactLibrary extends DurableObject<unknown> {
     const workspace = workspaceName(input.workspace), name = artifactName(input.name);
     const source = sourceText(input.source), server = input.server_source === null ? null : sourceText(input.server_source);
     const runtime = runtimeName(input.runtime);
-    if (typeof input.client_js !== "string" || !input.client_js ||
+    if (typeof input.client_js !== "string" || (!input.client_js && source !== "") ||
       (server === null ? input.server_js !== null : typeof input.server_js !== "string" || !input.server_js)) throw new Error("invalid compiled artifact output");
     const project = normalizeProject(input.project);
     const project_hash = projectHash(project);
@@ -213,23 +223,27 @@ export class ArtifactLibrary extends DurableObject<unknown> {
     const workspace = optionalWorkspace(input.workspace);
     const { offset, limit } = pagination(input, 100, 100);
     const result = workspace
-      ? rows(this.sql.exec<DraftListRow>("select workspace,name,source_hash,updated_at from drafts where workspace = ? order by workspace,name limit ? offset ?", workspace, limit, offset))
-      : rows(this.sql.exec<DraftListRow>("select workspace,name,source_hash,updated_at from drafts order by workspace,name limit ? offset ?", limit, offset));
+      ? rows(this.sql.exec<DraftListRow>("select workspace,name,source_hash,updated_at,source = '' as server_only from drafts where workspace = ? order by workspace,name limit ? offset ?", workspace, limit, offset))
+      : rows(this.sql.exec<DraftListRow>("select workspace,name,source_hash,updated_at,source = '' as server_only from drafts order by workspace,name limit ? offset ?", limit, offset));
     return result.map(row => ({
       id: row.name, name: `${row.name}${ARTIFACTS_SUFFIX}`, path: sourcePath(row.workspace, row.name),
-      workspace: row.workspace, source_hash: row.source_hash, updated_at: row.updated_at,
+      workspace: row.workspace, source_hash: row.source_hash, updated_at: row.updated_at, ...(row.server_only ? { server_only: true } : {}),
     }));
   }
 
-  writeDraft(input: { workspace: string; name: string; source: string; server_source?: string | null; project?: ArtifactProject; expected_revision?: string | null }) {
+  /** Omitted source or server_source preserves the saved part; null removes it. */
+  writeDraft(input: { workspace: string; name: string; source?: string | null; server_source?: string | null; project?: ArtifactProject; expected_revision?: string | null }) {
     const workspace = workspaceName(input.workspace); const name = artifactName(input.name);
-    const source = sourceText(input.source, true); const source_hash = sha256(source); const timestamp = now();
+    const requestedSource = input.source === undefined ? undefined : input.source === null || input.source === "" ? "" : sourceText(input.source, true);
+    const timestamp = now();
     const requestedServer = input.server_source === undefined ? undefined
       : input.server_source === null ? null : sourceText(input.server_source);
     return this.state.storage.transactionSync(() => {
       const current = first(this.sql.exec<DraftRow>("select * from drafts where workspace = ? and name = ?", workspace, name));
       assertProjectRevision(input.expected_revision, current ? projectRevision(current.source, current.server_source, this.projectStorage.read(current.project)) : null);
+      const source = requestedSource ?? current?.source ?? "", source_hash = sha256(source);
       const server_source = requestedServer === undefined ? current?.server_source ?? null : requestedServer;
+      assertHasPart(source, server_source);
       const project = input.project === undefined ? current?.project ?? this.projectStorage.encode(emptyProject()) : this.projectStorage.encode(input.project);
       this.sql.exec(`insert into drafts (workspace,name,source,server_source,source_hash,project,state,created_at,updated_at)
         values (?, ?, ?, ?, ?, ?, '{}', ?, ?)
@@ -245,6 +259,7 @@ export class ArtifactLibrary extends DurableObject<unknown> {
   importDraft(input: { workspace: string; name: string; source: string; server_source: string | null; project: ArtifactProject; runtime: string }) {
     const workspace = workspaceName(input.workspace), name = artifactName(input.name), runtime = runtimeName(input.runtime);
     const source = sourceText(input.source), server_source = input.server_source === null ? null : sourceText(input.server_source);
+    assertHasPart(source, server_source);
     const project = normalizeProject(input.project);
     return this.state.storage.transactionSync(() => {
       if (first(this.sql.exec("select name from drafts where workspace=? and name=? union all select name from artifacts where workspace=? and name=?", workspace, name, workspace, name))) throw new Error("Destination artifact already exists; choose a new name");
@@ -285,7 +300,7 @@ export class ArtifactLibrary extends DurableObject<unknown> {
   readRange(input: { workspace: string; name: string; part?: "client" | "server"; file?: string; start_line?: number; end_line?: number }) {
     const workspace = workspaceName(input.workspace); const name = artifactName(input.name);
     const row = this.draft(workspace, name);
-    const part = input.part ?? "client";
+    const part = input.part ?? defaultPart(row);
     if (part !== "client" && part !== "server") throw new Error("part must be client or server");
     if (input.file === undefined && part === "server" && row.server_source === null) throw new Error("artifact has no server source");
     const project = this.projectStorage.read(row.project);
@@ -310,15 +325,16 @@ export class ArtifactLibrary extends DurableObject<unknown> {
 
   editDraft(input: { workspace: string; name: string; part?: "client" | "server"; file?: string; edits: ArtifactEdit[]; expected_hash?: string }) {
     const workspace = workspaceName(input.workspace); const name = artifactName(input.name);
-    const part = input.part ?? "client";
-    if (part !== "client" && part !== "server") throw new Error("part must be client or server");
+    if (input.part !== undefined && input.part !== "client" && input.part !== "server") throw new Error("part must be client or server");
     if (!Array.isArray(input.edits) || input.edits.length === 0) throw new Error("edits must be a non-empty array");
     if (input.expected_hash !== undefined && (typeof input.expected_hash !== "string" || !/^[a-f0-9]{64}$/.test(input.expected_hash))) {
       throw new Error("expected_hash must be a SHA-256 hex string");
     }
     return this.state.storage.transactionSync(() => {
       const original = this.draft(workspace, name);
+      const part = input.part ?? defaultPart(original);
       if (input.file === undefined && part === "server" && original.server_source === null) throw new Error("artifact has no server source");
+      if (input.file === undefined && part === "client" && original.source === "") throw new Error("artifact has no browser source");
       let project = this.projectStorage.read(original.project);
       const originalSelected = input.file === undefined ? (part === "client" ? original.source : original.server_source!) : projectFile(project, input.file);
       const originalHash = input.file === undefined && part === "client" ? original.source_hash : sha256(originalSelected);

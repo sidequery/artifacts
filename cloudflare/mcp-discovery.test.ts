@@ -128,7 +128,7 @@ afterAll(async () => {
   if (directory) await rm(directory, { recursive: true, force: true });
 });
 
-integrationTest("one HTTP MCP connection discovers all 53 operations and performs complete artifact, script and native app workflows", async () => {
+integrationTest("one HTTP MCP connection discovers all 54 operations and performs complete artifact, script and native app workflows", async () => {
   const listed = (await client.listTools()).tools;
   const model = listed.filter(tool => !((tool._meta?.ui as { visibility?: string[] } | undefined)?.visibility?.every(scope => scope === "app")));
   expect(model.map(tool => tool.name).sort()).toEqual([
@@ -136,7 +136,7 @@ integrationTest("one HTTP MCP connection discovers all 53 operations and perform
     "artifacts_discover", "artifacts_execute", "artifacts_query",
   ]);
   const catalog = payload(await client.callTool({ name: "artifacts_discover", arguments: { limit: 50 } }));
-  expect(catalog.total).toBe(53);
+  expect(catalog.total).toBe(54);
   const rest = payload(await client.callTool({ name: "artifacts_discover", arguments: { offset: 50, limit: 50 } }));
   expect(rest.next_offset).toBeNull();
   for (const operation of [...catalog.operations, ...rest.operations]) await inspect(operation.operation);
@@ -171,6 +171,8 @@ integrationTest("one HTTP MCP connection discovers all 53 operations and perform
   expect(JSON.stringify(schedule)).toContain("86400");
   const runs = payload(await invoke("artifact_runs", { name: "compact-artifact" }));
   expect(runs.runs.length).toBeGreaterThan(0);
+  const logs = payload(await invoke("artifact_logs", { name: "compact-artifact", run_id: runs.runs[0].id }));
+  expect(logs.logs.length).toBeGreaterThan(0);
   const upload = payload(await invoke("artifact_files", { name: "compact-artifact", request: { operation: "upload", name: "fixture.txt", size: 5, type: "text/plain" } })).result;
   expect((await fetch(upload.url, { method: "PUT", body: "hello" })).ok).toBe(true);
   const files = payload(await invoke("artifact_files", { name: "compact-artifact", request: { operation: "list" } }, "artifacts_query")).result;

@@ -7,6 +7,7 @@ import type { ArtifactHttpRequest } from "../src/httpTypes";
 import { sha256 } from "./library";
 import { scriptResponse } from "./script-service-http";
 import { scriptRuntimeConfig } from "./script-runtime";
+import { SERVER_LOGGING_MODULE } from "./server-logging";
 
 export type ScriptLog = { timestamp: string; level: string; message: string; run_id?: string };
 export type ScriptRequest = {code: string; hash: string; secrets: Record<string,string>; request: Request; trigger?: "http" | "manual" | "schedule"; run_id?: string};
@@ -20,23 +21,6 @@ export const SCRIPT_HEADER = "x-artifact-internal-script";
 
 // Each script has its own isolate and native SQLite facet. Only the explicit
 // script secrets are supplied; the application's environment is never copied.
-const logging = `import { AsyncLocalStorage } from "node:async_hooks";
-const secrets = __ARTIFACTS_SCRIPT_SECRETS__;
-export const execution = new AsyncLocalStorage();
-let logs = [];
-const clean = (value, secrets) => {
-  let message;
-  try { message = typeof value === "string" ? value : value instanceof Error ? value.message : JSON.stringify(value); } catch { message = "[unserializable]"; }
-  message = String(message);
-  for (const secret of Object.values(secrets)) if (secret) message = message.split(secret).join("[REDACTED]");
-  return message.slice(0, 2048);
-};
-for (const level of ["log", "info", "warn", "error", "debug"]) console[level] = (...args) => {
-      logs.push({run_id: execution.getStore(), timestamp: new Date().toISOString(), level, message: args.slice(0, 16).map(value => clean(value, secrets)).join(" ").slice(0, 2048)});
-      if (logs.length > 100) logs.shift();
-};
-export function takeLogs() { const result = logs; logs = []; return result; }
-`;
 const adapter = `import { DurableObject } from "cloudflare:workers";
 import { takeLogs, execution } from "./logging.js";
 import handler from "./user.js";
@@ -78,13 +62,13 @@ export class ScriptBackend extends DurableObject<Env> {
     state.storage.sql.exec("update execution_runs set status='interrupted' where status='running'");
   }
   private cacheKey(input: Omit<ScriptRequest,"request">) {
-    return sha256(JSON.stringify([this.ctx.id.toString(), input.code, input.secrets, this.runtimeConfig, adapter, logging]));
+    return sha256(JSON.stringify([this.ctx.id.toString(), input.code, input.secrets, this.runtimeConfig, adapter, SERVER_LOGGING_MODULE]));
   }
   private worker(input: Omit<ScriptRequest,"request">) {
     const hash=this.cacheKey(input);
     return this.env.LOADER.get(hash,async()=>({
       ...this.runtimeConfig,
-      mainModule:"adapter.js",modules:{"adapter.js":adapter,"logging.js":logging.replace("__ARTIFACTS_SCRIPT_SECRETS__", () => JSON.stringify(input.secrets)),"user.js":input.code},
+      mainModule:"adapter.js",modules:{"adapter.js":adapter,"logging.js":SERVER_LOGGING_MODULE.replace("__ARTIFACTS_SCRIPT_SECRETS__", () => JSON.stringify(input.secrets)),"user.js":input.code},
       env:{secrets:input.secrets},
     }));
   }

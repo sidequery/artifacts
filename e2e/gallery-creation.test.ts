@@ -104,14 +104,14 @@ test("one creation menu preserves artifact drafts and retries saved invalid host
     const create = page.getByRole("button", { name: "Create or import", exact: true });
     await create.click();
     await page.getByRole("menu").waitFor();
-    expect(await page.getByRole("menuitem").allTextContents()).toEqual(["New artifact", "New script", "New Worker app", "Import project"]);
+    expect(await page.getByRole("menuitem").allTextContents()).toEqual(["New artifact", "New endpoint", "New native Worker", "Import project"]);
     const heading = await page.locator(".library-heading").boundingBox();
     const search = await page.getByRole("searchbox").boundingBox();
     const plus = await create.boundingBox();
     expect(heading!.y + heading!.height).toBeLessThanOrEqual(search!.y);
     expect(plus!.x).toBeGreaterThan(search!.x);
     expect(plus!.x + plus!.width).toBeLessThanOrEqual(search!.x + search!.width + 4);
-    expect(await page.getByRole("button", { name: "New Worker app", exact: true }).count()).toBe(0);
+    expect(await page.getByRole("button", { name: "New native Worker", exact: true }).count()).toBe(0);
     expect(await page.getByText("Artifacts and scripts", { exact: true }).count()).toBe(0);
     await screenshot(page, "create-menu-desktop");
     await page.keyboard.press("Escape");

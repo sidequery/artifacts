@@ -220,8 +220,11 @@ app.get("/api/source", async c => {
   }
   if (c.req.query("format") === "json") return c.json(snapshot);
   c.header("Content-Type", "text/plain; charset=utf-8");
-  if (c.req.query("download") === "1") c.header("Content-Disposition", `attachment; filename="artifact.artifact.tsx"; filename*=UTF-8''${encodeURIComponent(snapshot.name + ".artifact.tsx")}`);
-  return c.body(snapshot.source);
+  // A server-only artifact's entrypoint is its server source.
+  const serverOnly = snapshot.source === "" && snapshot.server_source !== null;
+  const suffix = serverOnly ? ".artifact.server.ts" : ".artifact.tsx";
+  if (c.req.query("download") === "1") c.header("Content-Disposition", `attachment; filename="artifact${suffix}"; filename*=UTF-8''${encodeURIComponent(snapshot.name + suffix)}`);
+  return c.body(serverOnly ? snapshot.server_source! : snapshot.source);
 });
 app.get("/gallery/preview", async c => {
   const service = c.get("service");

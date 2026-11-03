@@ -30,7 +30,7 @@ The server builds on MCP Apps and advertises optional OpenAI extensions. Actual 
 
 | Surface | Purpose and boundary |
 | --- | --- |
-| Global sidebar | Open the shared Artifacts gallery: folders, search, artifacts and scripts, Preview/Source, saved revisions, Share and Remix. Worker apps open the existing product. The catalog remains permission-filtered. |
+| Global sidebar | Open the shared Artifacts gallery: folders, search, artifacts, endpoints and legacy scripts, Preview/Source, saved revisions, Share and Remix. Native Workers open the existing product. The catalog remains permission-filtered. |
 | Conversation view | Restore the explicit attached selection or choose an artifact from the library. Browsing does not attach context automatically. There is no stored host conversation identifier or separate conversation membership list. |
 | Plugin settings | Native connection settings report the actual workspace and provide an authorized connection check. Endpoint configuration stays with the host; no fake editable preference is stored. |
 | Mentions | Search accessible artifacts and scripts with workspace/kind identity; references resolve complete source projects. Mention results do not grant access. |
@@ -44,23 +44,23 @@ Tool visibility distinguishes model calls from app calls; it does not replace se
 
 ## Model tools and operation discovery
 
-Every connection advertises the same nine model tools: `artifact_guide`, `artifact_list`, `artifact_read`, `artifact_write`, `artifact_edit`, `artifact_open`, `artifacts_discover`, `artifacts_query`, and `artifacts_execute`. Hosted connections retain all 48 artifact, script, file, schedule, secret, plugin and native Worker operations. Local file connections expose their supported subset. MCP Apps also receive the existing app-only gallery and host-integration tools.
+Every connection advertises the same nine model tools: `artifact_guide`, `artifact_list`, `artifact_read`, `artifact_write`, `artifact_edit`, `artifact_open`, `artifacts_discover`, `artifacts_query`, and `artifacts_execute`. Hosted connections retain all 54 artifact, legacy script, Trash, file, schedule, log, secret, plugin and native Worker operations. Local file connections expose their supported subset. MCP Apps also receive the existing app-only gallery and host-integration tools.
 
 Call `artifacts_discover` with `query` to search concise operation summaries, with neither selector to browse a paginated catalog, or with `operation` to retrieve its original JSON Schema, annotations, dispatch recommendation and relevant guide. Set `include_docs: false` after reading that guide. Discovery does not execute authored code, unlock tools or change `tools/list`; no connection or configuration switch is required.
 
-For example, inspect a script operation:
+For example, inspect a server operation:
 
 ```json
-{"operation":"script_write"}
+{"operation":"artifact_logs"}
 ```
 
 Then call `artifacts_execute` with the discovered operation and its arguments:
 
 ```json
-{"operation":"script_write","arguments":{"name":"hello","contents":"export default { fetch() { return new Response('Hello'); } };"}}
+{"operation":"artifact_request","arguments":{"name":"hello","request":{"path":"/"}}}
 ```
 
-`artifacts_query` accepts the same envelope but enforces read-only behavior. Schedule inspection, secret-name listing and file list/download are permitted; schedule changes, secret values, uploads/deletes, backend HTTP requests, script runs and plugin calls require `artifacts_execute`. An HTTP GET to authored code still executes it. Unknown and app-only operations, recursive dispatch and arguments outside the original schema are rejected.
+`artifacts_query` accepts the same envelope but enforces read-only behavior. Schedule inspection, secret-name listing and file list/download are permitted; schedule changes, secret values, uploads/deletes, server HTTP requests, legacy script runs and plugin calls require `artifacts_execute`. An HTTP GET to authored code still executes it. Unknown and app-only operations, recursive dispatch and arguments outside the original schema are rejected.
 
 Each dispatched call enters the original authorization and validation path and returns its original result, including inline previews, diagnostics and optimistic conflicts. Existing direct operation calls remain accepted for compatibility. Host tool grants for advanced actions apply to the shared `artifacts_execute` tool; operation discovery and UI visibility do not grant access or bypass owner/team checks.
 

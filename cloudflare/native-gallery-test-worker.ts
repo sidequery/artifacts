@@ -3,6 +3,7 @@ export { ScriptLibrary } from "./scripts";
 export { ArtifactLinks } from "./links";
 export { NativeApps } from "./native-worker/controller";
 import { ManagedArtifactService } from "./managed-service";
+import { artifactRoute } from "./artifact-routes";
 import type { Env } from "./worker";
 
 export default {
@@ -12,6 +13,7 @@ export default {
     const workspace = url.searchParams.get("workspace") ?? "default";
     const service = new ManagedArtifactService(env, workspace, owner, "alice", url.origin, url.origin, { user: { subject: owner, authority: "test" }, env });
     try {
+      if (url.pathname.startsWith("/route/")) return await artifactRoute(new Request(new URL(url.pathname.slice("/route".length), url.origin), request), env) ?? new Response("No route", { status: 404 });
       if (url.pathname === "/subscribe") return service.subscribeGallery(url.searchParams.get("all") === "1");
       if (url.pathname === "/gallery") return Response.json(await service.gallery(url.searchParams.get("all") === "1", Number(url.searchParams.get("offset") ?? 0)));
       if (url.pathname === "/seed-artifact") return Response.json(await env.LIBRARIES.getByName(owner).writeDraft({ workspace, name: "report", source: "source" }));

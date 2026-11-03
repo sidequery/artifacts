@@ -38,7 +38,7 @@ test("gallery exposes server secret names and writes for artifacts and scripts w
     const errors: string[] = [];
     page.on("pageerror", error => errors.push(error.message));
     await page.goto(server.url.href);
-    for (const [name, label, kind] of [["app", "app", "artifact"], ["handler", "handler Script", "script"]] as const) {
+    for (const [name, label, kind] of [["app", "app", "artifact"], ["handler", "handler Legacy script", "script"]] as const) {
       await page.getByRole("button", { name: label, exact: true }).click();
       await page.getByRole("button", { name: "More actions", exact: true }).click();
       await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
