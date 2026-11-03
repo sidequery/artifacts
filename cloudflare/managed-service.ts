@@ -130,11 +130,17 @@ export class ManagedArtifactService {
       return text({ items, next_offset: items.length === 100 ? (args.offset as number | undefined ?? 0) + 100 : null });
     }
     if (/^(artifact|script)_(delete|undelete)$/.test(name)) {
-      const kind = name.startsWith("script_") ? "script" : "artifact";
-      const result = await this.links.setTrashed({ ...this.selection(kind, {
-        name: args.name as string, ...(typeof args.workspace === "string" ? { workspace: args.workspace } : {}),
-      }), name: args.name as string }, name.endsWith("_delete"));
-      return text({ ok: true, ...result });
+      const workspace = typeof args.workspace === "string" ? { workspace: args.workspace } : {};
+      const trash = async (kind: "artifact" | "script") => text({ ok: true, ...await this.links.setTrashed({ ...this.selection(kind, {
+        name: args.name as string, ...workspace,
+      }), name: args.name as string }, name.endsWith("_delete")) });
+      if (name.startsWith("script_")) return trash("script");
+      try { return await trash("artifact"); }
+      catch (error) {
+        // artifact_delete/undelete also reach a legacy script with that name.
+        if (!(error instanceof Error) || !/not found/.test(error.message)) throw error;
+        try { return await trash("script"); } catch { throw error; }
+      }
     }
     if (name === "artifacts_tool") return galleryAction(this, args);
     if (name === "artifacts_source") return gallerySource(this, args);
