@@ -122,8 +122,7 @@ export function AgentOnboarding({ workspace, onCreate }: { workspace: string; on
   const url = new URL("/mcp", window.location.origin);
   url.searchParams.set("workspace", workspace);
   const library = new URLSearchParams(window.location.search).get("library");
-  if (library) url.searchParams.set("library", library);
-  const prompt = "Use artifact_guide, then create a small interactive artifact in this library with artifact_write. Use a new kebab-case name and private access. Show the preview and explain how I can edit it.";
+  const prompt = `Use artifact_guide, then create a small interactive artifact with artifact_write and library_scope: "${library === "team" ? "team" : "private"}". Use a new kebab-case name and private access. Show the preview and explain how I can edit it.`;
   async function copy(value: string, label: string) {
     try { await navigator.clipboard.writeText(value); setStatus(`${label} copied`); }
     catch (error) { setStatus(message(error)); }
@@ -134,7 +133,7 @@ export function AgentOnboarding({ workspace, onCreate }: { workspace: string; on
     <button className="primary-action" type="button" onClick={onCreate}>New artifact</button>
     <section className="agent-connection" aria-labelledby="agent-connection-title">
       <h3 id="agent-connection-title">Connect an agent</h3>
-      <p>Add this MCP server to your agent, then send the starter prompt.</p>
+      <p>Add this MCP server to your agent, then send the starter prompt. One connection works with both your personal and team libraries.</p>
       <label htmlFor="agent-mcp-url">MCP server URL</label>
       <div className="onboarding-url-row">
         <input id="agent-mcp-url" aria-label="Deployment MCP URL" readOnly value={url.href} onFocus={event => event.target.select()} />

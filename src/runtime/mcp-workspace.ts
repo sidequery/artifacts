@@ -9,7 +9,7 @@ import { GalleryToolError, type GalleryTransport, type MutationResult } from "..
 import type { SourceSnapshot } from "../gallery/drafts";
 import { editableProject } from "../gallery/project-editor";
 
-export type ArtifactSelection = { name?: string; workspace?: string; version_id?: string; event_id?: string; route?: string; kind?: "artifact" | "script"; tab?: "preview" | "source" };
+export type ArtifactSelection = { name?: string; workspace?: string; library_scope?: "private" | "team"; version_id?: string; event_id?: string; route?: string; kind?: "artifact" | "script"; tab?: "preview" | "source" };
 
 /** Deep links contain authenticated selectors, never file-transfer credentials. */
 export function parseArtifactDeepLink(value: string): ArtifactSelection | null {
@@ -23,8 +23,10 @@ export function parseArtifactDeepLink(value: string): ArtifactSelection | null {
   const route = url.searchParams.get("route") ?? "/";
   const kind = url.searchParams.get("kind");
   const tab = url.searchParams.get("tab");
+  const library_scope = url.searchParams.get("library_scope");
+  if (library_scope !== null && library_scope !== "private" && library_scope !== "team") return null;
   if ((!name && !version_id) || !route.startsWith("/") || route.startsWith("//") || route.includes("\\") || (kind && !["artifact", "script"].includes(kind)) || (tab && !["preview", "source"].includes(tab))) return null;
-  return { name: version_id ? undefined : name, workspace, version_id, route, ...(kind ? { kind: kind as "artifact" | "script" } : {}), ...(tab ? { tab: tab as "preview" | "source" } : {}) };
+  return { name: version_id ? undefined : name, workspace, version_id, route, ...(library_scope ? { library_scope } : {}), ...(kind ? { kind: kind as "artifact" | "script" } : {}), ...(tab ? { tab: tab as "preview" | "source" } : {}) };
 }
 
 export async function fetchArtifactPreview(app: App, selection: ArtifactSelection): Promise<ArtifactAppPayload> {
@@ -56,16 +58,17 @@ function resultValue(result: Awaited<ReturnType<App["callServerTool"]>>) {
   return value;
 }
 
-export function createGalleryTransport(app: App): GalleryTransport {
+export function createGalleryTransport(app: App, scope?: "private" | "team"): GalleryTransport {
+  const library = scope ? { library_scope: scope } : {};
   return {
     async tool(workspace, tool, args) {
-      return resultValue(await app.callServerTool({ name: "artifacts_tool", arguments: { workspace, tool, arguments: args } }));
+      return resultValue(await app.callServerTool({ name: "artifacts_tool", arguments: { workspace, tool, arguments: args, ...library } }));
     },
     async loadSource(sourceUrl, signal) {
       signal?.throwIfAborted();
       const params = new URL(sourceUrl, "https://artifacts.invalid").searchParams;
       const selection = params.get("version_id") ? { version_id: params.get("version_id")! } : { name: params.get("name")! };
-      const result = await app.callServerTool({ name: "artifacts_source", arguments: { workspace: params.get("workspace")!, kind: params.get("kind") === "script" ? "script" : "artifact", ...selection } });
+      const result = await app.callServerTool({ name: "artifacts_source", arguments: { workspace: params.get("workspace")!, kind: params.get("kind") === "script" ? "script" : "artifact", ...selection, ...library } });
       signal?.throwIfAborted();
       const snapshot = resultValue(result) as SourceSnapshot;
       if (typeof snapshot?.source !== "string" || !snapshot.project) throw new Error("The server returned an incomplete project snapshot");
@@ -79,22 +82,49 @@ export type WorkspaceOptions = Pick<WorkspaceProps, "renderPreview" | "attach" |
 
 export function mountWorkspace(root: HTMLElement, app: App, initial: ArtifactWorkspacePayload, options: WorkspaceOptions) {
   const reactRoot = createRoot(root);
-  const transport = createGalleryTransport(app);
-  const gallery = workspaceGallery(initial);
+  let gallery = workspaceGallery(initial);
+  let scope = gallery.libraryScope;
   let current = options;
   let refreshKey = 0;
-  const search = async (query: string, offset: number) => {
-    const result = await app.callServerTool({ name: "artifacts_search", arguments: { query, offset, view: "library" } });
+  let libraryRequest = 0;
+  let disposed = false;
+  const searchScope = async (query: string, offset: number, selectedScope = scope) => {
+    const result = await app.callServerTool({ name: "artifacts_search", arguments: { query, offset, view: "library", ...(selectedScope ? { library_scope: selectedScope } : {}) } });
     if (result.isError) resultValue(result);
     const payload = (result._meta?.workspace ?? result.structuredContent?.appWorkspace) as ArtifactWorkspacePayload | undefined;
     if (!payload) throw new Error("The server returned no library catalog");
     return workspaceGallery(payload);
   };
-  const render = () => reactRoot.render(createElement(GalleryWorkspace, { initial: gallery, view: initial.view, transport, search, ...current, refreshKey }));
+  let transport = createGalleryTransport(app, scope);
+  const initialScope = scope;
+  let search = (query: string, offset: number) => searchScope(query, offset, initialScope);
+  const changeLibrary = async (selectedScope: "private" | "team", selection?: ArtifactSelection) => {
+    const generation = ++libraryRequest;
+    const page = await searchScope("", 0, selectedScope);
+    if (disposed || generation !== libraryRequest) return;
+    scope = selectedScope; gallery = page;
+    current = { ...current, selection };
+    transport = createGalleryTransport(app, scope);
+    // Capture the selected scope so requests from the old view cannot change
+    // libraries halfway through pagination or a save.
+    search = (query, offset) => searchScope(query, offset, selectedScope);
+    render();
+  };
+  const render = () => reactRoot.render(createElement(GalleryWorkspace, { key: gallery.libraryScope, initial: gallery, view: initial.view, transport, search, ...current,
+    ...(gallery.libraryScope ? { onLibraryChange: changeLibrary } : {}), refreshKey }));
   render();
+  const ready = options.selection?.library_scope && options.selection.library_scope !== scope
+    ? changeLibrary(options.selection.library_scope, options.selection) : Promise.resolve();
   return {
-    update(value: Partial<WorkspaceOptions>) { current = { ...current, ...value }; render(); },
+    ready,
+    async update(value: Partial<WorkspaceOptions>) {
+      if (value.selection?.library_scope && value.selection.library_scope !== scope) {
+        await changeLibrary(value.selection.library_scope, value.selection);
+        return;
+      }
+      current = { ...current, ...value }; render();
+    },
     refresh() { refreshKey++; render(); },
-    dispose() { reactRoot.unmount(); },
+    dispose() { disposed = true; ++libraryRequest; reactRoot.unmount(); },
   };
 }

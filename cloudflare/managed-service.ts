@@ -19,7 +19,7 @@ import { CLOUD_MCP_TOOLS } from "./tool-contract";
 import * as toolValidators from "../dist/cloudflare/tool-validators.js";
 
 const text = (value: unknown): CallToolResult => ({ content: [{ type: "text", text: JSON.stringify(value, null, 2) }] });
-type Selection = { workspace?: string; name?: string; version_id?: string; event_id?: string };
+type Selection = { workspace?: string; name?: string; version_id?: string; event_id?: string; library_scope?: "private" | "team" };
 
 /** Management requests select an owner; execution continues on immutable storage. */
 export class ManagedArtifactService {
@@ -44,6 +44,15 @@ export class ManagedArtifactService {
       this.plugins, this.fileStorage);
   }
 
+  private scoped(scope: unknown): ManagedArtifactService {
+    if (scope === undefined) return this;
+    if (scope !== "private" && scope !== "team") throw new Error("Library scope must be private or team");
+    if (scope === "private" && this.privateKey === "team") throw new Error("Service tokens manage the team library only");
+    const libraryKey = scope === "team" ? "team" : this.privateKey;
+    return libraryKey === this.libraryKey ? this : new ManagedArtifactService(this.env, this.workspace, libraryKey,
+      this.privateKey, this.origin, this.publicOrigin, this.plugins);
+  }
+
   private selection(kind: "artifact" | "script", selection: Selection): LibrarySelection {
     return { libraryKey: this.libraryKey, workspace: this.workspace, kind, ...selection };
   }
@@ -57,7 +66,24 @@ export class ManagedArtifactService {
 
   private async callSelectedTool(target: ArtifactTarget, name: string, args: Record<string, unknown>) {
     const changesGallery = /^(artifact|script)_(write|edit|restore|remix|import|open|link)$/.test(name);
-    try { return await this.physical(target).callTool(name, { ...args, workspace: target.workspace }); }
+    try {
+      const result = await this.physical(target).callTool(name, { ...args, workspace: target.workspace });
+      const scope = this.libraryKey === "team" ? "team" : "private";
+      // Both full previews and compact mutation results must reopen in the
+      // logical library, even after an item moves to different physical storage.
+      const scopedArtifact = (value: unknown) => value && typeof value === "object" ? { ...value, library_scope: scope } : value;
+      if (result._meta?.artifact) result._meta = { ...result._meta, artifact: scopedArtifact(result._meta.artifact) };
+      const content = result.structuredContent;
+      if (content) {
+        const preview = content.preview as Record<string, unknown> | undefined;
+        result.structuredContent = { ...content,
+          ...(content.artifact ? { artifact: scopedArtifact(content.artifact) } : {}),
+          ...(content.appPreview ? { appPreview: scopedArtifact(content.appPreview) } : {}),
+          ...(preview?.artifact ? { preview: { ...preview, artifact: scopedArtifact(preview.artifact) } } : {}),
+        };
+      }
+      return result;
+    }
     finally {
       // A failed compile may still have saved a draft. Resolve current ownership
       // after the operation, including writes admitted before a library move.
@@ -79,6 +105,10 @@ export class ManagedArtifactService {
   }
 
   async callTool(name: string, args: Record<string, unknown>): Promise<CallToolResult> {
+    if (args.library_scope !== undefined) {
+      const { library_scope, ...input } = args;
+      return this.scoped(library_scope).callTool(name, input);
+    }
     if (isDiscoveryTool(name)) {
       return callDiscoveryTool(CLOUD_MCP_TOOLS, name, args, async (operation, input) => {
         validateToolArguments(toolValidators, operation, input);
@@ -88,6 +118,17 @@ export class ManagedArtifactService {
       });
     }
     if (ARTIFACTS_SETTINGS_TOOLS.some(tool => tool.name === name)) return settingsTool(this, name, args);
+    if (name === "artifacts_trash") {
+      const items = await this.links.trash({ libraryKey: this.libraryKey, workspace: args.all === true ? undefined : this.workspace, offset: args.offset as number | undefined });
+      return text({ items, next_offset: items.length === 100 ? (args.offset as number | undefined ?? 0) + 100 : null });
+    }
+    if (/^(artifact|script)_(delete|undelete)$/.test(name)) {
+      const kind = name.startsWith("script_") ? "script" : "artifact";
+      const result = await this.links.setTrashed({ ...this.selection(kind, {
+        name: args.name as string, ...(typeof args.workspace === "string" ? { workspace: args.workspace } : {}),
+      }), name: args.name as string }, name.endsWith("_delete"));
+      return text({ ok: true, ...result });
+    }
     if (name === "artifacts_tool") return galleryAction(this, args);
     if (name === "artifacts_source") return gallerySource(this, args);
     if (["artifacts_library", "artifacts_working", "artifacts_search", "artifacts_mentions"].includes(name)) return workspaceTool(this, name, args);
@@ -155,8 +196,14 @@ export class ManagedArtifactService {
   }
 
   pluginCall(request: PluginRequest) { return this.physical({ libraryKey: this.libraryKey, workspace: this.workspace }).pluginCall(request); }
-  async snapshot(selection: Selection) { return (await this.service("artifact", selection)).snapshot(selection); }
-  async scriptReadSource(selection: Selection) { return (await this.service("script", selection)).scriptReadSource(selection); }
+  async snapshot(selection: Selection) {
+    const { library_scope, ...input } = selection;
+    return (await this.scoped(library_scope).service("artifact", input)).snapshot(input);
+  }
+  async scriptReadSource(selection: Selection) {
+    const { library_scope, ...input } = selection;
+    return (await this.scoped(library_scope).service("script", input)).scriptReadSource(input);
+  }
   async request(selection: Selection, request: ArtifactHttpRequest) { return (await this.service("artifact", selection)).request(selection, request); }
   async fileRequest(selection: Selection, request: ArtifactFileRequest) { return (await this.service("artifact", selection)).fileRequest(selection, request); }
   async preview(snapshot: Awaited<ReturnType<CloudArtifactService["snapshot"]>>) {
@@ -185,7 +232,7 @@ export class ManagedArtifactService {
         for (const row of rows) {
           const name = method === "listDrafts" && kind === "artifact" ? row.id! : row.name;
           const key = JSON.stringify(kind === "script" ? ["script", row.workspace, name] : [row.workspace, name]);
-          const item: GalleryArtifact = artifacts.get(key) ?? { key, name, workspace: row.workspace, working: false, kind, versions: [] };
+          const item: GalleryArtifact = artifacts.get(key) ?? { key, name, workspace: row.workspace, library_scope: this.libraryKey === "team" ? "team" : "private", working: false, kind, versions: [] };
           if (method === "listDrafts") item.working = true;
           else item.versions.push({ id: row.version_id ?? row.id!, revision: row.revision as number, createdAt: row.created_at!, reason: row.reason as string, serveCount: kind === "artifact" ? row.serve_count as number : 0 });
           artifacts.set(key, item);
@@ -205,7 +252,7 @@ export class ManagedArtifactService {
       ? await this.nativeController().list({ owner: this.libraryKey, workspace: all ? undefined : this.workspace, offset })
       : null;
     hasMore ||= workers?.next_offset != null;
-    return { libraryScope: this.libraryKey === "team" ? "team" : "private", capabilities: { editing: true, scripts: true, links: true, moves: true, nativeApps: !!this.env.NATIVE_APPS, subscriptions: true, subscriptionTransport: "events" as const }, workspace: this.workspace,
+    return { libraryScope: this.libraryKey === "team" ? "team" : "private", capabilities: { editing: true, scripts: true, links: true, moves: true, trash: true, nativeApps: !!this.env.NATIVE_APPS, subscriptions: true, subscriptionTransport: "events" as const }, workspace: this.workspace,
       ...(workers ? { workerApps: workers.apps.map(app => ({ ...app, kind: "worker" as const, key: JSON.stringify(["worker", app.workspace, app.name]) })), nativeAppProviders: workers.providers } : {}),
       artifacts: [...artifacts.values()].sort((a, b) => a.name.localeCompare(b.name) || a.workspace.localeCompare(b.workspace)), nextOffset: hasMore ? offset + 100 : null };
   }

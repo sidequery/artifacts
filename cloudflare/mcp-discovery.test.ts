@@ -128,7 +128,7 @@ afterAll(async () => {
   if (directory) await rm(directory, { recursive: true, force: true });
 });
 
-integrationTest("one HTTP MCP connection discovers all 48 operations and performs complete artifact, script and native app workflows", async () => {
+integrationTest("one HTTP MCP connection discovers all 53 operations and performs complete artifact, script and native app workflows", async () => {
   const listed = (await client.listTools()).tools;
   const model = listed.filter(tool => !((tool._meta?.ui as { visibility?: string[] } | undefined)?.visibility?.every(scope => scope === "app")));
   expect(model.map(tool => tool.name).sort()).toEqual([
@@ -136,8 +136,10 @@ integrationTest("one HTTP MCP connection discovers all 48 operations and perform
     "artifacts_discover", "artifacts_execute", "artifacts_query",
   ]);
   const catalog = payload(await client.callTool({ name: "artifacts_discover", arguments: { limit: 50 } }));
-  expect(catalog.total).toBe(48);
-  for (const operation of catalog.operations) await inspect(operation.operation);
+  expect(catalog.total).toBe(53);
+  const rest = payload(await client.callTool({ name: "artifacts_discover", arguments: { offset: 50, limit: 50 } }));
+  expect(rest.next_offset).toBeNull();
+  for (const operation of [...catalog.operations, ...rest.operations]) await inspect(operation.operation);
   const backend = await readFile(join(import.meta.dir, "../examples/counter.artifact.server.ts"), "utf8");
   const guide = await invoke("artifact_guide");
   expect(JSON.stringify(guide.content)).not.toContain("Hosted standalone scripts and root URLs");
@@ -198,6 +200,13 @@ integrationTest("one HTTP MCP connection discovers all 48 operations and perform
   const scriptArchive = payload(await invoke("script_export", { name: "compact-script" }));
   await invoke("script_import", { new_name: "compact-script-import", archive: scriptArchive });
   expect(JSON.stringify(scriptArchive)).not.toContain("script-fixture-value");
+  await invoke("artifact_delete", { name: "compact-import" });
+  await invoke("script_delete", { name: "compact-script-import" });
+  const trash = JSON.stringify(payload(await invoke("artifacts_trash")));
+  expect(trash).toContain("compact-import");
+  expect(trash).toContain("compact-script-import");
+  await invoke("artifact_undelete", { name: "compact-import" });
+  await invoke("script_undelete", { name: "compact-script-import" });
 
   await invoke("plugin_guide");
   const plugins = payload(await invoke("plugins_list"));
@@ -225,7 +234,7 @@ integrationTest("one HTTP MCP connection discovers all 48 operations and perform
     expect((await ownerFetch(appUrl)).status).toBe(404);
     expect(await (await otherFetch(appUrl + "&library=team")).text()).toBe("native-original");
   }
-  const expected = catalog.operations.map((operation: { operation: string }) => operation.operation).filter((name: string) => native || !name.startsWith("app_"));
+  const expected = [...catalog.operations, ...rest.operations].map((operation: { operation: string }) => operation.operation).filter((name: string) => native || !name.startsWith("app_"));
   expect([...seen].sort()).toEqual(expected.sort());
   expect((await client.listTools()).tools).toEqual(listed);
 }, 180_000);

@@ -276,7 +276,8 @@ test("real OIDC and MCP OAuth share per-user gallery, source and database bounda
       const body = await frame.locator("body").innerText({ timeout: 500 }).catch(() => "Preview body unavailable");
       throw new Error(`${String(error)}\nGallery: ${bobPage.url()}\nPreview: ${await bobPage.locator("iframe").getAttribute("src")}\n${body}\n${previewRequests.join("\n")}\n${celldRuntime?.logs().split("\n").filter(line => /ERROR|WARN| at |    at /.test(line)).join("\n") ?? ""}`);
     }
-    expect((await aliceContext.request.post(`${origin}/api/artifact/request`, { headers: { Origin: "https://evil.example" }, data: {} })).status()).toBe(403);
+    // A fresh connection: the preview wait can outlive the server's idle keep-alive socket.
+    expect((await aliceContext.request.post(`${origin}/api/artifact/request`, { headers: { Origin: "https://evil.example", Connection: "close" }, data: {} })).status()).toBe(403);
     const token = aliceProvider.savedTokens!.access_token;
     expect((await fetch(`${origin}/mcp`, { headers: { Authorization: `Bearer ${token.slice(0, -10)}tampered00` } })).status).toBe(401);
     const cookie = (await aliceContext.cookies()).find(cookie => cookie.name.endsWith("session_token"))!;
@@ -513,6 +514,8 @@ test("a service token manages the team library over MCP and confers nothing outs
   expect(linked.isError, JSON.stringify(linked.content)).not.toBe(true);
 
   // The service account has no personal library to fall back to.
+  expect((await service.callTool({ name: "artifact_list", arguments: { library_scope: "private" } })).isError).toBe(true);
+  expect((await service.callTool({ name: "artifacts_execute", arguments: { operation: "artifact_delete", arguments: { name: "service-report", library_scope: "private" } } })).isError).toBe(true);
   for (const query of ["workspace=test", "workspace=test&library=private"]) {
     const response = await fetch(`${origin}/mcp?${query}`, { headers: bearer });
     expect(response.status).toBe(403);

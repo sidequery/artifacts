@@ -168,7 +168,7 @@ function theme(kind?: string) {
 async function serverRequest(artifact: ArtifactAppPayload, request: ArtifactHttpRequest): Promise<ArtifactHttpResponse> {
   const result = await app.callServerTool({
     name: "artifact_request",
-    arguments: { version_id: artifact.versionId, ...(artifact.workspace ? { workspace: artifact.workspace } : {}), request },
+    arguments: { version_id: artifact.versionId, ...(artifact.workspace ? { workspace: artifact.workspace } : {}), ...(artifact.library_scope ? { library_scope: artifact.library_scope } : {}), request },
   });
   if (result.isError) {
     const message = result.content?.filter(item => item.type === "text").map(item => item.text).join("\n");
@@ -208,14 +208,14 @@ function clear() {
   updateDisplay();
 }
 
-type CompactSelection = { versionId?: string; eventId?: string; workspace?: string };
+type CompactSelection = { versionId?: string; eventId?: string; workspace?: string; library_scope?: "private" | "team" };
 type CompactToolResult = { artifact?: CompactSelection; preview?: { artifact?: CompactSelection }; appPreview?: ArtifactAppPayload; appWorkspace?: ArtifactWorkspacePayload };
 
 async function openSelection(selection: ArtifactSelection) {
   if (fileEditor?.hasUnsavedChanges()) throw new Error("Save or discard the file draft before opening another view.");
   if (!host.capabilities().serverTools) throw new Error("Browsing artifacts is unavailable in this host.");
   selectedArtifact = selection;
-  if (workspaceView) { workspaceView.update({ selection }); return; }
+  if (workspaceView) { await workspaceView.update({ selection }); return; }
   const request = ++opening;
   const artifact = await fetchArtifactPreview(app, selection);
   if (request !== opening) return;
@@ -246,7 +246,7 @@ function createArtifactBridge(artifact: ArtifactAppPayload, route?: string, prev
   bridgeVersions.set(bridge, artifact.versionId);
   if (capabilities.modelContext) bridge.onModelContext = async view => {
     const epoch = contextEpoch;
-    const snapshot = view === null ? undefined : { artifact: { name: artifact.name, workspace: artifact.workspace, version_id: artifact.versionId, revision: artifact.revision }, view };
+    const snapshot = view === null ? undefined : { artifact: { name: artifact.name, workspace: artifact.workspace, version_id: artifact.versionId, revision: artifact.revision, ...(artifact.library_scope ? { library_scope: artifact.library_scope } : {}) }, view };
     const result = await host.updateContext(snapshot ? {
       structuredContent: snapshot,
       content: [{ type: "text", text: JSON.stringify(snapshot), _meta: { "openai/title": artifact.name } }],
@@ -263,7 +263,7 @@ function createArtifactBridge(artifact: ArtifactAppPayload, route?: string, prev
   if (artifact.server === true && capabilities.serverTools) bridge.onRequest = request => serverRequest(artifact, request);
   if (artifact.files === true && capabilities.serverTools) {
     bridge.onFileRequest = async request => {
-      const result = await app.callServerTool({ name: "artifact_files", arguments: { version_id: artifact.versionId, ...(artifact.workspace ? { workspace: artifact.workspace } : {}), request } });
+      const result = await app.callServerTool({ name: "artifact_files", arguments: { version_id: artifact.versionId, ...(artifact.workspace ? { workspace: artifact.workspace } : {}), ...(artifact.library_scope ? { library_scope: artifact.library_scope } : {}), request } });
       if (result.isError) throw new Error(result.content?.filter(item => item.type === "text").map(item => item.text).join("\n") || "Artifact file request failed");
       if (!result.structuredContent || !Object.hasOwn(result.structuredContent, "result")) throw new Error("Artifact file result was missing");
       return result.structuredContent.result;
@@ -284,7 +284,7 @@ function createArtifactBridge(artifact: ArtifactAppPayload, route?: string, prev
 }
 
 function renderArtifact(artifact: ArtifactAppPayload, route?: string, preserve = false) {
-  const previous = preserve && activeArtifact?.name === artifact.name && activeArtifact?.workspace === artifact.workspace ? hostWindow.__artifacts : undefined;
+  const previous = preserve && activeArtifact?.name === artifact.name && activeArtifact?.workspace === artifact.workspace && activeArtifact?.library_scope === artifact.library_scope ? hostWindow.__artifacts : undefined;
   clear();
   activeArtifact = artifact;
   const bridge = createArtifactBridge(artifact, route, previous);
@@ -304,10 +304,10 @@ function renderArtifact(artifact: ArtifactAppPayload, route?: string, preserve =
 }
 
 async function renderWorkspacePreview(container: HTMLElement, item: GalleryArtifact, version: string, route?: string) {
-  const selection = { workspace: item.workspace, ...(version === "working" ? { name: item.name } : { version_id: version }) };
+  const selection = { workspace: item.workspace, ...(item.library_scope ? { library_scope: item.library_scope } : {}), ...(version === "working" ? { name: item.name } : { version_id: version }) };
   const artifact = await fetchArtifactPreview(app, selection);
   if (!container.isConnected) return () => {};
-  const key = JSON.stringify([item.key, version]);
+  const key = JSON.stringify([item.library_scope, item.key, version]);
   const previous = previewState.get(key);
   const bridge = createArtifactBridge(artifact, previous?.route?.path ?? route, previous);
   const preview = mountMcpPreview(container, artifact.js, bridge, message => { status.textContent = message; });
@@ -324,7 +324,7 @@ async function attachWorkspaceArtifact(item: GalleryArtifact, version: string) {
     await bridge.onModelContext({ ...bridge.modelContext, route: bridge.route?.path ?? "/" });
     return;
   }
-  const artifact = await fetchArtifactPreview(app, { workspace: item.workspace, ...(version === "working" ? { name: item.name } : { version_id: version }) });
+  const artifact = await fetchArtifactPreview(app, { workspace: item.workspace, ...(item.library_scope ? { library_scope: item.library_scope } : {}), ...(version === "working" ? { name: item.name } : { version_id: version }) });
   const temporary = createArtifactBridge(artifact);
   try {
     if (!temporary.onModelContext) throw new Error("Adding context is unavailable in this chat");
@@ -355,8 +355,10 @@ function showWorkspace(workspace: ArtifactWorkspacePayload) {
       const result = await app.openLink({ url });
       if (result.isError) throw new Error("The host could not open the link");
     },
-    ...(workspace.productUrl ? { openProduct: async () => {
-      const result = await app.openLink({ url: workspace.productUrl! });
+    ...(workspace.productUrl ? { openProduct: async (scope?: "private" | "team") => {
+      const url = new URL(workspace.productUrl!);
+      if (scope) url.searchParams.set("library", scope);
+      const result = await app.openLink({ url: url.href });
       if (result.isError) throw new Error("The host could not open the library");
     } } : {}),
     ...(host.capabilities().actions.promptAgent ? { askCreate: async () => {
@@ -364,6 +366,7 @@ function showWorkspace(workspace: ArtifactWorkspacePayload) {
       if (result.isError) throw new Error("The host could not send the request");
     } } : {}),
   });
+  void workspaceView.ready.catch(error => { status.textContent = String(error); });
   updateDisplay();
 }
 app.ontoolresult = result => {
@@ -381,7 +384,7 @@ app.ontoolresult = result => {
   }
   const selected = compact?.artifact ?? compact?.preview?.artifact;
   if (selected?.versionId && host.capabilities().serverTools) {
-    void openSelection({ workspace: selected.workspace, version_id: selected.versionId, event_id: selected.eventId }).catch(error => { status.textContent = String(error); });
+    void openSelection({ workspace: selected.workspace, version_id: selected.versionId, event_id: selected.eventId, ...(selected.library_scope ? { library_scope: selected.library_scope } : {}) }).catch(error => { status.textContent = String(error); });
     return;
   }
   const workspace = (result._meta?.workspace ?? compact?.appWorkspace) as ArtifactWorkspacePayload | undefined;

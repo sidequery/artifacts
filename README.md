@@ -112,15 +112,24 @@ https://your-artifacts-host/mcp
 ```
 
 For the local host, use `http://127.0.0.1:4786/mcp`. Remote clients use the
-configured deployment's sign-in flow. Optional `workspace` and `library` query
-parameters select a workspace or the team library.
+configured deployment's sign-in flow. One connection supports personal and team
+libraries: use `library_scope: "private"` or `library_scope: "team"` on a tool call,
+or choose the library in the MCP gallery. Optional `workspace` and `library` URL
+parameters remain supported as connection defaults.
 
 The connection advertises nine model tools: `artifact_guide`, `artifact_list`,
 `artifact_read`, `artifact_write`, `artifact_edit`, `artifact_open`,
-`artifacts_discover`, `artifacts_query`, and `artifacts_execute`. All 48 hosted
+`artifacts_discover`, `artifacts_query`, and `artifacts_execute`. All 53 hosted
 operations remain available through that same connection. Use `artifacts_discover`
 to find an operation and retrieve its exact argument schema and relevant guide;
 call it through `artifacts_query` for reads or `artifacts_execute` for actions.
+
+In the hosted gallery, **More actions → Delete** moves an artifact or script to
+recoverable **Trash**. Links stop working and schedules pause; source history,
+data, files and secrets are preserved. Restore it from Trash to recover its
+original link. Schedules stay paused until explicitly resumed. MCP exposes
+`artifact_delete`, `script_delete`, `artifacts_trash`, `artifact_undelete` and
+`script_undelete` through discovery.
 Local file connections expose their supported artifact operations through the
 same interface. No configuration switch is needed.
 

@@ -164,7 +164,22 @@ addScriptTool("app_secrets", "Atomically set/delete app secrets (null deletes); 
 addScriptTool("app_move", "Move an app between authenticated private/team libraries without changing its physical app identity, resources, secrets or revisions. The former owner immediately loses future management and HTTP access.", { ...appName, library: { type: "string", enum: ["private", "team"] } }, ["name", "library"]);
 for (const tool of CLOUD_MCP_TOOLS.filter(tool => ["app_guide", "app_list", "app_read", "app_history"].includes(tool.name))) tool.annotations = { readOnlyHint: true };
 
-for (const tool of [...ARTIFACTS_WORKSPACE_TOOLS, ARTIFACTS_FILE_TOOL]) if (!CLOUD_MCP_TOOLS.some(existing => existing.name === tool.name)) CLOUD_MCP_TOOLS.push(tool as Tool);
+for (const kind of ["artifact", "script"]) {
+  for (const action of ["delete", "undelete"]) {
+    addScriptTool(`${kind}_${action}`, action === "delete"
+      ? "Move an owned item to recoverable Trash. Disables its URL and pauses schedules. Preserves source history, state, data, files and secrets. The name and URL stay reserved. In-flight executions may finish."
+      : "Restore an item from Trash to its library with its original URL, history, data, files and secrets. Schedules remain paused until explicitly resumed.", {
+      name: { type: "string", minLength: 1 }, workspace: { type: "string", minLength: 1 },
+    }, ["name"]);
+    CLOUD_MCP_TOOLS[CLOUD_MCP_TOOLS.length - 1]!.annotations = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
+  }
+}
+addScriptTool("artifacts_trash", "List recoverable Trash in the selected library. Only the authenticated personal library or accessible team library is visible. Paginated, 100 entries per response.", {
+  ...pageProperty, all: { type: "boolean", default: false, description: "Include every workspace in this library." },
+});
+CLOUD_MCP_TOOLS[CLOUD_MCP_TOOLS.length - 1]!.annotations = { readOnlyHint: true };
+
+for (const tool of [...ARTIFACTS_WORKSPACE_TOOLS, ARTIFACTS_FILE_TOOL]) if (!CLOUD_MCP_TOOLS.some(existing => existing.name === tool.name)) CLOUD_MCP_TOOLS.push(structuredClone(tool) as Tool);
 for (const tool of CLOUD_MCP_TOOLS) {
   if (["artifact_write", "artifact_edit", "artifact_import", "artifact_remix", "artifact_restore"].includes(tool.name)) tool.inputSchema.properties!.preview = { type: "boolean", default: true, description: "Deliver the preview after saving and activating a valid revision. False suppresses delivery only; it does not roll back the mutation." };
   if (["artifact_request", "artifact_files", "artifact_read", "artifact_export"].includes(tool.name)) tool.inputSchema.properties!.workspace = { type: "string", minLength: 1, description: "Workspace in the authenticated library. Does not grant access." };
@@ -173,5 +188,15 @@ for (const tool of CLOUD_MCP_TOOLS) {
 }
 applyToolVisibility(CLOUD_MCP_TOOLS);
 CLOUD_MCP_TOOLS.push(galleryToolDefinition(CLOUD_MCP_TOOLS));
-CLOUD_MCP_TOOLS.push(...ARTIFACTS_SETTINGS_TOOLS);
-CLOUD_MCP_TOOLS.push(...DISCOVERY_TOOLS);
+CLOUD_MCP_TOOLS.push(...structuredClone(ARTIFACTS_SETTINGS_TOOLS));
+CLOUD_MCP_TOOLS.push(...structuredClone(DISCOVERY_TOOLS));
+
+// Select a library for this call, never by changing shared connection state.
+// Clone schemas borrowed from local tools before adding the hosted selector.
+for (const tool of CLOUD_MCP_TOOLS) {
+  tool.inputSchema = structuredClone(tool.inputSchema);
+  tool.inputSchema.properties = { ...tool.inputSchema.properties, library_scope: {
+    type: "string", enum: ["private", "team"],
+    description: "Personal (private) or shared team library for this call. One MCP connection supports both. Omit to use the connection URL's default. Never grants access to another user's personal library.",
+  } };
+}

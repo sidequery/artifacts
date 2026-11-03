@@ -81,7 +81,15 @@ export class ArtifactBackend extends DurableObject<BackendEnv> {
     return active ? { version_id: active.version_id, revision: active.revision, has_server: active.code !== null } : null;
   }
   runs(input: { limit?: number } = {}) { return this.execution.runs(input.limit); }
+  async setTrashed(trashed: boolean) {
+    if (trashed) await this.ctx.storage.put("trashed", true);
+    if (await this.execution.get()) await this.execution.update({ action: "pause" });
+    await this.ctx.storage.deleteAlarm();
+    if (!trashed) await this.ctx.storage.put("trashed", false);
+    // Restoration deliberately leaves schedules paused until explicitly resumed.
+  }
   async schedule(input: ArtifactScheduleInput = {}) {
+    if (input.action !== undefined && input.action !== "get" && input.action !== "pause" && await this.ctx.storage.get("trashed")) throw new Error("Item is in Trash");
     if (input.request) {
       nativeRequest(input.request);
       input = { ...input, request: { ...input.request, method: input.request.method ?? "GET", headers: input.request.headers ?? [] } };
@@ -95,6 +103,7 @@ export class ArtifactBackend extends DurableObject<BackendEnv> {
     return this.execution.update(input);
   }
   async alarm() {
+    if (await this.ctx.storage.get("trashed")) return;
     const claimed = await this.execution.claim();
     if (claimed) await this.runScheduled(claimed.schedule.request, "schedule", claimed);
   }
@@ -131,6 +140,7 @@ export class ArtifactBackend extends DurableObject<BackendEnv> {
   }
 
   private async execute(input: BackendCode, request: Request, claimedRun?: { id: string; started: number }): Promise<Response> {
+    if (await this.ctx.storage.get("trashed")) throw new Error("Item is in Trash");
     const active = input.version_id ? undefined : await this.execution.active();
     const revision = input.version_id ?? (active?.hash === input.hash ? active.version_id : input.hash);
     const run = claimedRun ?? this.execution.start(revision, input.trigger ?? "http");

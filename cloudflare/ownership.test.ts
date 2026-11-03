@@ -52,6 +52,40 @@ test("gallery subscriptions isolate owners and workspaces and follow moved physi
 
 for (const kind of ["artifact", "script"] as const) {
   const binding = kind === "artifact" ? "LIBRARIES" : "SCRIPTS";
+  test(`${kind}: Trash revokes admission and links, preserves revisions and blocks overwrites until restored by the owner`, async () => {
+    const workspace = `trash-${kind}`, name = "retained", original = { libraryKey: "trash-alice", workspace, kind, name };
+    await call(binding, original.libraryKey, "writeDraft", { workspace, name, source: "retained source" });
+    if (kind === "artifact") await call(binding, original.libraryKey, "recordServe", { workspace, name, source: "retained source", runtime: "test", mode: "live", initial_state: {} });
+    const version = (await call(binding, original.libraryKey, "history", { workspace, name }))[0];
+    const sourceBefore = await call(binding, original.libraryKey, "version", { workspace, id: version.version_id });
+    await links("move", original, "team");
+    const selection = { ...original, libraryKey: "team" };
+    const generation = await links("begin", original);
+    await links("commit", original, generation, { slug: `trash-${kind}`, access: "public" });
+    await expect(links("setTrashed", original, true)).rejects.toThrow("not found");
+    expect(await links("setTrashed", selection, true)).toMatchObject({ trashed: true });
+    expect(await links("catalog", { ...selection, method: "listDrafts" })).toEqual([]);
+    expect(await links("catalog", { ...selection, method: "history" })).toEqual([]);
+    await expect(links("admit", selection)).rejects.toThrow("not found");
+    await expect(links("admit", { ...selection, name: undefined, version_id: version.version_id })).rejects.toThrow("not found");
+    await expect(links("admit", selection, true)).rejects.toThrow("in Trash");
+    await expect(links("move", selection, "trash-alice")).rejects.toThrow("not found");
+    expect(await links("get", `trash-${kind}`)).toBeNull();
+    expect(await links("find", original)).toBeNull();
+    expect(await links("commit", original, generation, { slug: `trash-${kind}`, access: "public" })).toBeNull();
+    await expect(links("check", { ...original, name: "another" }, `trash-${kind}`)).rejects.toThrow("already in use");
+    expect(await links("trash", { libraryKey: "trash-alice" })).toEqual([]);
+    expect(await links("trash", { libraryKey: "team", workspace })).toMatchObject([{ workspace, kind, name }]);
+    await expect(links("setTrashed", original, false)).rejects.toThrow("not found");
+    expect(await links("setTrashed", selection, false)).toMatchObject({ trashed: false });
+    expect(await links("trash", { libraryKey: "team", workspace })).toEqual([]);
+    expect(await links("admit", selection)).toEqual(original);
+    expect(await call(binding, original.libraryKey, "version", { workspace, id: version.version_id })).toEqual(sourceBefore);
+    expect(await links("catalog", { ...selection, method: "history" })).toEqual([version]);
+    expect(await links("get", `trash-${kind}`)).toMatchObject({ access: "public", name });
+    // A compile admitted before deletion cannot replace the restored link.
+    expect(await links("commit", original, generation, { slug: "late", access: "public" })).toBeNull();
+  });
   test(`${kind}: moves preserve physical source, projects, history, state/secrets and links; both directions enforce ownership`, async () => {
     const workspace = `preserve-${kind}`, name = "existing", original = { libraryKey: "alice", workspace, kind, name };
     const source = "original source\n", project = { files: { "helper.ts": "export const value = 7;" }, dependencies: {}, lock: {} };
