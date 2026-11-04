@@ -36,7 +36,7 @@ describe("portable plugin package", () => {
     expect((await readdir(directory)).sort()).toEqual(["mcp.json", "plugin.json", "skills"]);
     expect(await config(directory)).toEqual({
       $schema: "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
-      mcpServers: { artifacts: { type: "stdio", command: "bunx", args: ["--bun", "@sidequery/artifacts@0.1.0", "mcp", "--dir", resolve(workspace)] } },
+      mcpServers: { artifacts: { type: "stdio", command: "bunx", args: ["--bun", "@sidequery/artifacts@0.2.0", "mcp", "--dir", resolve(workspace)] } },
     });
   });
 
