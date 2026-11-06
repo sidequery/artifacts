@@ -1,7 +1,7 @@
 {
   "name": "@sidequery/artifacts",
   "description": "Sidequery Artifacts: React artifacts with a web gallery, version history, CLI, MCP, and optional Herdr integration.",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
