@@ -1,4 +1,4 @@
-import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
+import { useEffect, useImperativeHandle, useRef, useState, type FormEvent, type ReactNode, type Ref } from "react";
 import { GalleryToolError, LinkSettings, galleryTool } from "./hosted";
 import { ProjectEditor, editableProject, emptyEditableProject, type EditableProject } from "./project-editor";
 import { SecretControls } from "./secrets";
@@ -183,6 +183,34 @@ export function NativeAppEditor({ workspace, appName, providers, onNavigate, onS
   };
   const providerAvailable = providers.includes(provider);
   const detail = (!!selected || editingNew) && providerAvailable;
+  function deploy(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void perform(async () => {
+      const result = decode<App & { ok: boolean }>(
+        await galleryTool(workspace, "app_write", {
+          name,
+          source,
+          manifest: JSON.parse(manifest),
+          project,
+          provider,
+          expected_revision: baseRevision,
+        }),
+      );
+      setDirty(false);
+      await onSaved();
+      await loadApp(name);
+      navigate(name);
+      setStatus(result.ok ? "Native Worker deployed" : "Native Worker needs reconciliation");
+    }, true);
+  }
+  const deployControls = (
+    <>
+      <button className="primary-action" disabled={busy || !valid || !provider || !parsed}>
+        Save and deploy Worker
+      </button>
+      {dirty ? <span>Unsaved changes</span> : null}
+    </>
+  );
   return (
     <Tabs.Root
       render={<section />}
@@ -203,7 +231,7 @@ export function NativeAppEditor({ workspace, appName, providers, onNavigate, onS
         .worker-workspace [role="tabpanel"][hidden] { display: none; }
         .worker-workspace .worker-source-panel { min-height: 300px; padding: 0; }
         .worker-workspace .worker-source-panel > .project-editor { height: 100%; }
-        .worker-workspace .worker-content > :is(p, .worker-empty, .script-fields, h3, button) { margin: 12px 16px; }
+        .worker-workspace .worker-content > :is(p, .worker-empty, .script-fields) { margin: 12px 16px; }
         .worker-workspace .source-actions { flex-wrap: wrap; }
         .worker-workspace input, .worker-workspace textarea { max-width: 100%; box-sizing: border-box; }
         .worker-workspace fieldset { min-width: 0; }
@@ -216,12 +244,37 @@ export function NativeAppEditor({ workspace, appName, providers, onNavigate, onS
         .worker-workspace [role="tabpanel"]:not(.worker-source-panel) { max-width: 760px; }
         .worker-workspace [role="tabpanel"] > h2 { margin: 0 0 6px; font-size: 14px; font-weight: 600; }
         .worker-workspace [role="tabpanel"] > h3 { margin: 24px 0 6px; font-size: 13px; font-weight: 600; }
-        .worker-workspace .worker-content > h3 { font-size: 13px; font-weight: 600; }
         .worker-workspace legend { padding: 0; margin-bottom: 8px; font-size: 12px; font-weight: 600; }
+        .worker-workspace [role="tabpanel"].worker-settings { padding-block: 0; }
+        .settings-section { padding-block: 24px; }
+        .settings-section + .settings-section { border-top: 1px solid var(--line); }
+        .settings-section > h2 { margin: 0 0 4px; font-size: 14px; font-weight: 600; }
+        .worker-settings .settings-description { margin-bottom: 16px; }
+        .worker-settings .secret-controls { max-width: none; padding: 0; }
+        .worker-settings .settings-feedback { margin-top: 8px; }
+        .worker-settings .settings-feedback:empty { min-height: 0; margin: 0; }
+        .worker-settings .link-settings { padding: 0; margin-top: 12px; }
+        .worker-settings .link-settings > label:has(input) { flex: 1; }
+        .worker-settings .link-settings > label input { width: 100%; }
+        .worker-settings :is(.settings-stack, .settings-section) > .settings-actions { margin-top: 0; }
+        .settings-stack { display: flex; flex-direction: column; gap: 20px; }
+        .settings-list { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-width: 0; margin: 0; padding: 0; border: 0; }
+        .worker-workspace .settings-list legend { margin-bottom: 4px; }
+        .settings-hint { margin: 0; color: var(--muted); font-size: 12px; }
+        .settings-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-self: stretch; gap: 8px; }
+        .settings-row.variable-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
+        .settings-row input { width: 100%; font-family: var(--font-mono); }
+        .settings-row :is(input, button), .settings-list > button { height: 36px; }
         .worker-manifest { display: block; width: 100%; min-height: 240px; margin-top: 6px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); font: 12px/1.6 var(--font-mono); }
         @media (max-width: 1100px) {
           .worker-workspace .detail-header { flex-wrap: wrap; gap: 8px; }
           .worker-workspace .view-control { order: 3; width: 100%; }
+        }
+        @media (max-width: 760px) {
+          .settings-row.variable-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+          .settings-row.variable-row button { grid-column: 1 / -1; justify-self: end; }
+          .settings-row :is(input, button), .settings-list > button { height: 44px; }
+          .settings-row input { font-size: 16px; }
         }
       `}</style>
       <header className="detail-header">
@@ -339,29 +392,8 @@ export function NativeAppEditor({ workspace, appName, providers, onNavigate, onS
         {detail ? (
           <>
             {selected?.error ? <p role="alert">{selected.error}</p> : null}
-            <form
-              className="source-form"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void perform(async () => {
-                  const result = decode<App & { ok: boolean }>(
-                    await galleryTool(workspace, "app_write", {
-                      name,
-                      source,
-                      manifest: JSON.parse(manifest),
-                      project,
-                      provider,
-                      expected_revision: baseRevision,
-                    }),
-                  );
-                  setDirty(false);
-                  await onSaved();
-                  await loadApp(name);
-                  navigate(name);
-                  setStatus(result.ok ? "Native Worker deployed" : "Native Worker needs reconciliation");
-                }, true);
-              }}
-            >
+            {/* Settings holds its own forms, so it cannot render inside this one. */}
+            <form className="source-form" hidden={section === "settings"} onSubmit={deploy}>
               <Tabs.Panel value="source" className="worker-source-panel" keepMounted hidden={section !== "source"}>
                 <ProjectEditor
                   key={editorKey}
@@ -402,9 +434,10 @@ export function NativeAppEditor({ workspace, appName, providers, onNavigate, onS
                   Cron triggers use UTC. Queue consumers refer to queue resource names configured in Resources.
                 </p>
                 {parsed ? (
-                  <>
+                  <div className="settings-stack">
                     <StringList
                       label="Cron schedule"
+                      placeholder="0 * * * *"
                       values={parsed.triggers?.crons ?? []}
                       disabled={busy}
                       onChange={(crons) =>
@@ -423,7 +456,7 @@ export function NativeAppEditor({ workspace, appName, providers, onNavigate, onS
                         })
                       }
                     />
-                  </>
+                  </div>
                 ) : (
                   <p>Fix the manifest JSON in Settings to edit triggers.</p>
                 )}
@@ -496,135 +529,148 @@ export function NativeAppEditor({ workspace, appName, providers, onNavigate, onS
                   <p>Save and deploy this Worker to create its first revision.</p>
                 )}
               </Tabs.Panel>
-              <Tabs.Panel value="settings">
-                <h2>Settings</h2>
-                {parsed ? (
-                  <>
-                    <div className="script-fields">
-                      <label>
-                        Entry point
-                        <input
-                          aria-label="Worker entry point"
-                          disabled={busy}
-                          value={parsed.main ?? ""}
-                          onChange={(event) => updateManifest({ main: event.target.value })}
-                        />
-                      </label>
-                      <label>
-                        Compatibility date
-                        <input
-                          aria-label="Compatibility date"
-                          type="date"
-                          disabled={busy}
-                          value={parsed.compatibility_date ?? ""}
-                          onChange={(event) => updateManifest({ compatibility_date: event.target.value })}
-                        />
-                      </label>
-                    </div>
-                    <StringList
-                      label="Compatibility flag"
-                      values={parsed.compatibility_flags ?? []}
-                      disabled={busy}
-                      onChange={(compatibility_flags) => updateManifest({ compatibility_flags })}
-                    />
-                    <VariableFields
-                      values={parsed.vars ?? {}}
-                      disabled={busy}
-                      onChange={(vars) => updateManifest({ vars })}
-                    />
-                    <StringList
-                      label="Required secret"
-                      values={parsed.secrets ?? []}
-                      disabled={busy}
-                      onChange={(secrets) => updateManifest({ secrets })}
-                    />
-                  </>
-                ) : (
-                  <p role="alert">Enter a valid manifest object below to use structured settings.</p>
-                )}
-                <details>
-                  <summary>Advanced manifest (JSON)</summary>
-                  <label>
-                    Manifest
-                    <textarea
-                      aria-label="Native Worker manifest"
-                      rows={16}
-                      value={manifest}
-                      disabled={busy}
-                      onChange={(event) => {
-                        setManifest(event.target.value);
-                        setDirty(true);
-                      }}
-                      className="worker-manifest"
-                    />
-                  </label>
-                </details>
-              </Tabs.Panel>
-              <div className="source-actions">
-                <button className="primary-action" disabled={busy || !valid || !provider || !parsed}>
-                  Save and deploy Worker
-                </button>
-                {dirty ? <span>Unsaved changes</span> : null}
-              </div>
+              {section !== "settings" ? <div className="source-actions">{deployControls}</div> : null}
             </form>
-            {section === "settings" && selected ? (
-              <>
-                <h3>Secret values</h3>
-                <SecretControls
-                  key={selected.name}
-                  workspace={workspace}
-                  name={selected.name}
-                  kind="app"
-                  onSaved={async () => {
-                    await onSaved();
-                    const saved = decode<Snapshot>(await galleryTool(workspace, "app_read", { name }));
-                    setSelected(saved);
-                  }}
-                />
-                <h3>Link</h3>
-                {library === "private" && selected.username === null ? <form className="link-settings" onSubmit={event => {
-                  event.preventDefault();
-                  void perform(async () => {
-                    const response = await fetch("/api/account/username", {
-                      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username }),
-                    });
-                    if (!response.ok) throw new Error((await response.json()).error || "Could not save username");
-                    setSelected(decode<Snapshot>(await galleryTool(workspace, "app_read", { name })));
-                    await onSaved();
-                  });
-                }}>
-                  <label>Personal username<input required maxLength={32} value={username} onChange={event => setUsername(event.target.value)} /></label>
-                  <p className="link-note">Choose once for all your personal app URLs. Previously copied links will still work.</p>
-                  <button disabled={busy} type="submit">Save username</button>
-                </form> : null}
-                <LinkSettings
-                  key={`${selected.name}:link`}
-                  artifact={{ workspace, name: selected.name, kind: "app", slug: selected.slug, access: selected.access, url: selected.url ?? appUrl }}
-                  onSaved={async () => {
-                    await onSaved();
-                    setSelected(decode<Snapshot>(await galleryTool(workspace, "app_read", { name })));
-                  }}
-                />
-                <h3>Library</h3>
-                <button
-                  disabled={busy || dirty}
-                  onClick={() =>
-                    void perform(async () => {
-                      await galleryTool(workspace, "app_move", {
-                        name,
-                        library: library === "team" ? "private" : "team",
+            <Tabs.Panel value="settings" className="worker-settings">
+              <SettingsSection title="Configuration" description="Saved with the Worker's source. Changes apply when you deploy.">
+                <form className="settings-stack" onSubmit={deploy}>
+                  {parsed ? (
+                    <>
+                      <div className="settings-fields">
+                        <label>
+                          Entry point
+                          <input
+                            aria-label="Worker entry point"
+                            disabled={busy}
+                            value={parsed.main ?? ""}
+                            onChange={(event) => updateManifest({ main: event.target.value })}
+                          />
+                        </label>
+                        <label>
+                          Compatibility date
+                          <input
+                            aria-label="Compatibility date"
+                            type="date"
+                            disabled={busy}
+                            value={parsed.compatibility_date ?? ""}
+                            onChange={(event) => updateManifest({ compatibility_date: event.target.value })}
+                          />
+                        </label>
+                      </div>
+                      <StringList
+                        label="Compatibility flag"
+                        placeholder="nodejs_compat"
+                        values={parsed.compatibility_flags ?? []}
+                        disabled={busy}
+                        onChange={(compatibility_flags) => updateManifest({ compatibility_flags })}
+                      />
+                      <VariableFields
+                        values={parsed.vars ?? {}}
+                        disabled={busy}
+                        onChange={(vars) => updateManifest({ vars })}
+                      />
+                      <StringList
+                        label="Required secret"
+                        hint={<>Names passed to the Worker on <code>env</code>. Deploying fails until each one has a value under Secrets.</>}
+                        placeholder="API_KEY"
+                        values={parsed.secrets ?? []}
+                        disabled={busy}
+                        onChange={(secrets) => updateManifest({ secrets })}
+                      />
+                    </>
+                  ) : (
+                    <p role="alert">Enter a valid manifest object below to use structured settings.</p>
+                  )}
+                  <details>
+                    <summary>Advanced manifest (JSON)</summary>
+                    <label>
+                      Manifest
+                      <textarea
+                        aria-label="Native Worker manifest"
+                        rows={16}
+                        value={manifest}
+                        disabled={busy}
+                        onChange={(event) => {
+                          setManifest(event.target.value);
+                          setDirty(true);
+                        }}
+                        className="worker-manifest"
+                      />
+                    </label>
+                  </details>
+                  <div className="settings-actions">{deployControls}</div>
+                </form>
+              </SettingsSection>
+              {selected ? (
+                <>
+                  <SettingsSection title="Secrets">
+                    <SecretControls
+                      key={selected.name}
+                      workspace={workspace}
+                      name={selected.name}
+                      kind="app"
+                      required={parsed ? (parsed.secrets ?? []).filter(Boolean) : undefined}
+                      onSaved={async () => {
+                        await onSaved();
+                        const saved = decode<Snapshot>(await galleryTool(workspace, "app_read", { name }));
+                        setSelected(saved);
+                      }}
+                    />
+                  </SettingsSection>
+                  <SettingsSection title="Sharing">
+                    {library === "private" && selected.username === null ? <form className="link-settings" onSubmit={event => {
+                      event.preventDefault();
+                      void perform(async () => {
+                        const response = await fetch("/api/account/username", {
+                          method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username }),
+                        });
+                        if (!response.ok) throw new Error((await response.json()).error || "Could not save username");
+                        setSelected(decode<Snapshot>(await galleryTool(workspace, "app_read", { name })));
+                        await onSaved();
                       });
-                      setSelected(null);
-                      setEditingNew(false);
-                      navigate(null);
-                      await onSaved();
-                    })
-                  }
-                >
-                  Move to {library === "team" ? "personal" : "team"} library
-                </button>
-              </>
-            ) : null}
+                    }}>
+                      <label>Personal username<input required maxLength={32} value={username} onChange={event => setUsername(event.target.value)} /></label>
+                      <p className="link-note">Choose once for all your personal app URLs. Previously copied links will still work.</p>
+                      <button disabled={busy} type="submit">Save username</button>
+                    </form> : null}
+                    <LinkSettings
+                      key={`${selected.name}:link`}
+                      artifact={{ workspace, name: selected.name, kind: "app", slug: selected.slug, access: selected.access, url: selected.url ?? appUrl }}
+                      onSaved={async () => {
+                        await onSaved();
+                        setSelected(decode<Snapshot>(await galleryTool(workspace, "app_read", { name })));
+                      }}
+                    />
+                  </SettingsSection>
+                  <SettingsSection
+                    title="Library"
+                    description={`In your ${library === "team" ? "team" : "personal"} library. Moving keeps its source history, resources, secrets and URL slug, but this library loses access.`}
+                  >
+                    <div className="settings-actions">
+                      <button
+                        type="button"
+                        disabled={busy || dirty}
+                        onClick={() =>
+                          void perform(async () => {
+                            await galleryTool(workspace, "app_move", {
+                              name,
+                              library: library === "team" ? "private" : "team",
+                            });
+                            setSelected(null);
+                            setEditingNew(false);
+                            navigate(null);
+                            await onSaved();
+                          })
+                        }
+                      >
+                        Move to {library === "team" ? "personal" : "team"} library
+                      </button>
+                      {dirty ? <span className="muted">Deploy or discard your changes first.</span> : null}
+                    </div>
+                  </SettingsSection>
+                </>
+              ) : null}
+            </Tabs.Panel>
           </>
         ) : null}
       </div>
@@ -677,24 +723,40 @@ function isEditableManifest(value: unknown): value is AppManifest {
     (record(value.triggers) && strings(value.triggers.crons) && strings(value.triggers.queues))
   );
 }
+function SettingsSection({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
+  return (
+    <section className="settings-section">
+      <h2>{title}</h2>
+      {description ? <p className="settings-description">{description}</p> : null}
+      {children}
+    </section>
+  );
+}
 function StringList({
   label,
+  hint,
+  placeholder,
   values,
   disabled,
   onChange,
 }: {
   label: string;
+  hint?: ReactNode;
+  placeholder?: string;
   values: string[];
   disabled: boolean;
   onChange: (values: string[]) => void;
 }) {
   return (
-    <fieldset disabled={disabled} style={{ border: 0, padding: "12px 0" }}>
+    <fieldset className="settings-list" disabled={disabled}>
       <legend>{label}s</legend>
+      {hint ? <p className="settings-hint">{hint}</p> : null}
       {values.map((value, index) => (
-        <div className="script-fields" key={index}>
+        <div className="settings-row" key={index}>
           <input
             aria-label={`${label} ${index + 1}`}
+            placeholder={placeholder}
+            spellCheck={false}
             value={value}
             onChange={(event) => onChange(values.map((item, i) => (i === index ? event.target.value : item)))}
           />
@@ -724,12 +786,15 @@ function VariableFields({
 }) {
   const rows = Object.entries(values);
   return (
-    <fieldset disabled={disabled} style={{ border: 0, padding: "12px 0" }}>
+    <fieldset className="settings-list" disabled={disabled}>
       <legend>Environment variables</legend>
+      <p className="settings-hint">Plain text, visible in the manifest. Use a secret for anything sensitive.</p>
       {rows.map(([name, value], index) => (
-        <div className="script-fields" key={index}>
+        <div className="settings-row variable-row" key={index}>
           <input
             aria-label={`Variable name ${index + 1}`}
+            placeholder="NAME"
+            spellCheck={false}
             value={name}
             onChange={(event) => {
               if (event.target.value !== name && Object.hasOwn(values, event.target.value)) return;
@@ -738,11 +803,17 @@ function VariableFields({
           />
           <input
             aria-label={`Variable value ${index + 1}`}
+            placeholder="value"
+            spellCheck={false}
             value={value}
             onChange={(event) => onChange({ ...values, [name]: event.target.value })}
           />
-          <button type="button" onClick={() => onChange(Object.fromEntries(rows.filter((_, i) => i !== index)))}>
-            Remove variable
+          <button
+            type="button"
+            aria-label={`Remove variable ${index + 1}`}
+            onClick={() => onChange(Object.fromEntries(rows.filter((_, i) => i !== index)))}
+          >
+            Remove
           </button>
         </div>
       ))}
