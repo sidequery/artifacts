@@ -4,7 +4,7 @@
     "artifacts": {
       "type": "stdio",
       "command": "bunx",
-      "args": ["--bun", "@sidequery/artifacts@0.2.0", "mcp"]
+      "args": ["--bun", "@sidequery/artifacts@0.2.1", "mcp"]
     }
   }
 }
