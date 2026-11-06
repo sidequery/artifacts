@@ -5,7 +5,7 @@ export type AuthEnvironment = {
   ACCESS_TEAM_DOMAIN?: string;
   ACCESS_AUD?: string;
 };
-export type Identity = { subject: string; authority: string };
+export type Identity = { subject: string; authority: string; email?: string };
 
 export function createAuthenticator(jwksFetch?: FetchImplementation) {
   const keySets = new Map<string, JWTVerifyGetKey>();
@@ -35,7 +35,7 @@ export function createAuthenticator(jwksFetch?: FetchImplementation) {
         requiredClaims: ["sub", "exp", "iat"],
       });
       if (typeof payload.sub !== "string" || !payload.sub) throw new Error("Missing identity");
-      return { subject: payload.sub, authority: issuer };
+      return { subject: payload.sub, authority: issuer, ...(typeof payload.email === "string" && { email: payload.email }) };
     } catch {
       return Response.json({ error: "Invalid Cloudflare Access assertion" }, { status: 401 });
     }

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { Miniflare, Response as RuntimeResponse } from "miniflare";
 import { CelldOperator } from "../scripts/native-worker/operator";
+import { legacyUsername } from "./native-worker/urls";
 
 test.skipIf(process.env.NATIVE_WORKER_CELLD !== "1")("authenticated app management retains native resources, isolates owners/secrets and recovers interrupted updates", async () => {
   const directory = await mkdtemp(join(tmpdir(), "native-controller-"));
@@ -16,9 +17,9 @@ test.skipIf(process.env.NATIVE_WORKER_CELLD !== "1")("authenticated app manageme
     const server = operator.serve({ port: 0 });
     const { publicKey, privateKey } = await generateKeyPair("RS256");
     const jwk = { ...await exportJWK(publicKey), kid: "native-controller", alg: "RS256", use: "sig" };
-    const assertion = async (subject: string) => new SignJWT({}).setProtectedHeader({ alg: "RS256", kid: jwk.kid }).setSubject(subject)
+    const assertion = async (subject: string, email: string) => new SignJWT({ email }).setProtectedHeader({ alg: "RS256", kid: jwk.kid }).setSubject(subject)
       .setIssuer("https://fixture.cloudflareaccess.com").setAudience("native-app-test").setIssuedAt().setExpirationTime("1h").sign(privateKey);
-    const alice = await assertion("alice"), bob = await assertion("bob");
+    const alice = await assertion("alice", "Nico@first.example"), bob = await assertion("bob", "nico@second.example");
     const modulesRoot = join(import.meta.dir, "../dist/worker-app");
     const modules: Record<string, { type: "esm" | "wasm" | "text"; contents: string | Uint8Array }> = {};
     for (const name of await readdir(modulesRoot)) {
@@ -71,13 +72,36 @@ test.skipIf(process.env.NATIVE_WORKER_CELLD !== "1")("authenticated app manageme
     expect(inspection.url).toBe(`${origin}/inspect`);
     for (const header of ["cookie", "authorization", "cf-access-jwt-assertion", "x-artifacts-gateway-token", "x-artifacts-target-url", "x-artifacts-app-selection"]) expect(inspection.headers[header]).toBeUndefined();
     const read = (await tool("app_read", { name: "fixture" })).payload;
+    const generatedUrl = read.management_url;
+    expect(generatedUrl).toBe(origin + "/users/nico/test/fixture/");
+    const legacy = legacyUsername(JSON.stringify(["private", "fixture.cloudflareaccess.com", "alice"]));
+    const legacyUrl = origin + "/users/" + legacy + "/test/fixture/";
+    const claim = (username: string, token: string) => fetch(origin + "/api/account/username", {
+      method: "POST", headers: { "cf-access-jwt-assertion": token, "content-type": "application/json" }, body: JSON.stringify({ username }),
+    });
+    expect((await claim("alice", alice)).status).toBe(200);
+    expect((await claim("nico", bob)).status).toBe(409);
+    expect((await claim("alice", bob)).status).toBe(409);
+    expect((await claim("renamed", alice)).status).toBe(409);
+    const personalUrl = (await tool("app_read", { name: "fixture" })).payload.management_url;
+    expect(personalUrl).toBe(origin + "/users/alice/test/fixture/");
+    for (const url of [generatedUrl, personalUrl, legacyUrl]) {
+      expect((await fetch(url + "inspect", { headers: { "cf-access-jwt-assertion": alice } })).status).toBe(200);
+    }
     expect(JSON.stringify(read)).not.toContain("app-fixture-secret"); expect(JSON.stringify(read)).not.toContain(operatorToken);
     const original = read.active_revision;
     expect((await tool("app_read", { name: "fixture" }, bob)).response.status).toBe(404);
     expect((await invoke("fixture", bob)).status).toBe(404);
     await tool("app_write", { name: "fixture", source, manifest, provider: "celld-local" }, bob);
+    const bobUrl = (await tool("app_read", { name: "fixture" }, bob)).payload.management_url;
+    expect(bobUrl).toBe(origin + "/users/nico2/test/fixture/");
+    const newEmail = await assertion("bob", "different@second.example");
+    expect((await tool("app_read", { name: "fixture" }, newEmail)).payload.management_url).toBe(bobUrl);
     await tool("app_secrets", { name: "fixture", secrets: { API_TOKEN: "bob-fixture-secret" } }, bob);
     expect(await (await invoke("fixture", bob)).json()).toMatchObject({ count: 1, visits: 1 });
+    for (const url of [generatedUrl, personalUrl, legacyUrl]) {
+      expect((await fetch(url, { headers: { "cf-access-jwt-assertion": bob } })).status).toBe(404);
+    }
     const renamed = structuredClone(manifest); renamed.bindings.COUNTERS.class_name = "RenamedCounter";
     expect((await tool("app_write", { name: "fixture", source: source.replaceAll("Counter", "RenamedCounter"), manifest: renamed, expected_revision: read.revision_token })).result.isError).toBe(false);
     expect(await (await invoke()).json()).toMatchObject({ count: 2, visits: 2 });
@@ -106,6 +130,19 @@ test.skipIf(process.env.NATIVE_WORKER_CELLD !== "1")("authenticated app manageme
     expect((await tool("app_read", { name: "fixture" })).response.status).toBe(404);
     expect((await invoke()).status).toBe(404);
     expect(await (await invoke("fixture", bob, "/", "team")).json()).toMatchObject({ count: 6, visits: 6 });
+    const teamUrl = `${origin}/team/test/fixture`;
+    expect((await tool("app_read", { name: "fixture" }, bob, "team")).payload.management_url).toBe(teamUrl + "/");
+    for (const slug of ["team", "users"]) {
+      expect((await tool("artifact_link", { kind: "app", name: "fixture", slug }, bob, "team")).response.status).toBe(400);
+    }
+    expect((await fetch(teamUrl + "/")).status).toBe(401);
+    const teamHeaders = { "cf-access-jwt-assertion": bob };
+    const redirect = await fetch(teamUrl, { redirect: "manual", headers: teamHeaders });
+    expect(redirect.status).toBe(308);
+    expect(new URL(redirect.headers.get("location")!, origin).href).toBe(teamUrl + "/");
+    const query = "?library=app-filter&workspace=app-view";
+    const nested = await fetch(teamUrl + "/inspect" + query, { headers: teamHeaders });
+    expect(await nested.json()).toMatchObject({ url: origin + "/inspect" + query });
     expect((await tool("app_secrets", { name: "fixture" }, bob, "team")).payload.names).toEqual(["API_TOKEN"]);
     // Reusing the former logical name must allocate a new physical app and fresh storage.
     await tool("app_write", { name: "fixture", source, manifest, provider: "celld-local", expected_revision: null });

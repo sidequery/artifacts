@@ -31,7 +31,7 @@ export async function identify(request: Request, env: Env): Promise<{ privateKey
     return { privateKey: JSON.stringify(["private", "better-auth", user.id]), user: { subject: user.id, authority: "better-auth" } };
   }
   const identity = await authenticate(request, env);
-  return identity instanceof Response ? identity : { privateKey: JSON.stringify(["private", env.ACCESS_TEAM_DOMAIN ?? "local", identity.subject]), user: identity };
+  return identity instanceof Response ? identity : { privateKey: JSON.stringify(["private", env.ACCESS_TEAM_DOMAIN ?? "local", identity.subject]), user: { subject: identity.subject, authority: identity.authority } };
 }
 const scriptJson = (value: unknown) => JSON.stringify(value).replaceAll("<", "\\u003c");
 function html(body: string, policy: string, head: boolean): Response {

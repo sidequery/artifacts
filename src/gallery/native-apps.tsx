@@ -18,6 +18,8 @@ type App = {
   slug?: string;
   access?: "private" | "public";
   url?: string;
+  management_url?: string;
+  username?: string | null;
 };
 type Snapshot = App & { source: string; manifest: AppManifest; project: EditableProject };
 const initialManifest = {
@@ -76,6 +78,7 @@ export function NativeAppEditor({ workspace, appName, providers, onNavigate, onS
   const [revisions, setRevisions] = useState<{ id: string; created_at: string }[]>([]),
     [restoreId, setRestoreId] = useState("");
   const [editorKey, setEditorKey] = useState(0);
+  const [username, setUsername] = useState("");
   const library = new URLSearchParams(window.location.search).get("library") === "team" ? "team" : "private";
   const allowLeave = () => !dirty || window.confirm("Discard unsaved native Worker changes?");
   useImperativeHandle(ref, () => ({ canLeave: () => !busy && allowLeave() }));
@@ -164,15 +167,9 @@ export function NativeAppEditor({ workspace, appName, providers, onNavigate, onS
     setRevisions(revisions);
     setRestoreId(revisions[0]?.id ?? "");
   }
-  const appUrl =
-    selected?.status === "active"
-      ? (() => {
-          const params = new URLSearchParams({ workspace });
-          const library = new URLSearchParams(window.location.search).get("library");
-          if (library) params.set("library", library);
-          return `/apps/${encodeURIComponent(selected.name)}/?${params}`;
-        })()
-      : null;
+  const appUrl = selected?.status === "active"
+    ? selected.url ?? selected.management_url
+    : undefined;
   let parsed: AppManifest | null = null;
   try {
     const value = JSON.parse(manifest);
@@ -235,7 +232,7 @@ export function NativeAppEditor({ workspace, appName, providers, onNavigate, onS
         {detail ? <Tabs.List aria-label="Native Worker sections" className="view-control" activateOnFocus>
           {workerSections.map(tab => <Tabs.Tab key={tab} value={tab} type="button">{tab[0]!.toUpperCase() + tab.slice(1)}</Tabs.Tab>)}
         </Tabs.List> : null}
-        {appUrl ? <div className="detail-actions"><a className="download-link open-link" aria-label="Open private app" href={appUrl} target="_blank" rel="noopener">Open<span aria-hidden="true">↗</span></a></div> : null}
+        {appUrl ? <div className="detail-actions"><a className="download-link open-link" aria-label="Open app" href={appUrl} target="_blank" rel="noopener">Open<span aria-hidden="true">↗</span></a></div> : null}
       </header>
       <div className="worker-content">
         {detail ? (
@@ -585,9 +582,24 @@ export function NativeAppEditor({ workspace, appName, providers, onNavigate, onS
                   }}
                 />
                 <h3>Link</h3>
+                {library === "private" && selected.username === null ? <form className="link-settings" onSubmit={event => {
+                  event.preventDefault();
+                  void perform(async () => {
+                    const response = await fetch("/api/account/username", {
+                      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username }),
+                    });
+                    if (!response.ok) throw new Error((await response.json()).error || "Could not save username");
+                    setSelected(decode<Snapshot>(await galleryTool(workspace, "app_read", { name })));
+                    await onSaved();
+                  });
+                }}>
+                  <label>Personal username<input required maxLength={32} value={username} onChange={event => setUsername(event.target.value)} /></label>
+                  <p className="link-note">Choose once for all your personal app URLs. Previously copied links will still work.</p>
+                  <button disabled={busy} type="submit">Save username</button>
+                </form> : null}
                 <LinkSettings
                   key={`${selected.name}:link`}
-                  artifact={{ workspace, name: selected.name, kind: "app", slug: selected.slug, access: selected.access, url: selected.url }}
+                  artifact={{ workspace, name: selected.name, kind: "app", slug: selected.slug, access: selected.access, url: selected.url ?? appUrl }}
                   onSaved={async () => {
                     await onSaved();
                     setSelected(decode<Snapshot>(await galleryTool(workspace, "app_read", { name })));
