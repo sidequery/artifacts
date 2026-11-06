@@ -2,7 +2,7 @@ import { publicOrigin } from "./public-origin";
 import { Hono } from "hono";
 import type { DurableObjectNamespace, Fetcher } from "@cloudflare/workers-types";
 import { ArtifactLibrary } from "./library";
-import { authenticate, type AuthEnvironment } from "./auth";
+import { authenticate, type AuthEnvironment, type Identity } from "./auth";
 // esbuild 0.28.1 must initialize Better Auth's shared Zod module before
 // the MCP SDK constructs its top-level schemas, including through managed
 // dispatch's tool registry (Zod 4.5.4).
@@ -26,6 +26,7 @@ import { galleryEvents } from "./gallery-events";
 import { ScriptLibrary } from "./scripts";
 import { ScriptBackend } from "./script-backend";
 import { NativeApps, type NativeEnvironment } from "./native-worker/controller";
+import { matchNativeAppPath, workspaceFromPath } from "./native-worker/urls";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { FLEET_PUBLICATION_VAR } from "./native-worker/fleet-contract";
 import { artifactRoute } from "./artifact-routes";
@@ -88,13 +89,16 @@ for (const path of ["/api/artifact/files/transfer/:object/:token", "/api/canvas/
   return c.env.FILE_BACKENDS.get(id).fetch(c.req.raw);
 });
 app.use("*", async (c, next) => {
-  const artifactOperation = artifactRoute(c.req.raw, c.env);
-  c.executionCtx.waitUntil(artifactOperation);
-  const artifact = await artifactOperation;
-  if (artifact) return artifact;
+  const url = new URL(c.req.url);
+  const appPath = matchNativeAppPath(url.pathname);
+  if (!appPath) {
+    const artifactOperation = artifactRoute(c.req.raw, c.env);
+    c.executionCtx.waitUntil(artifactOperation);
+    const artifact = await artifactOperation;
+    if (artifact) return artifact;
+  }
   c.header("Cache-Control", "private, no-store");
   c.header("X-Content-Type-Options", "nosniff");
-  const url = new URL(c.req.url);
   const origin = c.req.header("Origin");
   if (origin && origin !== url.origin) return c.json({ error: "Origin is not allowed" }, 403);
   if (c.env.AUTH_MODE && !["access", "better-auth"].includes(c.env.AUTH_MODE)) return c.json({ error: "AUTH_MODE must be access or better-auth" }, 503);
@@ -103,13 +107,13 @@ app.use("*", async (c, next) => {
   const serviceAccount = c.env.AUTH_MODE === "better-auth" && url.pathname === "/mcp" ? servicePrincipal(c.req.header("Authorization"), c.env) : null;
   const user = c.env.AUTH_MODE === "better-auth" && !serviceAccount ? await authenticateBetterAuth(c.req.raw, c.env) : null;
   if (user instanceof Response) return user;
-  const identity = serviceAccount ? { subject: serviceAccount.name, authority: SERVICE_TOKEN_AUTHORITY }
-    : user ? { subject: user.id, authority: "better-auth" } : await authenticate(c.req.raw, c.env);
+  const identity: Identity | Response = serviceAccount ? { subject: serviceAccount.name, authority: SERVICE_TOKEN_AUTHORITY }
+    : user ? { subject: user.id, authority: "better-auth", email: user.email } : await authenticate(c.req.raw, c.env);
   if (identity instanceof Response) return identity;
   c.set("user", user);
-  const workspace = (url.searchParams.get("workspace") ?? c.env.DEFAULT_WORKSPACE ?? "default").trim();
+  const workspace = (appPath ? workspaceFromPath(appPath.workspace!) : url.searchParams.get("workspace") ?? c.env.DEFAULT_WORKSPACE ?? "default").trim();
   if (!workspace || workspace.includes("\0") || new TextEncoder().encode(workspace).byteLength > 4096) return c.json({ error: "Invalid workspace" }, 400);
-  const libraryScope = url.searchParams.get("library") ?? "private";
+  const libraryScope = appPath ? (appPath.username ? "private" : "team") : url.searchParams.get("library") ?? "private";
   if (libraryScope !== "private" && libraryScope !== "team") return c.json({ error: "Library must be private or team" }, 400);
   // Nobody can open a service account's personal library, so it has none: it
   // manages the team library, and a "private" move destination resolves there
@@ -122,7 +126,18 @@ app.use("*", async (c, next) => {
     : JSON.stringify(["private", c.env.ACCESS_TEAM_DOMAIN ?? "local", identity.subject]);
   const libraryKey = libraryScope === "team" ? "team" : privateKey;
   c.set("libraryScope", libraryScope);
-  c.set("service", new ManagedArtifactService(c.env, workspace, libraryKey, privateKey, url.origin, publicOrigin(c.req.url, c.env.ARTIFACTS_PUBLIC_ORIGIN), { user: identity, env: c.env }));
+  const service = new ManagedArtifactService(c.env, workspace, libraryKey, privateKey, url.origin, publicOrigin(c.req.url, c.env.ARTIFACTS_PUBLIC_ORIGIN),
+    { user: { subject: identity.subject, authority: identity.authority }, env: c.env }, identity.email);
+  if (appPath) {
+    if (appPath.username && !await service.ownsUsername(appPath.username)) return c.notFound();
+    if (!appPath.path) {
+      url.pathname += "/";
+      return c.redirect(url.pathname + url.search, 308);
+    }
+    url.pathname = appPath.path;
+    return service.nativeFetch(decodeURIComponent(appPath.name!), new Request(url, c.req.raw));
+  }
+  c.set("service", service);
   // Compilation uses shared isolate resources. Let an admitted operation finish
   // after a client disconnects rather than abandoning its native compiler I/O.
   const operation = next();
@@ -132,6 +147,13 @@ app.use("*", async (c, next) => {
 app.get("/api/session", c => {
   const user = c.get("user");
   return c.json({ authMode: user ? "better-auth" : "access", user: user ? { id: user.id, name: user.name, email: user.email } : null });
+});
+app.post("/api/account/username", async c => {
+  if (!c.req.header("content-type")?.startsWith("application/json")) return c.json({ error: "Expected JSON" }, 415);
+  const input = JSON.parse(await readRequestText(c.req.raw, 512));
+  if (typeof input?.username !== "string") return c.json({ error: "Username is required" }, 400);
+  const claimed = await c.get("service").claimUsername(input.username);
+  return claimed ? c.json({ username: input.username }) : c.json({ error: "Username is taken or your account already has one" }, 409);
 });
 for (const path of ["/apps/:name", "/apps/:name/*"]) app.all(path, c => {
   const url = new URL(c.req.url);

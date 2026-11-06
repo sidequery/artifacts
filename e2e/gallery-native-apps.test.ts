@@ -8,6 +8,8 @@ test("Workers share the library folders, search, selection and mobile navigation
   const js = await build.outputs[0]!.text();
   const calls: { workspace: string; name: string; arguments: Record<string, unknown> }[] = [];
   const workers = ["default", "Jobs"].map(workspace => ({
+    management_url: `/team/${workspace}/example/`,
+    ...(workspace === "default" ? { slug: "runner-status", url: "/runner-status" } : {}),
     key: JSON.stringify(["worker", workspace, "example"]), workspace, kind: "worker", name: "example", provider: "cloudflare", status: "active", revision_token: "a".repeat(64),
   }));
   const server = Bun.serve({ port: 0, hostname: "127.0.0.1", async fetch(request) {
@@ -33,6 +35,7 @@ test("Workers share the library folders, search, selection and mobile navigation
         manifest: { main: "worker.ts", compatibility_date: "2026-09-06" }, project: { files: {}, dependencies: {}, lock: {} },
       } });
       if (call.name === "app_history") return Response.json({ structuredContent: { revisions: [], next_offset: null } });
+      if (call.name === "app_secrets" && !call.arguments.secrets) return Response.json({ structuredContent: { names: [] } });
       throw new Error(`Unexpected tool ${call.name}`);
     }
     return new Response(galleryHtml(), { headers: { "content-type": "text/html" } });
@@ -43,7 +46,7 @@ test("Workers share the library folders, search, selection and mobile navigation
     page.setDefaultTimeout(5000);
     const errors: string[] = [];
     page.on("pageerror", error => errors.push(error.message));
-    await page.goto(server.url.href);
+    await page.goto(new URL("?library=team", server.url).href);
     const library = page.getByRole("complementary");
     const worker = library.getByTitle("Jobs/example", { exact: true });
     const otherWorker = library.getByTitle("default/example", { exact: true });
@@ -72,6 +75,10 @@ test("Workers share the library folders, search, selection and mobile navigation
     const source = panel.getByRole("textbox", { name: "worker.ts", exact: true });
     await source.waitFor();
     expect(await source.innerText()).toContain('"Jobs"');
+    expect(await panel.getByRole("link", { name: "Open app" }).getAttribute("href")).toBe("/team/Jobs/example/");
+    await panel.getByRole("tab", { name: "Settings", exact: true }).click();
+    expect(await panel.getByLabel("Share link").inputValue()).toBe(new URL("/team/Jobs/example/", server.url).href);
+    await panel.getByRole("tab", { name: "Source", exact: true }).click();
     expect(await library.isVisible()).toBe(true);
     expect(await worker.getAttribute("aria-current")).toBe("true");
     expect(await otherWorker.getAttribute("aria-current")).toBeNull();
@@ -105,9 +112,9 @@ test("Workers share the library folders, search, selection and mobile navigation
     await otherWorker.click();
     await panel.waitFor();
     expect(await source.innerText()).toContain("mobile draft");
-    expect(await panel.getByRole("link", { name: "Open private app" }).isVisible()).toBe(true);
+    expect(await panel.getByRole("link", { name: "Open app" }).getAttribute("href")).toBe("/runner-status");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    expect(calls.every(call => ["app_read", "app_history"].includes(call.name))).toBe(true);
+    expect(calls.every(call => ["app_read", "app_history", "app_secrets"].includes(call.name))).toBe(true);
     expect(errors).toEqual([]);
   } finally { await browser.close(); server.stop(true); }
 }, 30000);
@@ -136,6 +143,11 @@ test("Worker gallery deploys drafts, manages revisions/secrets and preserves edi
       const url = new URL(request.url);
       if (url.pathname === "/gallery.js") return new Response(js, { headers: { "content-type": "text/javascript" } });
       if (url.pathname === "/api/session") return Response.json({});
+      if (url.pathname === "/api/account/username" && saved) {
+        saved.username = (await request.json()).username;
+        saved.management_url = `/users/${saved.username}/test/example/`;
+        return Response.json({ username: saved.username });
+      }
       if (url.pathname === "/api/gallery")
         return Response.json({
           workspace: "test",
@@ -159,6 +171,7 @@ test("Worker gallery deploys drafts, manages revisions/secrets and preserves edi
                 true,
               );
             saved = {
+              username: saved?.username ?? null, management_url: saved?.management_url ?? "/users/user-generated/test/example/",
               name: call.arguments.name,
               provider: "cloudflare",
               status: "active",
@@ -289,8 +302,8 @@ test("Worker gallery deploys drafts, manages revisions/secrets and preserves edi
     await library.getByTitle("test/example", { exact: true }).waitFor();
     expect(await library.getByTitle("test/example", { exact: true }).getAttribute("aria-current")).toBe("true");
     expect(calls.filter((call) => call.name === "app_write").at(-1)!.arguments.expected_revision).toBe(firstToken);
-    expect(await panel.getByRole("link", { name: "Open private app" }).getAttribute("href")).toBe(
-      "/apps/example/?workspace=test",
+    expect(await panel.getByRole("link", { name: "Open app" }).getAttribute("href")).toBe(
+      "/users/user-generated/test/example/",
     );
     // Another editor saves a newer project after this panel loaded the first token.
     saved!.revision_token = newerToken;
@@ -318,6 +331,11 @@ test("Worker gallery deploys drafts, manages revisions/secrets and preserves edi
     expect(new URL(page.url()).searchParams.get("app")).toBe("example");
     expect(new URL(page.url()).searchParams.get("appTab")).toBe("deployments");
     await panel.getByRole("tab", { name: "Settings", exact: true }).click();
+    await panel.getByLabel("Personal username").fill("nico");
+    await panel.getByRole("button", { name: "Save username" }).click();
+    await panel.getByLabel("Personal username").waitFor({ state: "hidden" });
+    expect(await panel.getByLabel("Share link").inputValue()).toBe(new URL("/users/nico/test/example/", server.url).href);
+    expect(await panel.getByRole("link", { name: "Open app" }).getAttribute("href")).toBe("/users/nico/test/example/");
     const settings = panel.getByRole("tabpanel", { name: "Settings", exact: true });
     const secretRows = settings.getByRole("list", { name: "Secret names", exact: true }).getByRole("listitem");
     await secretRows.filter({ hasText: "TOKEN" }).getByText("Needs a value", { exact: true }).waitFor();

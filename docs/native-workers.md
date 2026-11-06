@@ -17,15 +17,20 @@ Native Workers deploy ordinary Cloudflare Worker modules with their default hand
 
 An app belongs to a private or team library and a workspace. Its UUID permanently owns provider resources; source revisions, export names, logical library moves and binding names do not change those identities.
 
-Give a native Worker a root URL like any other artifact: use **Link** under its **Settings** in the gallery, or `artifact_link({kind:"app",name,slug,access})`. Slugs share the deployment-wide namespace with artifacts. Private links admit the app's current library, following it across library moves; public links admit any caller, and the app can implement its own authentication. The app receives paths relative to the slug, so `/my-app/jobs` arrives as `/jobs`. `app_read` and `app_list` report the link's `slug`, `access` and `url`.
+Give a native Worker a root URL like any other artifact: use **Sharing** under its **Settings** in the gallery, or `artifact_link({kind:"app",name,slug,access})`. Slugs share the deployment-wide namespace with artifacts. Private links admit the app's current library, following it across library moves; public links admit any caller, and the app can implement its own authentication. The app receives paths relative to the slug, so `/my-app/jobs` arrives as `/jobs`. `app_read` and `app_list` report the link's `slug`, `access` and `url`.
 
 Every app also keeps its management URL, which is always private:
 
 ```text
-/apps/my-app/?workspace=default&library=private
+/users/nico/default/my-app/
+/team/research/my-app/
 ```
 
-Both routes remove management credentials/cookies before proxying and strip response cookies. The app receives its app-relative path and deployment origin. HTTP bodies stream and have no browser/MCP envelope limit. Management URLs must include their workspace/library selectors on subsequent requests; clients should preserve these selectors when constructing links. Native Workers have no iframe application viewer.
+Open and **Settings → Sharing** use the saved slug when one exists. Otherwise they use the app's authenticated `management_url`, also returned by `app_read`, `app_write`, and `app_list`. A team link works for signed-in teammates. A personal link works only for its owner, even if the viewer has an app with the same name. Personal usernames default to the lowercase part of the sign-in email before the @: for example, `nico@example.com` gets `nico`, then another Nico gets `nico2` if that name is free. If the sign-in provides no usable email prefix, the base is `user`. The assigned name stays with the account if the email changes. You can choose a different permanent username in a personal app's **Settings → Sharing**; previously copied links still work.
+
+Relative links keep the same workspace and library, and query parameters belong to the app. Older `/apps/<name>/?workspace=…&library=…` URLs still work. The `users` and `team` root slugs can no longer be claimed. On deployments that already use either slug, the root link remains, but paths matching the new app URL shapes now route to authenticated apps.
+
+Both routes remove management credentials/cookies before proxying and strip response cookies. The app receives its app-relative path and deployment origin. HTTP bodies stream and have no browser/MCP envelope limit. Native Workers have no iframe application viewer.
 
 ## Manifest and source
 
