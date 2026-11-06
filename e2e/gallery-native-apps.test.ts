@@ -128,6 +128,7 @@ test("Worker gallery deploys drafts, manages revisions/secrets and preserves edi
   let failFirst = true;
   let failRestore = true;
   let failReconcile = true;
+  let secretNames: string[] = [];
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
@@ -204,7 +205,8 @@ test("Worker gallery deploys drafts, manages revisions/secrets and preserves edi
             saved!.status = "active";
             return result({ ...saved, ok: true });
           case "app_secrets":
-            return result({ names: ["TOKEN"] });
+            if (call.arguments.secrets) secretNames = ["TOKEN", "UNDECLARED"];
+            return result({ names: secretNames });
           case "app_move":
             saved = null;
             return result({ ok: true });
@@ -316,12 +318,25 @@ test("Worker gallery deploys drafts, manages revisions/secrets and preserves edi
     expect(new URL(page.url()).searchParams.get("app")).toBe("example");
     expect(new URL(page.url()).searchParams.get("appTab")).toBe("deployments");
     await panel.getByRole("tab", { name: "Settings", exact: true }).click();
-    await panel.getByLabel("Secret name", { exact: true }).fill("TOKEN");
+    const settings = panel.getByRole("tabpanel", { name: "Settings", exact: true });
+    const secretRows = settings.getByRole("list", { name: "Secret names", exact: true }).getByRole("listitem");
+    await secretRows.filter({ hasText: "TOKEN" }).getByText("Needs a value", { exact: true }).waitFor();
+    await secretRows.filter({ hasText: "TOKEN" }).getByRole("button", { name: "Set value", exact: true }).click();
+    expect(await panel.getByLabel("Secret name", { exact: true }).inputValue()).toBe("TOKEN");
+    expect(await panel.getByLabel("Secret value", { exact: true }).evaluate((input) => input === document.activeElement)).toBe(true);
+    // Sections that save on their own sit inside the panel, below the deploy action that does not cover them.
+    const deployBox = await settings.getByRole("button", { name: "Save and deploy Worker", exact: true }).boundingBox();
+    for (const heading of ["Secrets", "Sharing", "Library"]) {
+      const headingBox = await settings.getByRole("heading", { name: heading, exact: true }).boundingBox();
+      expect(headingBox!.y).toBeGreaterThan(deployBox!.y);
+    }
     await panel.getByLabel("Secret value", { exact: true }).fill("secret-fixture-value");
     const writesBeforeSecret = calls.filter((call) => call.name === "app_write").length;
     await panel.getByRole("button", { name: "Save secret", exact: true }).click();
     await panel.getByText("Secret saved", { exact: true }).waitFor();
     expect(await panel.getByLabel("Secret value", { exact: true }).inputValue()).toBe("");
+    expect(await settings.getByText("Needs a value", { exact: true }).count()).toBe(0);
+    await secretRows.filter({ hasText: "UNDECLARED" }).getByText("Not passed to the Worker", { exact: true }).waitFor();
     expect(calls.filter((call) => call.name === "app_write").length).toBe(writesBeforeSecret);
     expect(await panel.locator(".cm-content").innerText()).toContain("local edit");
     await panel.getByRole("button", { name: "Save and deploy Worker", exact: true }).click();

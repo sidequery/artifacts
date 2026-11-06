@@ -117,6 +117,7 @@ export const galleryStyles = `
   .link-note { flex-basis: 100%; margin: 0; color: var(--muted); font-size: 12px; }
   .link-settings [role="status"] { align-self: center; }
   .link-settings .muted { font-size: 12px; }
+  .link-settings > p { flex-basis: 100%; margin: 0; }
   .script-panel { display: flex; flex-direction: column; flex: 1; width: 100%; min-width: 0; min-height: 0; overflow: hidden; }
   .source-form { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
   .source-form > .script-fields { padding: 12px 16px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
@@ -299,6 +300,8 @@ export const galleryStyles = `
   .secret-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; padding: 8px 12px; }
   .secret-list li + li { border-top: 1px solid var(--line); }
   .secret-list code { min-width: 0; overflow-wrap: anywhere; font-size: 12px; }
+  .secret-name { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; min-width: 0; }
+  .secret-state { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
   .secret-list button { height: 28px; min-height: 28px; font-size: 12px; }
   .secret-controls fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
   .secret-controls legend { padding: 0; margin-bottom: 12px; font-size: 12px; font-weight: 600; }
