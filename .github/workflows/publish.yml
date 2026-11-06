@@ -68,4 +68,5 @@ jobs:
           name: npm-package
           path: release
       # npm CLI performs the OIDC exchange. No NPM_TOKEN or NODE_AUTH_TOKEN.
-      - run: npm publish ./release/artifacts.tgz --access public --ignore-scripts
+      # A failed exchange is only logged at verbose level; otherwise it appears as ENEEDAUTH.
+      - run: npm publish ./release/artifacts.tgz --access public --ignore-scripts --loglevel verbose

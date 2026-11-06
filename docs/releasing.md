@@ -16,6 +16,33 @@ Only the publish job can request an OIDC token. Bun handles installation, builds
 and tests; Node 24's npm CLI handles the OIDC publish exchange. No registry token
 is stored in GitHub or 1Password for routine releases.
 
+### Known blocker: npm rejects this repository's OIDC subject
+
+The publish job currently fails with `ENEEDAUTH`, even though the trusted publisher
+below is configured correctly. npm's token exchange returns
+`404 OIDC token exchange error - package not found`, and the CLI only shows that
+message at verbose log level.
+
+GitHub gives repositories created after 2026-07-15 an immutable OIDC `sub` claim
+(`repo:sidequery@179541581/artifacts@1359790780:...`), and this repository was
+created on 2026-09-07. npm's registry does not accept that format; see
+[npm/cli#9969](https://github.com/npm/cli/issues/9969). Other reports of that issue
+found that repositories in this position cannot opt out of the format.
+
+Until that is fixed, publish the archive the workflow has already tested:
+
+1. Dispatch `Publish npm package` and wait for the `package` job to pass. The
+   `publish` job then fails as described above.
+2. Download the archive with `gh run download RUN_ID -n npm-package -D /tmp/artifacts-release`.
+3. Publish it, approving the browser prompt from npm:
+   `npm publish /tmp/artifacts-release/artifacts.tgz --registry=https://registry.npmjs.org --access public --ignore-scripts`.
+4. npm scans uploads before they can be installed, which can take several minutes.
+   Confirm with `npm view @sidequery/artifacts@VERSION dist.shasum` that the
+   registry has the archive's SHA-1.
+
+When a release's `publish` job succeeds, remove this section and finish the
+one-time setup below.
+
 ### One-time npm setup
 
 The package must first exist on npm before its trusted publisher can be configured.
