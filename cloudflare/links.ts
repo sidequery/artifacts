@@ -40,6 +40,40 @@ export class ArtifactLinks extends DurableObject<unknown> {
     ctx.storage.sql.exec("create table if not exists links (slug text primary key, target text not null unique, value text not null)");
     ctx.storage.sql.exec("create table if not exists generations (target text primary key, generation integer not null)");
     ctx.storage.sql.exec("create table if not exists pending_links (target text primary key, value text not null)");
+    ctx.storage.sql.exec("create table if not exists usernames (owner text primary key, username text not null unique)");
+    ctx.storage.sql.exec("create table if not exists default_usernames (owner text primary key, username text not null unique)");
+  }
+  private username(owner: string) {
+    return this.ctx.storage.sql.exec<{ username: string }>("select username from usernames where owner=?", owner).toArray()[0]?.username ?? null;
+  }
+  private usernameOwner(username: string) {
+    return this.ctx.storage.sql.exec<{ owner: string }>("select owner from usernames where username=? union all select owner from default_usernames where username=? limit 1", username, username).toArray()[0]?.owner;
+  }
+  ownsUsername(owner: string, username: string) {
+    return this.usernameOwner(username) === owner;
+  }
+  personalUsername(owner: string, base: string) {
+    return this.ctx.storage.transactionSync(() => {
+      const chosen = this.username(owner);
+      if (chosen) return { chosen, current: chosen };
+      const prior = this.ctx.storage.sql.exec<{ username: string }>("select username from default_usernames where owner=?", owner).toArray()[0];
+      if (prior) return { chosen: null, current: prior.username };
+      let current = base;
+      for (let suffix = 2; /^user-[a-f0-9]{32}$/.test(current) || this.usernameOwner(current); suffix++) current = base + suffix;
+      this.ctx.storage.sql.exec("insert into default_usernames(owner,username) values (?,?)", owner, current);
+      return { chosen: null, current };
+    });
+  }
+  claimUsername(owner: string, username: string) {
+    if (!/^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/.test(username) || /^user-[a-f0-9]{32}$/.test(username)) {
+      throw new Error("Use 1–32 lowercase letters, numbers or hyphens for your username");
+    }
+    return this.ctx.storage.transactionSync(() => {
+      const taken = this.usernameOwner(username);
+      if (taken && taken !== owner) return false;
+      this.ctx.storage.sql.exec("insert into usernames(owner,username) values (?,?) on conflict do nothing", owner, username);
+      return this.username(owner) === username;
+    });
   }
   owner(target: ArtifactTarget) { return this.ownership.owner(target); }
   admit(selection: LibrarySelection, create = false) { return this.ownership.admit(selection, create); }
@@ -87,6 +121,7 @@ export class ArtifactLinks extends DurableObject<unknown> {
     // Trashed links reserve their slug so restoring cannot hijack another URL.
     const row = this.ctx.storage.sql.exec<{ value: string }>("select value from links where slug=?", slug).toArray()[0];
     const taken = row ? readLink(row.value) : null;
+    if ((slug === "team" || slug === "users") && !taken) throw new Error("Slug is reserved for app URLs");
     if (taken && key(taken) !== key(target)) throw new Error("Slug is already in use");
     return slug;
   }

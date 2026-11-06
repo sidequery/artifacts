@@ -22,10 +22,15 @@ Give a native Worker a root URL like any other artifact: use **Link** under its 
 Every app also keeps its management URL, which is always private:
 
 ```text
-/apps/my-app/?workspace=default&library=private
+/users/nico/default/my-app/
+/team/research/my-app/
 ```
 
-Both routes remove management credentials/cookies before proxying and strip response cookies. The app receives its app-relative path and deployment origin. HTTP bodies stream and have no browser/MCP envelope limit. Management URLs must include their workspace/library selectors on subsequent requests; clients should preserve these selectors when constructing links. Native Workers have no iframe application viewer.
+Open and **Settings → Link** use the saved slug when one exists. Otherwise they use the app's authenticated `management_url`, also returned by `app_read`, `app_write`, and `app_list`. A team link works for signed-in teammates. A personal link works only for its owner, even if the viewer has an app with the same name. Personal usernames default to the lowercase part of the sign-in email before the @: for example, `nico@example.com` gets `nico`, then another Nico gets `nico2` if that name is free. If the sign-in provides no usable email prefix, the base is `user`. The assigned name stays with the account if the email changes. You can choose a different permanent username in a personal app's **Settings → Link**; previously copied links still work.
+
+Relative links keep the same workspace and library, and query parameters belong to the app. Older `/apps/<name>/?workspace=…&library=…` URLs still work. The `users` and `team` root slugs can no longer be claimed. On deployments that already use either slug, the root link remains, but paths matching the new app URL shapes now route to authenticated apps.
+
+Both routes remove management credentials/cookies before proxying and strip response cookies. The app receives its app-relative path and deployment origin. HTTP bodies stream and have no browser/MCP envelope limit. Native Workers have no iframe application viewer.
 
 ## Manifest and source
 

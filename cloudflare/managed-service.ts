@@ -1,6 +1,7 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { Env } from "./worker";
 import { nativeLinkTarget, type ArtifactTarget } from "./links";
+import { emailUsername, legacyUsername, nativeAppPath } from "./native-worker/urls";
 import type { LibrarySelection } from "./ownership";
 import type { PluginInvocationContext } from "./plugins";
 import type { PluginRequest } from "../src/plugins/types";
@@ -40,7 +41,7 @@ export class ManagedArtifactService {
   private readonly links;
   constructor(private readonly env: Env, readonly workspace: string, readonly libraryKey: string,
     private readonly privateKey: string, private readonly origin: string, private readonly publicOrigin: string,
-    private readonly plugins: PluginInvocationContext) {
+    private readonly plugins: PluginInvocationContext, private readonly email?: string) {
     this.links = env.LINKS.getByName("deployment");
     this.fileStorage = env.FILE_BACKENDS ? { backends: env.FILE_BACKENDS, origin: publicOrigin } : undefined;
   }
@@ -57,7 +58,7 @@ export class ManagedArtifactService {
     if (scope === "private" && this.privateKey === "team") throw new Error("Service tokens manage the team library only");
     const libraryKey = scope === "team" ? "team" : this.privateKey;
     return libraryKey === this.libraryKey ? this : new ManagedArtifactService(this.env, this.workspace, libraryKey,
-      this.privateKey, this.origin, this.publicOrigin, this.plugins);
+      this.privateKey, this.origin, this.publicOrigin, this.plugins, this.email);
   }
 
   private selection(kind: "artifact" | "script", selection: Selection): LibrarySelection {
@@ -266,7 +267,7 @@ export class ManagedArtifactService {
     return this.env.NATIVE_APPS.getByName("deployment");
   }
   private async nativeTool(tool: string, args: Record<string, unknown>): Promise<CallToolResult> {
-    if (tool === "app_guide") return text({ guide: "Native apps preserve the default Worker and named Durable Object exports. app_write accepts source, a strict app-owned manifest and optional project files/dependencies. Manifest fields: main (relative JS/TS path), compatibility_date, compatibility_flags, vars, secrets (names only), bindings (name -> {type:kv|r2|d1|queue|durable-object, resource:stable-name, class_name:DO export}), triggers:{crons:[],queues:[resource-name]}. Resource names permanently identify storage; binding/export renames preserve it and removed resources remain reserved. Set secrets with app_secrets. app_read/history/restore/reconcile manage persistent revisions and interrupted deployments. Restores retain current data and current secrets. Providers cannot change on an existing app. celld-local and celld-fleet accept trusted code only; celld-fleet uses the existing bucket-backed fleet and its coordinated publisher. Management URLs are private /apps/<name>/?workspace=<workspace>&library=<private|team> and require library authentication. artifact_link({kind:'app',name,slug,access}) adds a root /<slug> URL, private or public, that follows the app across library moves and passes slug-relative paths. Both stream HTTP and strip management credentials/cookies. Cloudflare uses native queue/cron delivery. celld-fleet uses native queues and host-coordinated cron dispatch into each app's own environment. celld-local operator does not support WebSockets. No destructive resource removal or schema/data rollback is provided." });
+    if (tool === "app_guide") return text({ guide: "Native apps preserve the default Worker and named Durable Object exports. app_write accepts source, a strict app-owned manifest and optional project files/dependencies. Manifest fields: main (relative JS/TS path), compatibility_date, compatibility_flags, vars, secrets (names only), bindings (name -> {type:kv|r2|d1|queue|durable-object, resource:stable-name, class_name:DO export}), triggers:{crons:[],queues:[resource-name]}. Resource names permanently identify storage; binding/export renames preserve it and removed resources remain reserved. Set secrets with app_secrets. app_read/history/restore/reconcile manage persistent revisions and interrupted deployments. Restores retain current data and current secrets. Providers cannot change on an existing app. celld-local and celld-fleet accept trusted code only; celld-fleet uses the existing bucket-backed fleet and its coordinated publisher. Open the management_url returned by app_read: /team/<workspace>/<name>/ or /users/<username>/<workspace>/<name>/. These require library authentication and preserve app query parameters. artifact_link({kind:'app',name,slug,access}) adds a root /<slug> URL, private or public, that follows the app across library moves and passes slug-relative paths. Both stream HTTP and strip management credentials/cookies. Cloudflare uses native queue/cron delivery. celld-fleet uses native queues and host-coordinated cron dispatch into each app's own environment. celld-local operator does not support WebSockets. No destructive resource removal or schema/data rollback is provided." });
     const controller = this.nativeController(), input = { owner: this.libraryKey, workspace: this.workspace, name: args.name as string };
     let result: unknown;
     switch (tool) {
@@ -284,8 +285,8 @@ export class ManagedArtifactService {
       default: throw new Error("Unknown app tool");
     }
     const payload = result as Record<string, unknown>;
-    if (tool === "app_read" || (tool === "app_write" && typeof payload.id === "string")) Object.assign(payload, await this.nativeLinkDetails(this.workspace, payload.id as string));
-    if (tool === "app_list") for (const app of payload.apps as { id: string; workspace: string }[]) Object.assign(app, await this.nativeLinkDetails(app.workspace, app.id));
+    if (tool === "app_read" || (tool === "app_write" && typeof payload.id === "string")) Object.assign(payload, await this.nativeLinkDetails(this.workspace, payload.id as string, input.name));
+    if (tool === "app_list") for (const app of payload.apps as { id: string; workspace: string; name: string }[]) Object.assign(app, await this.nativeLinkDetails(app.workspace, app.id, app.name));
     if (["app_write", "app_restore", "app_reconcile", "app_move"].includes(tool) || (tool === "app_secrets" && args.secrets)) {
       await this.links.nativeAppChanged({ libraryKey: this.libraryKey, workspace: this.workspace });
       if (tool === "app_move") await this.links.nativeAppChanged({ libraryKey: args.library === "team" ? "team" : this.privateKey, workspace: this.workspace });
@@ -297,11 +298,25 @@ export class ManagedArtifactService {
     const { id } = await this.nativeController().identity({ owner: this.libraryKey, workspace: this.workspace, name: args.name as string });
     await this.links.set({ ...nativeLinkTarget(this.workspace, id), slug: args.slug as string, access: args.access as "private" | "public" | undefined });
     await this.links.nativeAppChanged({ libraryKey: this.libraryKey, workspace: this.workspace });
-    return text({ ok: true, ...await this.nativeLinkDetails(this.workspace, id) });
+    return text({ ok: true, ...await this.nativeLinkDetails(this.workspace, id, args.name as string) });
   }
-  private async nativeLinkDetails(workspace: string, id: string) {
+  private usernameLookup?: Promise<{ chosen: string | null; current: string }>;
+  private username() {
+    return this.usernameLookup ??= this.links.personalUsername(this.privateKey, emailUsername(this.email));
+  }
+  async ownsUsername(username: string) {
+    return username === legacyUsername(this.privateKey) || await this.links.ownsUsername(this.privateKey, username);
+  }
+  claimUsername(username: string) {
+    return this.links.claimUsername(this.privateKey, username);
+  }
+  private async nativeLinkDetails(workspace: string, id: string, name: string) {
     const link = await this.links.find(nativeLinkTarget(workspace, id));
-    return link ? { slug: link.slug, access: link.access, url: `${this.publicOrigin}/${link.slug}` } : {};
+    const team = this.libraryKey === "team";
+    const username = team ? null : await this.username();
+    const path = nativeAppPath(username?.current ?? null, workspace, name);
+    return { management_url: this.publicOrigin + path, ...(!team && { username: username?.chosen }),
+      ...(link && { slug: link.slug, access: link.access, url: `${this.publicOrigin}/${link.slug}` }) };
   }
   nativeFetch(name: string, request: Request) {
     const headers = new Headers(request.headers);
@@ -368,7 +383,7 @@ export class ManagedArtifactService {
       : null;
     hasMore ||= workers?.next_offset != null;
     return { libraryScope: this.libraryKey === "team" ? "team" : "private", capabilities: { editing: true, scripts: true, links: true, moves: true, trash: true, nativeApps: !!this.env.NATIVE_APPS, subscriptions: true, subscriptionTransport: "events" as const }, workspace: this.workspace,
-      ...(workers ? { workerApps: await Promise.all(workers.apps.map(async app => ({ ...app, ...await this.nativeLinkDetails(app.workspace, app.id), kind: "worker" as const, key: JSON.stringify(["worker", app.workspace, app.name]) }))), nativeAppProviders: workers.providers } : {}),
+      ...(workers ? { workerApps: await Promise.all(workers.apps.map(async app => ({ ...app, ...await this.nativeLinkDetails(app.workspace, app.id, app.name), kind: "worker" as const, key: JSON.stringify(["worker", app.workspace, app.name]) }))), nativeAppProviders: workers.providers } : {}),
       artifacts: [...artifacts.values()].sort((a, b) => a.name.localeCompare(b.name) || a.workspace.localeCompare(b.workspace)), nextOffset: hasMore ? offset + 100 : null };
   }
 }
