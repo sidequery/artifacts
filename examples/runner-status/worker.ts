@@ -1,4 +1,4 @@
-import { boundedSnapshot, emptyCache, githubList, readConfig, refresh, refreshSeconds, storedContent, type Cache } from "./collector";
+import { boundedSnapshot, emptyCache, githubList, readConfig, refresh, refreshSeconds, storedContent, type Cache, type Config } from "./collector";
 
 export type Env = { RUNNER_STATUS: DurableObjectNamespace; GITHUB_TOKEN: string; RUNNER_STATUS_TOKEN: string; RUNNER_ORG: string; RUNNER_REPOS: string; RUNNER_NAME_PREFIX?: string };
 const headers = { "cache-control": "no-store", "content-type": "application/json", "x-content-type-options": "nosniff" };
@@ -46,25 +46,29 @@ export class RunnerStatus {
       try {
         const config = readConfig(this.env);
         this.cache = await refresh(config, this.cache, githubList(this.env.GITHUB_TOKEN, controller.signal));
-        const content = storedContent(this.cache);
-        if (this.stored && content === this.stored.content && Date.now() - this.stored.at < unchangedStoreMs) return;
-        // Cache source data can exceed the per-value DO storage limit even when
-        // the response is small. Commit bounded chunks and their manifest atomically.
-        const serialized = JSON.stringify(this.cache);
-        const parts: string[] = [];
-        // A UTF-16 code unit can encode to three UTF-8 bytes (including lone
-        // surrogates at a chunk boundary); leave room below the storage limit.
-        for (let offset = 0; offset < serialized.length; offset += 16 * 1024) parts.push(serialized.slice(offset, offset + 16 * 1024));
-        await this.state.storage.transaction(async storage => {
-          const old = await storage.get<{ chunks: number }>("manifest");
-          for (let index = 0; index < parts.length; index++) await storage.put(`cache:${index}`, parts[index]!);
-          for (let index = parts.length; index < (old?.chunks ?? 0); index++) await storage.delete(`cache:${index}`);
-          await storage.put("manifest", { config: JSON.stringify(config), chunks: parts.length });
-        });
-        this.stored = { content, at: Date.now() };
+        await this.storeCache(config);
       } finally { clearTimeout(timer); }
     })().finally(() => { this.inFlight = null; });
     return this.inFlight;
+  }
+  /** Skips storage when the poll changed nothing but fetch times, unless the stored copy is getting old. */
+  private async storeCache(config: Config): Promise<void> {
+    const content = storedContent(this.cache);
+    if (this.stored && content === this.stored.content && Date.now() - this.stored.at < unchangedStoreMs) return;
+    // Cache source data can exceed the per-value DO storage limit even when
+    // the response is small. Commit bounded chunks and their manifest atomically.
+    const serialized = JSON.stringify(this.cache);
+    const parts: string[] = [];
+    // A UTF-16 code unit can encode to three UTF-8 bytes (including lone
+    // surrogates at a chunk boundary); leave room below the storage limit.
+    for (let offset = 0; offset < serialized.length; offset += 16 * 1024) parts.push(serialized.slice(offset, offset + 16 * 1024));
+    await this.state.storage.transaction(async storage => {
+      const old = await storage.get<{ chunks: number }>("manifest");
+      for (let index = 0; index < parts.length; index++) await storage.put(`cache:${index}`, parts[index]!);
+      for (let index = parts.length; index < (old?.chunks ?? 0); index++) await storage.delete(`cache:${index}`);
+      await storage.put("manifest", { config: JSON.stringify(config), chunks: parts.length });
+    });
+    this.stored = { content, at: Date.now() };
   }
   async fetch(): Promise<Response> {
     if (!this.cache.snapshot) await this.poll();
