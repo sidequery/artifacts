@@ -46,6 +46,10 @@ test("authenticated viewers share a persisted collector; unauthorized calls neve
     const deadline = Date.now() + 50_000;
     while (calls < 12 && Date.now() < deadline) await Bun.sleep(250);
     expect(calls).toBe(12);
+    // GitHub reported nothing new, so the alarm poll left the stored cache as it was.
+    await mf.dispose();
+    mf = new Miniflare(options);
+    expect(await (await mf.dispatchFetch("https://collector/api/status", { headers: auth })).json()).toEqual(responses[0]);
 
   } finally { await mf.dispose(); await rm(directory, { recursive: true, force: true }); }
 }, 60000);
