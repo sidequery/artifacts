@@ -109,6 +109,14 @@ export async function refresh(config: Config, previous: Cache, list: List, now =
   return cache;
 }
 
+/** The cache without the timestamps that every refresh renews, so a refresh that found nothing new can skip storage. */
+export function storedContent(cache: Cache): string {
+  return JSON.stringify({ ...cache, runnerFetchedAt: null,
+    repos: Object.fromEntries(Object.entries(cache.repos).map(([repo, data]) => [repo, { ...data, fetchedAt: null }])),
+    snapshot: cache.snapshot && { ...cache.snapshot, runnerFetchedAt: null, checkedAt: null,
+      sources: cache.snapshot.sources.map(source => ({ ...source, fetchedAt: null })) } });
+}
+
 /** Leave room for the MCP result envelope within the bridge's 256 KiB limit. */
 export function boundedSnapshot(snapshot: Snapshot): Snapshot {
   const result = { ...snapshot, runners: [...snapshot.runners], jobs: [...snapshot.jobs], errors: [...snapshot.errors] };

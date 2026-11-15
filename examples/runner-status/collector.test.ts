@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { boundedSnapshot, emptyCache, eligible, githubList, readConfig, readRepo, refresh, relevant, type List } from "./collector";
+import { boundedSnapshot, emptyCache, eligible, githubList, readConfig, readRepo, refresh, relevant, storedContent, type List } from "./collector";
 import type { Job, Run, Runner } from "./types";
 
 const config = { org: "example", repos: ["example/app"], runnerPrefix: "" };
@@ -45,6 +45,16 @@ test("preserves per-source data and timestamps on failure, then clears errors on
   expect(recovered.snapshot!.errors).toEqual([]);
   expect(recovered.snapshot!.sources[0]).toMatchObject({ stale: false, fetchedAt: "2026-09-07T00:02:00Z" });
   expect(first.snapshot!.errors).toEqual([]);
+});
+
+test("stored content ignores renewed fetch times but not changed data or errors", async () => {
+  const first = await refresh(config, emptyCache(), fixture, () => "2026-09-07T00:00:00Z");
+  const same = await refresh(config, first, fixture, () => "2026-09-07T00:01:00Z");
+  expect(storedContent(same)).toBe(storedContent(first));
+  const idle = await refresh(config, first, async <T>(endpoint: string) => (endpoint.includes("/actions/runners") ? [{ ...runner, busy: false }] : endpoint.includes("/jobs?") ? [job] : [run]) as T[], () => "2026-09-07T00:01:00Z");
+  expect(storedContent(idle)).not.toBe(storedContent(first));
+  const failed = await refresh(config, first, async () => { throw new Error("offline"); }, () => "2026-09-07T00:01:00Z");
+  expect(storedContent(failed)).not.toBe(storedContent(first));
 });
 
 test("follows pagination with server credentials and bounds concurrency across callers", async () => {
